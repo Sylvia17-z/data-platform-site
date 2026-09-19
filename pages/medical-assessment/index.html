@@ -1,0 +1,512 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>医管考核数据统计</title>
+<style>
+  :root{
+    --navy:#01418B;
+    --navy-900:#003366;
+    --navy-700:#0a4ea3;
+    --navy-100:#d6e0f0;
+    --navy-50:#f3f6fb;
+    --light-blue:#D7EFF9;
+    --ink:#0f172a;
+    --ink-soft:#5b6472;
+    --line:#000000;
+    --ok:#0a7d4d;
+    --ok-bg:#e6f5ec;
+    --no:#b42318;
+    --no-bg:#fdecec;
+    --font:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei","Hiragino Sans GB",Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;font-family:var(--font);color:var(--ink);
+    background:var(--navy-50);font-size:14px;line-height:1.5;
+  }
+  .wrap{max-width:1320px;margin:0 auto;padding:16px 20px 40px;}
+  .topbar{
+    display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;
+    padding-bottom:12px;margin-bottom:14px;border-bottom:2px solid var(--navy);
+  }
+  .topbar h1{font-size:19px;margin:0;color:var(--navy-900);letter-spacing:.5px;}
+  .topbar .sub{color:var(--ink-soft);font-size:12.5px;}
+
+  /* 二级子功能面板：同一页面内按 mod 切换（由父框架 postMessage 控制） */
+  .mod-panel{display:none;}
+  .mod-panel.active{display:block;}
+
+  .panel-head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:10px;}
+  .panel-head h2{font-size:15px;margin:0;color:var(--navy-900);}
+  .panel-head .desc{color:var(--ink-soft);font-size:12.5px;}
+
+  .toolbar{
+    display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+    background:#fff;border:1px solid var(--navy-100);border-radius:10px;
+    padding:10px 12px;margin-bottom:12px;
+  }
+  .toolbar .grp{display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
+  .toolbar label.fbtn{
+    display:inline-flex;align-items:center;gap:6px;cursor:pointer;
+    background:var(--navy);color:#fff;border-radius:7px;padding:6px 12px;font-size:13px;
+    border:1px solid var(--navy);transition:.15s;
+  }
+  .toolbar label.fbtn:hover{background:var(--navy-700);}
+  .toolbar label.fbtn.opt{background:#fff;color:var(--navy);}
+  .toolbar label.fbtn.opt:hover{background:var(--navy-50);}
+  .toolbar input[type=file]{display:none;}
+  .toolbar .hint{color:var(--ink-soft);font-size:12px;}
+  .toolbar select,.toolbar .btn{
+    font-family:var(--font);font-size:13px;border:1px solid var(--navy-100);
+    border-radius:7px;padding:6px 10px;background:#fff;color:var(--ink);cursor:pointer;
+  }
+  .toolbar .btn{border-color:var(--navy);color:var(--navy);}
+  .toolbar .btn:hover{background:var(--navy-50);}
+
+  .stats{display:flex;gap:14px;flex-wrap:wrap;margin:0 0 10px;}
+  .stat{background:#fff;border:1px solid var(--navy-100);border-left:4px solid var(--navy);
+    border-radius:8px;padding:8px 14px;min-width:120px;}
+  .stat .v{font-size:18px;font-weight:600;color:var(--navy-900);}
+  .stat .k{font-size:12px;color:var(--ink-soft);}
+  .stat.match .v{color:var(--ok);}
+  .stat.nomatch .v{color:var(--no);}
+
+  .warn{background:var(--no-bg);border:1px solid #f3c0bb;color:var(--no);
+    border-radius:8px;padding:8px 12px;font-size:12.5px;margin-bottom:10px;display:none;}
+  .warn.show{display:block;}
+
+  .table-scroll{
+    background:#fff;border:1px solid var(--navy-100);border-radius:10px;
+    max-height:62vh;overflow:auto;
+  }
+  table.tbl{border-collapse:collapse;width:100%;font-size:13px;}
+  table.tbl thead th{
+    position:sticky;top:0;background:var(--navy);color:#fff;font-weight:600;
+    text-align:left;padding:8px 10px;border:1px solid var(--line);white-space:nowrap;z-index:2;
+  }
+  table.tbl tbody td{
+    padding:6px 10px;border:1px solid var(--line);white-space:nowrap;
+  }
+  table.tbl tbody tr:nth-child(even){background:var(--navy-50);}
+  table.tbl tbody tr:hover{background:var(--light-blue);}
+  table.tbl td.num{text-align:left;font-variant-numeric:tabular-nums;}
+  /* 必须用 table.tbl td.xxx 形式，避免被 table.tbl td 基础规则覆盖 */
+  table.tbl td.match-y{color:var(--ok);font-weight:600;}
+  table.tbl td.match-n{color:var(--no);font-weight:600;}
+  table.tbl td.match-y.bg{background:var(--ok-bg);}
+  table.tbl td.match-n.bg{background:var(--no-bg);}
+
+  .empty{padding:30px;text-align:center;color:var(--ink-soft);}
+  .foot-note{color:var(--ink-soft);font-size:12px;margin-top:8px;}
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="topbar">
+      <h1>🏥 医管考核数据统计</h1>
+      <span class="sub" id="crumbSub">VAB 会员清单 · 收退款明细 · 收费明细三类报表</span>
+    </div>
+
+    <!-- ============ 面板 1：VAB 会员清单 ============ -->
+    <section class="mod-panel" data-mod="vab">
+      <div class="panel-head">
+        <h2>📇 VAB 会员清单</h2>
+        <span class="desc">导入 VAB 会员清单（考核花名册），作为收退款 / 收费明细的匹配基准（会员号 / 姓名 → 管家 / 医生 / 是否参与考核）。</span>
+      </div>
+      <div class="toolbar">
+        <div class="grp">
+          <label class="fbtn">导入 VAB 会员清单
+            <input type="file" id="fileVab" accept=".xlsx,.xls" />
+          </label>
+        </div>
+        <span class="hint" id="vabHint">尚未导入清单</span>
+      </div>
+      <div class="stats" id="vabStats" style="display:none;">
+        <div class="stat"><div class="v" id="vabTotal">0</div><div class="k">清单人数</div></div>
+      </div>
+      <div class="table-scroll">
+        <table class="tbl" id="vabTable"><thead></thead><tbody></tbody></table>
+      </div>
+      <div class="empty" id="vabEmpty">请导入「VAB会员清单.xlsx」以查看清单。</div>
+    </section>
+
+    <!-- ============ 面板 2：收退款数据明细 ============ -->
+    <section class="mod-panel" data-mod="order">
+      <div class="panel-head">
+        <h2>💰 收退款数据明细</h2>
+        <span class="desc">导入订单项目收退款表-明细；按会员号匹配 VAB 清单，补全管家 / 医生 / 是否参与考核，未匹配行已标注。</span>
+      </div>
+      <div class="toolbar">
+        <div class="grp">
+          <label class="fbtn">导入收退款明细
+            <input type="file" id="fileOrder" accept=".xlsx,.xls" />
+          </label>
+          <label class="fbtn opt">（可选）导入 VAB 清单
+            <input type="file" id="fileOrderVab" accept=".xlsx,.xls" />
+          </label>
+        </div>
+        <div class="grp">
+          <span style="font-size:12.5px;color:var(--ink-soft);">匹配状态：</span>
+          <select id="orderFilter">
+            <option value="all">全部</option>
+            <option value="y">仅匹配</option>
+            <option value="n">仅未匹配</option>
+          </select>
+        </div>
+        <button class="btn" id="orderExport" disabled>导出 CSV</button>
+      </div>
+      <div class="warn" id="orderWarn">未检测到 VAB 清单，请先在「VAB 会员清单」面板导入，或点击上方「（可选）导入 VAB 清单」。</div>
+      <div class="stats" id="orderStats" style="display:none;">
+        <div class="stat"><div class="v" id="orderTotal">0</div><div class="k">明细行数</div></div>
+        <div class="stat match"><div class="v" id="orderMatched">0</div><div class="k">匹配 VAB</div></div>
+        <div class="stat nomatch"><div class="v" id="orderRate">0%</div><div class="k">匹配率</div></div>
+      </div>
+      <div class="table-scroll">
+        <table class="tbl" id="orderTable"><thead></thead><tbody></tbody></table>
+      </div>
+      <div class="empty" id="orderEmpty">请导入「订单项目收退款表-明细」Excel 以生成报表。</div>
+      <div class="foot-note" id="orderNote"></div>
+    </section>
+
+    <!-- ============ 面板 3：收费明细数据明细 ============ -->
+    <section class="mod-panel" data-mod="charge">
+      <div class="panel-head">
+        <h2>🧾 收费明细数据明细</h2>
+        <span class="desc">导入收费明细；按患者姓名匹配 VAB 清单（姓名 → 会员号 / 管家 / 医生 / 是否参与考核），未匹配行已标注。</span>
+      </div>
+      <div class="toolbar">
+        <div class="grp">
+          <label class="fbtn">导入收费明细
+            <input type="file" id="fileCharge" accept=".xlsx,.xls" />
+          </label>
+          <label class="fbtn opt">（可选）导入 VAB 清单
+            <input type="file" id="fileChargeVab" accept=".xlsx,.xls" />
+          </label>
+        </div>
+        <div class="grp">
+          <span style="font-size:12.5px;color:var(--ink-soft);">匹配状态：</span>
+          <select id="chargeFilter">
+            <option value="all">全部</option>
+            <option value="y">仅匹配</option>
+            <option value="n">仅未匹配</option>
+          </select>
+        </div>
+        <button class="btn" id="chargeExport" disabled>导出 CSV</button>
+      </div>
+      <div class="warn" id="chargeWarn">未检测到 VAB 清单，请先在「VAB 会员清单」面板导入，或点击上方「（可选）导入 VAB 清单」。</div>
+      <div class="stats" id="chargeStats" style="display:none;">
+        <div class="stat"><div class="v" id="chargeTotal">0</div><div class="k">明细行数</div></div>
+        <div class="stat match"><div class="v" id="chargeMatched">0</div><div class="k">匹配 VAB</div></div>
+        <div class="stat nomatch"><div class="v" id="chargeRate">0%</div><div class="k">匹配率</div></div>
+      </div>
+      <div class="table-scroll">
+        <table class="tbl" id="chargeTable"><thead></thead><tbody></tbody></table>
+      </div>
+      <div class="empty" id="chargeEmpty">请导入「收费明细」Excel 以生成报表。</div>
+      <div class="foot-note" id="chargeNote"></div>
+    </section>
+  </div>
+
+  <script src="assets/vendor/xlsx.full.min.js"></script>
+  <script>
+  'use strict';
+
+  /* ---------- 全局状态（同一 iframe 内跨面板共享） ---------- */
+  const App = {
+    vab: [],
+    vabByNum: new Map(),     // 规范化会员号 -> VAB 行
+    vabByNameExact: new Map(), // 原始姓名(trim) -> VAB 行
+    vabByNameNorm: new Map(),  // 规范化姓名 -> VAB 行
+    lastOrder: null,         // 已解析的收退款明细（用于 VAB 重导入后重渲染）
+    lastCharge: null,
+    vabLoaded: false,
+  };
+
+  const RENDER_CAP = 5000; // 表格 DOM 渲染上限，避免大表卡顿；CSV 导出含全部
+
+  /* ---------- 列定义 ---------- */
+  const COLS = {
+    vab: [
+      {k:'户主',t:'户主'},{k:'客户姓名',t:'客户姓名'},{k:'会员号',t:'会员号(唯一标识)'},
+      {k:'客户等级',t:'客户等级'},{k:'健康管家',t:'健康管家'},{k:'主诊医生',t:'主诊医生'},{k:'是否参与考核',t:'是否参与考核'},
+    ],
+    order: [
+      {k:'月份',t:'月份'},{k:'会员号',t:'会员号'},{k:'客户姓名',t:'客户姓名'},
+      {k:'VAB管家',t:'VAB管家'},{k:'VAB医生',t:'VAB医生'},{k:'是否参与考核',t:'是否参与考核'},
+      {k:'品项',t:'品项(分类/名称)'},{k:'匹配',t:'匹配状态'},
+    ],
+    charge: [
+      {k:'月份',t:'月份'},{k:'会员号',t:'会员号(姓名匹配)'},{k:'客户姓名',t:'客户姓名'},
+      {k:'VAB管家',t:'VAB管家'},{k:'VAB医生',t:'VAB医生'},{k:'是否参与考核',t:'是否参与考核'},
+      {k:'药品项目名称',t:'药品/项目名称'},{k:'匹配',t:'匹配状态'},
+    ],
+  };
+
+  /* ---------- 工具：表头匹配 ---------- */
+  function normKey(k){
+    return String(k==null?'':k).replace(/\s+/g,'').replace(/（.*?）/g,'').replace(/\(.*?\)/g,'');
+  }
+  function pick(row, names){
+    const keys = Object.keys(row);
+    for(const n of names){
+      const nn = normKey(n);
+      let hit = keys.find(k=>normKey(k)===nn);
+      if(hit===undefined) hit = keys.find(k=>{const kk=normKey(k); return kk.includes(nn)||nn.includes(kk);});
+      if(hit!==undefined) return row[hit];
+    }
+    return '';
+  }
+  function normNum(v){ return String(v==null?'':v).replace(/\s+/g,'').trim(); }
+  function normName(n){ return String(n==null?'':n).replace(/（.*?）/g,'').replace(/\(.*?\)/g,'').replace(/\s+/g,''); }
+
+  /* ---------- 工具：序列化日期 -> YYYY-MM ---------- */
+  function toMonth(v){
+    if(v==null||v==='') return '';
+    let d;
+    if(typeof v==='number'){
+      const epoch = new Date(1899,11,30);
+      d = new Date(epoch.getTime() + Math.round(v*86400000));
+    } else {
+      const s = String(v).replace(/-/g,'/').replace(/\..*/,'');
+      d = new Date(s);
+    }
+    if(isNaN(d.getTime())) return String(v);
+    const y = d.getFullYear();
+    const m = String(d.getMonth()+1).padStart(2,'0');
+    return y+'-'+m;
+  }
+
+  /* ---------- 文件读取 ---------- */
+  function readFile(file){
+    return new Promise((resolve,reject)=>{
+      const reader = new FileReader();
+      reader.onload = e=>{
+        try{
+          const wb = XLSX.read(e.target.result, {type:'array'});
+          const ws = wb.Sheets[wb.SheetNames[0]];
+          const rows = XLSX.utils.sheet_to_json(ws, {defval:''});
+          resolve(rows);
+        }catch(err){ reject(err); }
+      };
+      reader.onerror = ()=>reject(new Error('文件读取失败'));
+      reader.readAsArrayBuffer(file);
+    });
+  }
+
+  /* ---------- VAB 清单加载 ---------- */
+  function loadVab(rows){
+    App.vab = rows.map(r=>({
+      户主: String(pick(r,['户主'])).trim(),
+      客户姓名: String(pick(r,['客户姓名'])).trim(),
+      会员号: normNum(pick(r,['会员号'])),
+      客户等级: String(pick(r,['客户等级'])).trim(),
+      健康管家: String(pick(r,['健康管家'])).trim(),
+      主诊医生: String(pick(r,['主诊医生'])).trim(),
+      是否参与考核: String(pick(r,['是否参与考核'])).trim(),
+    }));
+    App.vabByNum = new Map();
+    App.vabByNameExact = new Map();
+    App.vabByNameNorm = new Map();
+    App.vab.forEach(v=>{
+      if(v.会员号) App.vabByNum.set(v.会员号, v);
+      if(v.客户姓名){
+        App.vabByNameExact.set(v.客户姓名, v);
+        const nm = normName(v.客户姓名);
+        if(nm) App.vabByNameNorm.set(nm, v);
+      }
+    });
+    App.vabLoaded = App.vab.length>0;
+    renderVab();
+    // VAB 重新导入后，若业务表已存在则重渲染
+    if(App.lastOrder) renderBusiness('order', App.lastOrder);
+    if(App.lastCharge) renderBusiness('charge', App.lastCharge);
+  }
+
+  function findVabByNum(num){
+    if(!num) return null;
+    return App.vabByNum.get(normNum(num)) || null;
+  }
+  function findVabByName(name){
+    if(!name) return null;
+    const raw = String(name).trim();
+    if(App.vabByNameExact.has(raw)) return App.vabByNameExact.get(raw);
+    const nm = normName(raw);
+    return App.vabByNameNorm.get(nm) || null;
+  }
+
+  /* ---------- 渲染：VAB 清单 ---------- */
+  function renderVab(){
+    const cols = COLS.vab;
+    const thead = document.querySelector('#vabTable thead');
+    const tbody = document.querySelector('#vabTable tbody');
+    thead.innerHTML = '<tr>'+cols.map(c=>'<th>'+esc(c.t)+'</th>').join('')+'</tr>';
+    const rows = App.vab.slice(0, RENDER_CAP);
+    tbody.innerHTML = rows.map(r=>'<tr>'+cols.map(c=>'<td>'+esc(r[c.k])+'</td>').join('')+'</tr>').join('');
+    document.getElementById('vabTotal').textContent = App.vab.length;
+    document.getElementById('vabStats').style.display = App.vab.length? 'flex':'none';
+    document.getElementById('vabEmpty').style.display = App.vab.length? 'none':'block';
+    document.getElementById('vabHint').textContent = App.vab.length
+      ? ('已导入 '+App.vab.length+' 人（收退款/收费明细匹配基准已就绪）')
+      : '尚未导入清单';
+  }
+
+  /* ---------- 渲染：业务明细（order / charge） ---------- */
+  function renderBusiness(mod, allRows){
+    const isOrder = mod==='order';
+    const cols = COLS[mod];
+    const thead = document.querySelector('#'+mod+'Table thead');
+    const tbody = document.querySelector('#'+mod+'Table tbody');
+    thead.innerHTML = '<tr>'+cols.map(c=>'<th>'+esc(c.t)+'</th>').join('')+'</tr>';
+
+    let matched = 0;
+    const view = [];
+    for(const r of allRows){
+      const isMatch = r.匹配==='匹配';
+      if(isMatch) matched++;
+      view.push(r);
+    }
+    const total = allRows.length;
+    const rate = total? (matched/total*100).toFixed(1)+'%' : '0%';
+
+    document.getElementById(mod+'Total').textContent = total;
+    document.getElementById(mod+'Matched').textContent = matched;
+    document.getElementById(mod+'Rate').textContent = rate;
+    document.getElementById(mod+'Stats').style.display = total? 'flex':'none';
+    document.getElementById(mod+'Empty').style.display = total? 'none':'block';
+    document.getElementById(mod+'Export').disabled = !total;
+
+    // VAB 匹配提示
+    const warn = document.getElementById(mod+'Warn');
+    warn.classList.toggle('show', total>0 && !App.vabLoaded);
+
+    const note = document.getElementById(mod+'Note');
+    if(total>RENDER_CAP){
+      note.textContent = '共 '+total+' 行，当前表格仅渲染前 '+RENDER_CAP+' 行（性能保护）；点击「导出 CSV」可获取全部 '+total+' 行数据。';
+    } else { note.textContent = ''; }
+
+    // 过滤
+    const filterEl = document.getElementById(mod+'Filter');
+    const fv = filterEl? filterEl.value : 'all';
+    const shown = view.filter(r=> fv==='all' ? true : (fv==='y' ? r.匹配==='匹配' : r.匹配!=='匹配'));
+    const slice = shown.slice(0, RENDER_CAP);
+    tbody.innerHTML = slice.map(r=>{
+      const cls = r.匹配==='匹配' ? 'match-y bg' : 'match-n bg';
+      return '<tr>'+cols.map(c=>{
+        if(c.k==='匹配') return '<td class="'+cls+'">'+esc(r.匹配)+'</td>';
+        return '<td>'+esc(r[c.k])+'</td>';
+      }).join('')+'</tr>';
+    }).join('');
+  }
+
+  function parseOrder(rows){
+    const out = rows.map(r=>{
+      const num = normNum(pick(r,['会员号','关联客户信息-会员号']));
+      const name = String(pick(r,['客户姓名','关联客户信息-客户姓名'])).trim();
+      const month = toMonth(pick(r,['收款时间']));
+      const itemParts = [
+        pick(r,['品项一级分类','一级分类']),
+        pick(r,['品项二级分类','二级分类']),
+        pick(r,['品项三级分类','三级分类']),
+        pick(r,['品项名称','关联订单条目信息-品项名称']),
+      ].map(s=>String(s).trim()).filter(Boolean);
+      const item = itemParts.join(' / ');
+      const v = findVabByNum(num);
+      return {
+        月份: month, 会员号: num, 客户姓名: name,
+        VAB管家: v? v.健康管家:'', VAB医生: v? v.主诊医生:'',
+        是否参与考核: v? v.是否参与考核:'', 品项: item,
+        匹配: v? '匹配':'未匹配',
+      };
+    });
+    App.lastOrder = out;
+    renderBusiness('order', out);
+  }
+
+  function parseCharge(rows){
+    const out = rows.map(r=>{
+      const name = String(pick(r,['患者姓名','姓名'])).trim();
+      const month = toMonth(pick(r,['收费时间']));
+      const item = String(pick(r,['药品/项目名称','药品名称','项目名称'])).trim();
+      const v = findVabByName(name);
+      return {
+        月份: month, 会员号: v? v.会员号:'', 客户姓名: name,
+        VAB管家: v? v.健康管家:'', VAB医生: v? v.主诊医生:'',
+        是否参与考核: v? v.是否参与考核:'', 药品项目名称: item,
+        匹配: v? '匹配':'未匹配',
+      };
+    });
+    App.lastCharge = out;
+    renderBusiness('charge', out);
+  }
+
+  /* ---------- CSV 导出 ---------- */
+  function csvCell(v){
+    const s = String(v==null?'':v);
+    if(/[",\n\r]/.test(s)) return '"'+s.replace(/"/g,'""')+'"';
+    return s;
+  }
+  function exportCsv(mod){
+    const all = mod==='order' ? App.lastOrder : App.lastCharge;
+    if(!all || !all.length) return;
+    const cols = COLS[mod];
+    const header = cols.map(c=>csvCell(c.t)).join(',');
+    const lines = all.map(r=>cols.map(c=>csvCell(r[c.k])).join(','));
+    const csv = '﻿'+header+'\n'+lines.join('\n');
+    const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = '医管考核_'+mod+'_'+Date.now()+'.csv';
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  function esc(s){
+    return String(s==null?'':s).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  }
+
+  /* ---------- 面板切换（父框架 postMessage / ?mod= 兜底） ---------- */
+  function setMod(m){
+    if(!['vab','order','charge'].includes(m)) m='vab';
+    document.querySelectorAll('.mod-panel').forEach(p=>p.classList.toggle('active', p.dataset.mod===m));
+    const sub = {vab:'VAB 会员清单', order:'收退款数据明细', charge:'收费明细数据明细'}[m];
+    document.getElementById('crumbSub').textContent = sub + ' · 医管考核数据统计';
+  }
+  window.addEventListener('message', (e)=>{
+    if(e.data && e.data.type==='app:setMod') setMod(e.data.mod);
+  });
+  (function initMod(){
+    const p = new URLSearchParams(location.search).get('mod');
+    setMod(p || 'vab');
+  })();
+
+  /* ---------- 事件绑定 ---------- */
+  function bindFile(id, handler){
+    const el = document.getElementById(id);
+    if(el) el.addEventListener('change', async (e)=>{
+      const f = e.target.files && e.target.files[0];
+      if(!f) return;
+      try{
+        const rows = await readFile(f);
+        handler(rows);
+      }catch(err){
+        alert('导入失败：'+(err && err.message ? err.message : err));
+      }finally{
+        e.target.value = '';
+      }
+    });
+  }
+  bindFile('fileVab', loadVab);
+  bindFile('fileOrderVab', loadVab);
+  bindFile('fileChargeVab', loadVab);
+  bindFile('fileOrder', parseOrder);
+  bindFile('fileCharge', parseCharge);
+
+  document.getElementById('orderFilter').addEventListener('change', ()=>{ if(App.lastOrder) renderBusiness('order', App.lastOrder); });
+  document.getElementById('chargeFilter').addEventListener('change', ()=>{ if(App.lastCharge) renderBusiness('charge', App.lastCharge); });
+  document.getElementById('orderExport').addEventListener('click', ()=>exportCsv('order'));
+  document.getElementById('chargeExport').addEventListener('click', ()=>exportCsv('charge'));
+  </script>
+</body>
+</html>

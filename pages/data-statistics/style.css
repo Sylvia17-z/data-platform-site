@@ -1,0 +1,133 @@
+:root{
+  /* ===== 藏蓝主题色板（统一） ===== */
+  --navy:#01418B;          /* 主色 */
+  --navy-900:#003366;      /* 深藏蓝 */
+  --navy-700:#0a4ea3;      /* 强调 */
+  --navy-100:#d6e0f0;      /* 浅藏蓝边框/分隔 */
+  --navy-50:#f3f6fb;       /* 极浅藏蓝底 */
+  --light-blue:#D7EFF9;    /* 单元格 / 说明底 */
+  --gold:#b8893a;          /* KPI 强调金 */
+  --ink:#0f172a;           /* 主文字 */
+  --ink-soft:#5b6472;      /* 次要文字 */
+  --line:#000000;          /* 统一黑色框线 */
+  /* ===== 统一字体栈（中文 + 西文一套） ===== */
+  --font:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei","Hiragino Sans GB",Helvetica,Arial,sans-serif;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;background:var(--navy-50);color:var(--ink);
+  font-family:var(--font);font-variant-numeric:tabular-nums;
+  font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased}
+
+
+.wrap{max-width:1180px;margin:0 auto;padding:18px 16px 50px}
+
+/* ===== 控制面板 ===== */
+.panel{background:#fff;border:1px solid var(--navy-100);border-radius:12px;padding:16px 18px;
+  box-shadow:0 2px 10px rgba(1,65,139,.06);margin-bottom:16px}
+.controls{display:flex;flex-wrap:wrap;gap:14px;align-items:flex-end}
+.field{display:flex;flex-direction:column;gap:5px}
+.field label{font-size:12px;color:var(--ink-soft);font-weight:600}
+.file-btn{position:relative;overflow:hidden;display:inline-block}
+.file-btn input{position:absolute;inset:0;opacity:0;cursor:pointer;z-index:2}
+.file-btn .btn{position:relative;z-index:0}
+.btn{padding:9px 15px;border:none;border-radius:8px;cursor:pointer;font-size:13px;
+  font-family:var(--font);font-weight:600;transition:.15s;white-space:nowrap;display:inline-block}
+.btn-primary{background:var(--navy);color:#fff}
+.btn-primary:hover{background:var(--navy-900)}
+.btn-ghost{background:#fff;color:var(--navy);border:1px solid var(--navy-100)}
+.btn-ghost:hover{background:var(--navy-50)}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+input[type=date],input[type=text]{padding:7px 10px;border:1px solid var(--navy-100);border-radius:7px;
+  font-family:var(--font);font-size:13px;background:#fff;color:var(--ink);outline:none}
+input:focus{border-color:var(--navy);box-shadow:0 0 0 3px rgba(1,65,139,.18)}
+.date-sep{font-size:13px;color:var(--ink-soft);padding:0 2px 6px}
+.btn-row{display:flex;gap:10px;flex-wrap:wrap;margin-top:4px}
+
+/* ===== 状态信息条 ===== */
+.status{font-size:12.5px;color:var(--ink-soft);min-height:18px;background:var(--navy-50);
+  border:1px solid var(--navy-100);border-radius:8px;padding:9px 13px;line-height:1.6}
+.status b{color:var(--navy)}
+.status.warn{background:#fff6e6;border-color:#f0d9a8;color:#8a5a00}
+
+/* ===== 报表卡片 ===== */
+.report-card{background:#fff;border:1px solid var(--navy-100);border-radius:12px;
+  box-shadow:0 2px 10px rgba(1,65,139,.08);margin-bottom:18px;overflow:hidden}
+.report-title{background:linear-gradient(180deg,var(--navy-900),var(--navy));color:#fff;
+  text-align:center;padding:9px;font-size:14px;font-weight:600;letter-spacing:1px;border-bottom:2px solid var(--line)}
+.scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
+table.tbl{border-collapse:collapse;width:100%;min-width:640px;background:#fff;border:1px solid var(--line);font-family:var(--font);font-variant-numeric:tabular-nums}
+table.tbl th,table.tbl td{border:1px solid var(--line);padding:6px 8px;text-align:center;
+  font-size:13px;color:var(--ink);line-height:1.35}
+table.tbl thead th{background:var(--navy);color:#fff;font-weight:600;letter-spacing:.5px;font-size:13px;padding:7px 8px}
+/* 部门列（线上/线下/营销部…）：与其他数据单元格格式完全一致，不做加粗/变色区分 */
+table.tbl td.ch{background:#fff;font-weight:400;color:var(--ink)}
+table.tbl td.dept{background:#fff;font-weight:400;color:var(--ink)}
+table.tbl tr.total td{background:var(--navy);color:#fff;font-weight:700;font-size:13.5px}
+table.tbl tr.note td{background:#fff;color:var(--ink);text-align:left;font-size:12px;line-height:1.6;white-space:pre-line}
+table.tbl tr.summary td{background:var(--light-blue);color:var(--ink);font-weight:600;font-size:12.5px;text-align:center}
+.pct{font-weight:700;color:var(--navy)}
+/* 可编辑单元格（高新/经开/总业绩）：外观与普通单元格完全一致，仅保留可输入光标 */
+table.tbl td.editable{background:#fff;color:var(--ink);font-weight:400;cursor:text}
+table.tbl td.editable:hover{background:#fff}
+table.tbl td.editable:focus{background:#fff;color:var(--ink);outline:none;box-shadow:none}
+
+/* ===== 报表顶部说明区 ===== */
+.report-note{background:var(--light-blue);border:1px solid var(--navy-100);border-radius:10px;
+  padding:12px 16px;margin-bottom:14px;color:var(--navy);font-size:13px;line-height:1.7;white-space:pre-line}
+
+/* ===== KPI 总览 ===== */
+.kpi-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:18px}
+.kpi{position:relative;overflow:hidden;background:linear-gradient(135deg,var(--navy-900),var(--navy));color:#fff;border-radius:12px;padding:16px 18px;box-shadow:0 4px 14px rgba(1,65,139,.12)}
+.kpi::after{content:"";position:absolute;right:-22px;top:-22px;width:88px;height:88px;border-radius:50%;background:rgba(255,255,255,.06)}
+.kpi-label{font-size:12px;color:var(--light-blue);letter-spacing:1px}
+.kpi-value{font-size:30px;font-weight:700;line-height:1.1;margin-top:6px;font-variant-numeric:tabular-nums}
+.kpi-value small{font-size:13px;font-weight:500;margin-left:3px;opacity:.85}
+.kpi-foot{font-size:11.5px;color:var(--light-blue);margin-top:6px;opacity:.92}
+.kpi-gold{box-shadow:inset 0 4px 0 var(--gold),0 4px 14px rgba(1,65,139,.12)}
+.kpi-gold .kpi-value{color:var(--gold)}
+
+/* ===== 控制区分组卡片 ===== */
+.control-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:16px}
+.ctl{background:var(--navy-50);border:1px solid var(--navy-100);border-radius:10px;padding:12px 14px;display:flex;flex-direction:column;gap:8px}
+.ctl-title{font-size:13px;font-weight:700;color:var(--navy);letter-spacing:1px;display:flex;align-items:center;gap:6px}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--navy);box-shadow:0 0 0 3px rgba(1,65,139,.15);flex:none}
+.hint{font-size:11.5px;color:var(--ink-soft);line-height:1.5}
+.btn-col{display:flex;flex-direction:column;gap:8px}
+.btn-col .btn{width:100%}
+
+/* ===== 模块切换（两个完全独立的模块：三报表平台 / 预约量统计） ===== */
+.modnav{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:18px}
+.modbtn{flex:1 1 240px;min-width:200px;padding:14px 18px;border:1px solid var(--navy-100);background:#fff;color:var(--navy);
+  border-radius:12px;cursor:pointer;font-family:var(--font);font-size:15px;font-weight:600;letter-spacing:1px;transition:.15s;text-align:left;line-height:1.4}
+.modbtn small{display:block;font-size:11.5px;font-weight:500;color:var(--ink-soft);margin-top:4px;letter-spacing:0}
+.modbtn:hover{background:var(--navy-50)}
+.modbtn.active{background:linear-gradient(135deg,var(--navy-900),var(--navy));color:#fff;border-color:var(--navy);box-shadow:0 3px 14px rgba(1,65,139,.2)}
+.modbtn.active small{color:var(--light-blue)}
+.mod-panel{display:none}
+.mod-panel.active{display:block}
+
+/* ===== 预约量统计表：压缩列宽、固定布局（解决数据列过宽） ===== */
+#nextReport .tbl{min-width:0;width:100%;max-width:820px;margin:0 auto;table-layout:fixed;font-size:12.5px}
+#nextReport .tbl th,#nextReport .tbl td{padding:5px 7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#nextReport .tbl th:first-child,#nextReport .tbl td:first-child{text-align:center;width:32%;white-space:normal;word-break:break-word}
+#nextReport .tbl th:nth-child(n+2),#nextReport .tbl td:nth-child(n+2){text-align:center;width:17%}
+#nextReport .report-card{max-width:820px;margin:0 auto 14px}
+/* 预约量统计专用「统计说明」：宽度与下方数据表（820px）对齐 */
+#nextReport .stat-note{max-width:820px;margin:0 auto 14px;background:var(--light-blue);
+  border:1px solid var(--navy-100);border-radius:10px;padding:12px 16px;
+  color:var(--navy);font-size:13px;line-height:1.7;white-space:pre-line}
+
+@media (max-width:720px){
+  .controls{gap:10px}
+  .field{flex:1 1 100%}
+  .field.half{flex:1 1 46%}
+  .kpi-grid{grid-template-columns:repeat(2,1fr)}
+  .control-grid{grid-template-columns:1fr}
+  table.tbl{min-width:560px}
+  table.tbl th,table.tbl td{font-size:12px;padding:5px 6px}
+}
+@media print{
+  body{background:#fff}
+  .panel{display:none!important}
+  .report-card{box-shadow:none;border:none;break-inside:avoid}
+}

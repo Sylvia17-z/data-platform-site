@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-page-node-id="zpsjOb2zVDoyfDmrygRpnl">
+<head data-page-node-id="xjXjO6Fuw1gDmzQUawtu7B">
+<meta charset="UTF-8" data-page-node-id="ZTyKtFk1zDeAPQjKFllACB" />
+<meta name="viewport" content="width=device-width,initial-scale=1.0" data-page-node-id="QL5SneVyWn7UBe8MRj5833" />
+<title>各部门业绩完成情况跟踪日报表</title>
+<style>
+  /* ============ 设计令牌 ============ */
+  :root{
+    --c-bg:#eef1f6;
+    --c-card:#ffffff;
+    --c-border:#dbe3ee;
+    --c-border-soft:#e9eef6;
+    --c-head:#002060;          /* 标题行深藏蓝 */
+    --c-head-2:#1e3a8a;
+    --c-head-text:#ffffff;
+    --c-blue-tint:#DAE3F5;     /* 表头/大类 浅蓝 */
+    --c-blue-sub:#D9E1F4;      /* 子项 浅蓝 */
+    --c-pink:#FFC9C7;          /* 品牌组-自然到店 浅粉 */
+    --c-orange:#FFBA84;        /* 高新业绩 橙 */
+    --c-orange-2:#f0a35a;      /* 橙·深 */
+    --c-orange-ink:#5b3300;
+    --c-row-alt:#f5f8fd;
+    --c-text:#1f2d4d;
+    --c-muted:#7a8aa6;
+    --c-accent:#3658d3;
+    --c-success:#1f8a4a;
+    --c-warn:#a85b04;
+    --c-error:#b3261e;
+    --radius:14px;
+    --radius-sm:9px;
+    --shadow-card:0 1px 2px rgba(31,45,77,.05),0 8px 24px rgba(31,45,77,.07);
+    --shadow-pop:0 8px 24px rgba(0,0,0,.18);
+    --font-sans:"PingFang SC","Microsoft YaHei","Segoe UI",system-ui,-apple-system,sans-serif;
+    --space:8px;
+  }
+  *{box-sizing:border-box}
+  html,body{
+    margin:0;padding:0;
+    font-family:var(--font-sans);
+    background:var(--c-bg);
+    color:var(--c-text);
+    font-size:14px;
+    -webkit-font-smoothing:antialiased;
+    text-rendering:optimizeLegibility;
+  }
+
+  /* ============ 布局容器 ============ */
+  .wrap{max-width:1180px;margin:0 auto;padding:24px 18px 60px;}
+
+  /* ============ 面板（卡片） ============ */
+  .panel{
+    background:var(--c-card);
+    border:1px solid var(--c-border);
+    border-radius:var(--radius);
+    box-shadow:var(--shadow-card);
+    margin-bottom:18px;
+    overflow:hidden;
+    position:relative;
+  }
+  .panel::before{
+    content:"";position:absolute;left:0;top:0;bottom:0;width:4px;
+    background:linear-gradient(180deg,var(--c-head),var(--c-head-2));
+    z-index:2;
+  }
+  /* 面板标题（含可点击折叠的 h2）统一外观 */
+  .panel > h2, .panel > details > summary{
+    font-size:15px;font-weight:700;color:var(--c-head);
+    margin:0;padding:14px 18px 12px 22px;
+    display:flex;align-items:center;gap:9px;
+    border-bottom:2px solid var(--c-border-soft);
+    position:relative;
+  }
+  .panel > h2::before, .panel > details > summary::before{
+    content:"";width:7px;height:18px;border-radius:3px;
+    background:linear-gradient(180deg,var(--c-head),var(--c-accent));
+    flex-shrink:0;
+  }
+  /* 可折叠面板的箭头与标题分居两侧 */
+  #targets-toggle{justify-content:space-between;cursor:pointer;width:100%;}
+  #targets-arrow{
+    font-size:12px;color:var(--c-muted);font-weight:600;
+    padding:3px 10px;border:1px solid var(--c-border);border-radius:999px;background:#fff;
+  }
+  /* 面板内主体内容统一内边距（标题与 details 摘要除外） */
+  .panel > .row,
+  .panel > #targets-body,
+  .panel > #report-stage,
+  .panel > #store-stage{
+    padding:16px 18px 18px 22px;overflow-x:auto;max-width:100%;
+  }
+  .panel > #targets-body,
+  .panel > #import-details,
+  .panel > .vab-list-details,
+  .panel > #render-error{
+    padding:16px 18px 18px 22px;
+  }
+  /* ③ ④ 的「标题+操作」行不做左内边距叠加 */
+  .panel > .row:has(h2){padding-bottom:8px;}
+
+  /* ============ 行/控件 ============ */
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+  .label{font-size:12.5px;color:var(--c-muted);margin-right:6px;font-weight:500;}
+  .file-meta{font-size:12px;color:var(--c-muted);}
+  .select,.input{
+    padding:8px 11px;border:1px solid var(--c-border);border-radius:var(--radius-sm);
+    font-size:13px;background:#fff;color:var(--c-text);font-family:inherit;
+    transition:border-color .15s,box-shadow .15s;
+  }
+  .input:focus,.select:focus{outline:none;border-color:var(--c-accent);box-shadow:0 0 0 3px rgba(54,88,211,.12);}
+
+  /* ============ 按钮 ============ */
+  .btn{
+    cursor:pointer;border:1px solid var(--c-border);background:#fff;
+    border-radius:var(--radius-sm);padding:8px 14px;color:var(--c-text);
+    font-size:13px;font-weight:500;display:inline-flex;align-items:center;gap:6px;
+    font-family:inherit;transition:all .15s ease;user-select:none;white-space:nowrap;
+  }
+  .btn:hover{border-color:var(--c-accent);color:var(--c-accent);box-shadow:0 2px 8px rgba(54,88,211,.12);transform:translateY(-1px);}
+  .btn:active{transform:translateY(0);}
+  .btn-primary{background:var(--c-head);color:#fff;border-color:var(--c-head);}
+  .btn-primary:hover{background:var(--c-head-2);color:#fff;border-color:var(--c-head-2);box-shadow:0 4px 12px rgba(0,32,96,.25);}
+  .btn-orange{background:var(--c-orange);color:var(--c-orange-ink);border-color:var(--c-orange);font-weight:600;}
+  .btn-orange:hover{background:var(--c-orange-2);color:var(--c-orange-ink);border-color:var(--c-orange-2);box-shadow:0 4px 12px rgba(240,163,90,.35);}
+  .btn-danger{background:#b3261e;color:#fff;border-color:#b3261e;}
+  .btn-danger:hover{background:#8f1d17;color:#fff;border-color:#8f1d17;box-shadow:0 4px 12px rgba(179,38,30,.3);}
+
+  /* ============ 标签 / 状态 chip ============ */
+  .chip{display:inline-flex;align-items:center;gap:6px;border-radius:999px;padding:5px 12px;font-size:12px;font-weight:600;white-space:nowrap;}
+  .chip.warn{background:#fff4e0;color:var(--c-warn);}
+  .chip.ok{background:#e3f5ea;color:var(--c-success);}
+  .chip.err{background:#fde4e4;color:var(--c-error);}
+  .chip:not(.ok):not(.warn):not(.err){background:#eef2fa;color:var(--c-accent);}
+
+  /* ============ VAB 会员清单 ============ */
+  .vab-list-details{flex-basis:100%;width:100%;} /* 独占整行，铺满面板空白区域 */
+  .vab-list-summary{cursor:pointer;user-select:none;font-size:13px;font-weight:600;color:var(--c-head);} /* 点击 summary 可收起/展开 */
+  /* VAB 新增会员弹窗 */
+  .modal-mask{position:fixed;inset:0;background:rgba(15,23,42,.42);display:flex;align-items:center;justify-content:center;z-index:1000;padding:16px;}
+  .modal-box{background:#fff;border-radius:12px;padding:20px;width:min(460px,94vw);max-height:86vh;overflow:auto;box-shadow:0 16px 48px rgba(0,0,0,.28);}
+  .modal-title{font-size:15px;font-weight:600;color:var(--c-head);margin-bottom:14px;}
+  .modal-fields{display:flex;flex-direction:column;gap:10px;}
+  .modal-field{display:flex;flex-direction:column;gap:4px;}
+  .modal-field label{font-size:12px;color:var(--c-muted);}
+  .modal-input{padding:8px 11px;border:1px solid var(--c-border);border-radius:var(--radius-sm);font-size:13px;font-family:inherit;background:#fff;color:var(--c-text);}
+  .modal-input:focus{outline:none;border-color:var(--c-head);box-shadow:0 0 0 3px rgba(0,32,96,.10);}
+  .modal-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:18px;}
+  .vab-list-wrap{flex-basis:100%;width:100%;padding:14px !important;background:#f7f9fd;border:1px solid var(--c-border);border-radius:var(--radius-sm);}
+  .vab-table-wrap td.vab-cell{cursor:cell;transition:background .12s;}
+  .vab-table-wrap td.vab-cell:hover{background:#eaf0fb;}
+  .vab-table-wrap td.vab-cell input{font-family:inherit;}
+  .vab-list-head{font-size:13px;font-weight:600;color:var(--c-head);margin-bottom:8px;}
+  .vab-chips{display:flex;flex-wrap:wrap;gap:6px;max-height:220px;overflow:auto;padding:2px 0;}
+  .vab-chip{display:inline-block;background:#eef2fa;color:var(--c-text);border:1px solid var(--c-border);border-radius:6px;padding:3px 8px;font-size:12px;font-family:inherit;line-height:1.4;}
+  .vab-chip .vab-del{margin-left:5px;border:none;background:transparent;color:var(--c-error);cursor:pointer;font-size:13px;line-height:1;padding:0 2px;}
+  .vab-chip .vab-del:hover{font-weight:700;}
+  .vab-add-row{display:flex;gap:8px;margin-top:10px;align-items:center;}
+
+  /* ============ ② 月目标面板（美化：分组卡片） ============ */
+  #targets{display:block;}
+  .target-group{margin-bottom:14px;}
+  .target-group:last-child{margin-bottom:0;}
+  .target-group__title{
+    display:flex;align-items:center;gap:7px;margin:0 0 9px;
+    font-size:12.5px;font-weight:700;color:var(--c-head);
+    padding-bottom:6px;border-bottom:1px dashed var(--c-border);
+  }
+  .target-group__title::before{content:"";width:6px;height:14px;border-radius:3px;background:linear-gradient(180deg,var(--c-head),var(--c-accent));}
+  .target-group__grid{display:grid;grid-template-columns:1fr 1fr;gap:8px 18px;}
+  @media (max-width:720px){.target-group__grid{grid-template-columns:1fr;}}
+  .target-row{
+    display:flex;align-items:center;gap:10px;
+    background:#f7f9fd;border:1px solid var(--c-border-soft);
+    border-radius:var(--radius-sm);padding:7px 12px;
+    transition:border-color .15s,box-shadow .15s,background .15s;
+  }
+  .target-row:hover{border-color:var(--c-accent);box-shadow:0 2px 8px rgba(54,88,211,.10);background:#fff;}
+  .target-row .label{margin:0;font-weight:500;color:var(--c-text);}
+  .target-row .target-input{
+    margin-left:auto;width:94px;text-align:right;
+    font-variant-numeric:tabular-nums;font-weight:700;color:var(--c-head);
+    border-color:var(--c-border);
+  }
+  .target-row .target-input:focus{box-shadow:0 0 0 3px rgba(0,32,96,.12);}
+  .target-row .unit{font-size:12px;color:var(--c-muted);font-weight:500;min-width:28px;flex-shrink:0;}
+
+  /* ============ 主报表舞台 ============ */
+  .report-stage{padding:16px 18px 18px 22px;overflow-x:auto;max-width:100%;}
+  .stage{background:#ffffff;border-radius:var(--radius-sm);}
+
+  /* ============ 报表表格（Excel 语义配色，黑色框线，紧凑高密度） ============ */
+  table.report{
+    width:100%;border-collapse:collapse;background:#fff;
+    border:1px solid #000000;
+    box-shadow:0 4px 14px rgba(31,45,77,.06);
+    font-size:12.5px;color:var(--c-text);table-layout:auto;
+  }
+  table.report th,table.report td{
+    border:1px solid #000000;padding:6px 6px;
+    text-align:center;vertical-align:middle;font-weight:400;white-space:nowrap;
+  }
+  table.report thead th{
+    background:linear-gradient(180deg,#002a73,#002060);
+    color:var(--c-head-text);font-weight:600;letter-spacing:.3px;
+  }
+  table.report .title-cell{
+    text-align:center;font-weight:700;color:#fff;font-size:15.5px;padding:9px;
+    background:linear-gradient(180deg,#002a73,#002060);
+  }
+  table.report .sub-head{background:var(--c-blue-tint);font-weight:700;color:#002060;font-size:12px;}
+  table.report .cat{text-align:center;font-weight:600;background:var(--c-blue-tint);color:#002060;}
+  table.report .cat.sub{background:var(--c-blue-sub);color:#002060;}
+  table.report .row-pink td{background:var(--c-pink);}
+  table.report .row-pink .cat{background:var(--c-pink);}
+  table.report .row-white td{background:#fff;}
+  table.report .row-white .cat{background:#fff;}
+  table.report .row-orange td{background:var(--c-orange);font-weight:700;color:var(--c-orange-ink);font-size:12px;}
+  table.report .row-orange .cat{background:var(--c-orange);color:var(--c-orange-ink);}
+  table.report .num{text-align:center;font-variant-numeric:tabular-nums;padding:5px 5px;font-size:12px;}
+  table.report .target{text-align:center;background:#fff;font-weight:500;padding:3px 5px;}
+  table.report .col-hidden{display:none !important;}
+  /* 每日列交互 */
+  table.report th.daily-col:hover{background:var(--c-blue-sub);color:var(--c-text);}
+  table.report.batch-mode th.daily-col{cursor:pointer;}
+  table.report th.daily-col.selected{background:#ffe08a !important;color:#5c4a00;}
+  table.report .copy-col{display:block;font-size:10.5px;line-height:1.4;color:rgba(255,255,255,.82);cursor:pointer;margin-top:3px;user-select:none;text-align:center;}
+  table.report th.daily-col:hover .copy-col{color:#fff;text-decoration:underline;}
+  table.report th{position:relative;}
+  table.report .resize-handle{position:absolute;right:0;top:0;width:6px;height:100%;cursor:col-resize;z-index:5;background:transparent;}
+  table.report .resize-handle:hover{background:rgba(54,88,211,.35);}
+  table.report col{width:auto;}
+
+  /* 业绩报表字体规范：除标题行外全部黑色 + 微软雅黑；合计行大两号加粗（v20260916） */
+  table.report, table.report th, table.report td,
+  table.report .cat, table.report .num, table.report .target, table.report .sub-head,
+  table.report .row-orange, table.report .row-orange .cat, table.report .row-pink .cat,
+  table.report .copy-col {
+    font-family:"Microsoft YaHei","微软雅黑",sans-serif !important;
+    color:#000 !important;
+  }
+  /* 标题行（深藏蓝底）保持白字，不参与黑色化 */
+  table.report .title-cell { color:#fff !important; }
+  /* 合计行：14px 加粗（底色橙不变，仅字体；v-71 由 15pt 改 12pt，v20260910-77 放大一号→14px） */
+  table.report tr.row-orange td,
+  table.report tr.row-orange .cat { font-size:14px !important; font-weight:700 !important; color:#000 !important; }
+
+  /* ============ 图例 ============ */
+  .legend{display:flex;flex-wrap:wrap;gap:14px;margin-top:10px;font-size:12px;color:var(--c-muted);padding:0 4px;}
+  .legend .swatch{display:inline-block;width:14px;height:14px;border-radius:3px;margin-right:5px;vertical-align:middle;border:1px solid rgba(0,0,0,.12);}
+  .sw-orange{background:var(--c-orange);}
+  .sw-tint{background:var(--c-blue-tint);}
+  .sw-pink{background:var(--c-pink);}
+  .sw-sub{background:var(--c-blue-sub);}
+
+  /* ============ 导入数据明细（标签 + 表格） ============ */
+  details > summary{cursor:pointer;list-style:none;}
+  details > summary::-webkit-details-marker{display:none;}
+  details[open] > summary{margin-bottom:4px;}
+  .detail-tabs{margin:2px 0 12px;display:flex;flex-wrap:wrap;gap:6px;}
+  .detail-tab{cursor:pointer;border:1px solid var(--c-border);background:#fff;color:var(--c-text);padding:5px 12px;border-radius:999px;font-size:12px;margin:0;font-family:inherit;font-weight:500;transition:all .15s;}
+  .detail-tab:hover{border-color:var(--c-head);color:var(--c-head);}
+  .detail-tab.active{background:var(--c-head);color:#fff;border-color:var(--c-head);font-weight:600;}
+  .detail-del{margin:0 2px;border:1px solid var(--c-border);background:#fff;color:var(--c-error);cursor:pointer;font-size:13px;line-height:1;border-radius:5px;padding:2px 8px;font-family:inherit;}
+  .detail-del:hover{background:var(--c-error);color:#fff;border-color:var(--c-error);}
+  .detail-filters{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin:2px 0 10px;}
+  .detail-filter{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--c-muted);}
+  .detail-select{border:1px solid var(--c-border);background:#fff;color:var(--c-text);padding:5px 10px;border-radius:8px;font-size:12px;font-family:inherit;font-weight:500;cursor:pointer;min-width:120px;}
+  .detail-select:hover{border-color:var(--c-head);}
+  .detail-select:focus{outline:none;border-color:var(--c-head);box-shadow:0 0 0 2px rgba(0,32,96,.12);}
+  .detail-reset{margin:0;border:1px solid var(--c-border);background:#fff;color:var(--c-head);cursor:pointer;font-size:12px;line-height:1;border-radius:8px;padding:5px 12px;font-family:inherit;font-weight:500;}
+  .detail-reset:hover{background:var(--c-head);color:#fff;border-color:var(--c-head);}
+  .table-wrap{max-height:300px;overflow:auto;border:1px solid var(--c-border);border-radius:var(--radius-sm);background:#fff;}
+  table.data{width:100%;border-collapse:collapse;font-size:12px;}
+  table.data th,table.data td{border:1px solid #e5ecf6;padding:6px 9px;white-space:nowrap;}
+  table.data thead th{background:#f0f4fb;color:var(--c-head);position:sticky;top:0;z-index:2;font-weight:600;}
+  table.data tbody tr:nth-child(odd){background:#fafcff;}
+  table.data tbody tr:hover{background:#eef4ff;}
+  table.data tfoot td{position:sticky;bottom:0;z-index:2;background:var(--c-blue-tint);font-weight:700;color:var(--c-head);}
+
+  /* ============ 提示横幅 ============ */
+  #debug-banner{margin-bottom:14px;padding:9px 14px;background:#fff8dc;border:1px solid #d4a017;border-radius:var(--radius-sm);font-size:12px;color:#5c4a00;}
+  #render-error{margin-top:0 !important;padding:12px 14px !important;background:#fde4e4;color:#b3261e;border:1px solid #b3261e;border-radius:var(--radius-sm);font-size:13px;}
+
+  /* ============ Toast ============ */
+  .toast{position:fixed;left:50%;top:24px;transform:translateX(-50%);background:#1f2d4d;color:#fff;padding:11px 20px;border-radius:10px;font-size:13px;box-shadow:var(--shadow-pop);z-index:9999;opacity:0;transition:opacity .25s;pointer-events:none;}
+  .toast.show{opacity:1;}
+  .toast.err{background:#b3261e;}
+  .toast.ok{background:#1f8a4a;}
+
+  /* ============ 响应式 ============ */
+  @media (max-width:640px){
+
+    .grid-2{grid-template-columns:1fr;}
+    .chip{white-space:normal;border-radius:12px;} /* 手机端允许长警示条（如 VAB 未上传提醒）换行，nowrap 会横向溢出被裁切 */
+  }
+</style>
+</head>
+<body data-page-node-id="WKMgpaWQmsfgWtxyKz9iJd">
+
+
+<div class="wrap" id="app" data-page-node-id="3alh1yimASMLper0cvdavQ">
+  <div id="debug-banner" style="display:none;margin-bottom:12px;padding:8px 12px;background:#fff8dc;border:1px solid #d4a017;border-radius:6px;font-size:12px;color:#5c4a00;" data-page-node-id="OCzUl5FE5VQZZYIrsWlBHP"></div>
+
+  <!-- 控制面板 -->
+  <div class="panel" data-page-node-id="q3UG7s9I9lOeGXeyBazgrD">
+    <h2 data-page-node-id="CAnTOEgbyucSNzEYBOtamy">① 数据导入</h2>
+    <div class="row" style="gap:18px;" data-page-node-id="uRauk3BTriiIEQj3dJFP4P">
+      <div data-page-node-id="e9yoGRgkpNU7G5jw6O3wqZ">
+        <span class="label" data-page-node-id="rcMNWKRBWP74I43ofv9dYm">订单收退款明细：</span>
+        <input type="file" id="file-orders" accept=".xlsx,.xls" hidden data-page-node-id="qPfudSznaBi8SGbJMA7Tvy" />
+        <label for="file-orders" class="btn btn-primary" data-page-node-id="BQzpkj18KygQmHmAUfLIfE">📁 上传订单表</label>
+        <span id="orders-meta" class="file-meta" data-page-node-id="WXC1BHVp6u6ppPQsqfxqkH">未导入</span>
+        <label style="font-size:12px;margin-left:6px;color:var(--c-muted);" data-page-node-id="3bjnFxlhUdGSfQY30HRnDq">
+          <input type="checkbox" id="merge-mode" checked data-page-node-id="HM0RpqKy2mrDSwFwMCFHUO" /> 合并到历史数据（重叠日期覆盖，其它日期保留）
+        </label>
+      </div>
+      <div data-page-node-id="GuBPinJbNcTK30VWY2G5DZ">
+        <span class="label" data-page-node-id="nywmf7ZKstPW3vFTFE5ORl">VAB 会员列表：</span>
+        <input type="file" id="file-vab" accept=".xlsx,.xls" hidden data-page-node-id="DXtBHsfyxdEcg3rFrb5nwS" />
+        <label for="file-vab" class="btn" data-page-node-id="auLOVNlApcfoAfw3SxzTvF">👥 上传VAB会员表</label>
+        <span id="vab-meta" class="file-meta" data-page-node-id="xstmJe27hHeREDGXMIA0Ql">未导入</span>
+        <button class="btn" id="edit-vab" title="展开/收起 VAB 会员清单（清单内双击单元格编辑、行尾 × 删除会员）" data-page-node-id="2vcS9kp7k74vSZfjuKUP8k">📋 编辑会员</button>
+        <button class="btn" id="clear-vab" title="清空本机保存的VAB清单（重置旧版本残留/示例数据），清空后重新上传真实会员表" data-page-node-id="clearVabBtn">🗑 清空VAB</button>
+      </div>
+      <!-- VAB 会员清单（默认展开呈现导入会员，单元格可双击编辑、行尾可删除） -->
+      <details class="vab-list-details" style="margin-top:10px;" data-page-node-id="vabListBox">
+        <summary id="vab-list-summary" class="vab-list-summary">📋 VAB 会员清单</summary>
+        <div id="vab-list" class="vab-list-wrap"></div>
+      </details>
+      <!-- 新增 VAB 会员弹窗（录入会员号/姓名/组别等全部字段） -->
+      <div id="vab-add-modal" class="modal-mask" style="display:none;" data-page-node-id="vabAddModal">
+        <div class="modal-box" role="dialog" aria-modal="true">
+          <div class="modal-title">＋ 新增 VAB 会员</div>
+          <div id="vab-add-fields" class="modal-fields"></div>
+          <div class="modal-actions">
+            <button class="btn btn-primary" id="vab-add-save" data-page-node-id="vabAddSave">💾 保存</button>
+            <button class="btn" id="vab-add-cancel" data-page-node-id="vabAddCancel">取消</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="row" style="margin-top:12px;" data-page-node-id="qlWcD1nsI8D3ZcQmFA9B4f">
+      <span class="label" data-page-node-id="SQGaFDln4aDjb4EwYfvV9E">截止日期：</span>
+      <input type="date" id="cutoff-date" class="input" data-page-node-id="3ZaYGlsyPJp2mOgfqHAvFj" />
+      <span class="file-meta" data-page-node-id="HGIi1hVHYymyUOMA4NeaFz">（仅汇总 ≤ 该日期的数据）</span>
+      <button class="btn" id="recompute" data-page-node-id="pOgl6nqAh86a9vsgpK848M">🔄 重新计算</button>
+      <button class="btn" id="clear-manual" title="清除所有手动调整的月累计/每日数据，恢复自动计算（用于修正手动改错导致的「月累计≠当日」）">🧹 清除手动调整</button>
+      <button class="btn btn-danger" id="clear-all" title="清除本机保存的订单/月目标/手动调整/列宽，重置为空后重新导入（不影响 VAB 会员）">🗑 清除全部数据</button>
+      <span style="flex:1" data-page-node-id="cm7JsX5fZ7iDlJZeeDkKUf"></span>
+    </div>
+    <div id="render-error" style="display:none;margin-top:10px;padding:10px 12px;background:#fde4e4;color:#b3261e;border:1px solid #b3261e;border-radius:6px;font-size:13px;" data-page-node-id="Cren2M9ptIxbdhlZu8Vs9i"></div>
+  </div>
+
+  <!-- 月目标维护 -->
+  <div class="panel" data-page-node-id="pXf3CltNWJHY6uO6qeGxN3">
+    <h2 style="display:flex;justify-content:space-between;align-items:center;cursor:pointer;margin:0 0 12px;" id="targets-toggle" title="点击收起/展开" data-page-node-id="etinOZHukLHvezBGc120rG">
+      <span data-page-node-id="yaUlflTRv8u8npKybRBGgT">② 月目标（单位：万元）</span>
+      <span class="btn" id="targets-arrow" style="padding:4px 10px;" data-page-node-id="0u0AvXzbyBEwz5Q95DbfAj">▲ 收起</span>
+    </h2>
+    <div id="targets-body" data-page-node-id="Bz90FVv25QpOJwJLlcz78M">
+      <div id="targets" style="font-size:13px;" data-page-node-id="Z4fDwAd0Xypmt9UaCPtkIt"></div>
+      <div class="file-meta" style="margin-top:8px;" data-page-node-id="V8LthaRy0BaVqcNgFDLOmB">月目标变更后会立即影响月累计/达成率展示；日数据由导入的订单明细自动结算。</div>
+      <div class="file-meta" style="margin-top:6px;color:var(--c-muted);">＊高新店 / 经开店 不设月度目标（详见 ④ 门店业绩）。</div>
+    </div>
+  </div>
+
+  <!-- 主报表 -->
+  <div class="panel" data-page-node-id="TGdhTOBjfLAmUJqH4K3SES">
+      <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:8px;" data-page-node-id="T6vsiDPkzQB7mwVvDIAPhy">
+        <h2 style="margin:0;" data-page-node-id="h6ZNdUM5PNYqJizlLOsxSs">③ 业绩报表</h2>
+      <div class="row" data-page-node-id="UGvQsYwUILaU4vGkc7TQzN">
+        <button class="btn" id="batch-toggle" title="批量选择要隐藏的日期列">☑ 批量</button>
+        <button class="btn" id="expand-all" title="展开所有日期列">+展开</button>
+        <button class="btn" id="export-xlsx" data-page-node-id="Dl7Z2nfnhq1k54Mfn2mTHp">📥 导出Excel</button>
+        <button class="btn btn-orange" id="export-png" data-page-node-id="0x4LNDHlO1Zk1WlyHKHfaD">🖼 导出图片</button>
+      </div>
+      </div>
+    <div class="stage" id="report-stage" data-page-node-id="gPrDky1AOxq96CYabE4OYN">
+      <!-- 报表容器 -->
+      <table class="report" id="report-table" data-page-node-id="WOv38htJgr8kvbJqQIcUjI">
+        <thead data-page-node-id="38aLlKZuVBnEd9kJtUYL5a">
+          <tr data-page-node-id="CR8ERUlVgE2drxMgEKYNkN">
+            <th colspan="6" class="title-cell" data-page-node-id="Uf8AFlPIZBB5GjDxMLxT5E">各部门业绩完成情况跟踪日报表(截止--)</th>
+          </tr>
+          <tr data-page-node-id="CJMib7O98IXAtK3fRADfAC">
+            <th colspan="3" class="sub-head" data-page-node-id="xxjD3qID3aBpOUbcJfXlan">部门类别</th>
+            <th class="sub-head" data-page-node-id="tZOxqe5PSHA5CHGZwPCElu">月目标<br data-page-node-id="aFDHCWmLrp3FNq3IBkbY7I">(单位：万元)</th>
+            <th class="sub-head" data-page-node-id="Y5rei8e9Yp4JtADXpv8EpD">月累计<br data-page-node-id="bcT0LCjr5nzj5GM4Bo73cc">(单位：元)</th>
+            <th class="sub-head" data-page-node-id="e8f7mA0kfsE7bxDyeeqXI2">当日<br data-page-node-id="KIHSckAPy0FtvHKIMPYLN4">(单位：元)</th>
+          </tr>
+        </thead>
+        <tbody id="report-body" data-page-node-id="iICG20wiWVAVt4uw0Jn5gd"></tbody>
+      </table>
+
+      <div class="legend" data-page-node-id="aULxbEUPvBnyHAAcUrtR8m">
+        <span data-page-node-id="nk73obRLEL8ME7mbA4OOJJ"><span class="swatch sw-tint" data-page-node-id="8fEEz8UH0EfofSY4ago9JW"></span>部门类别/表头底色</span>
+        <span data-page-node-id="OLH3Ay4ZKCmvNX3AAPUBo7"><span class="swatch sw-sub" data-page-node-id="LNzkStDhAXCRhEo9BIYM2O"></span>营销部子项底色</span>
+        <span data-page-node-id="fU4KBnPHXUCZ54M6KbAm9R"><span class="swatch sw-orange" data-page-node-id="kgwTH6D1hUMsGFpi7kVJeb"></span>合计行（橙）</span>
+        <span data-page-node-id="v6jWv6pT2xwlPU8fCuC0ka">月目标单位为「万元」，月累计与当日为「元」</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 门店业绩（高新 / 北郊） -->
+  <div class="panel" data-page-node-id="OVse82M5l7LtcAUhXdi0BL">
+    <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:8px;" data-page-node-id="QvM8CY93FEiQDeGVxOZXho">
+      <h2 style="margin:0;" data-page-node-id="L5ppgzmYuo1HX6A7OF8XX2">④ 门店业绩（高新店 / 经开店）</h2>
+      <div class="row" data-page-node-id="SYuuyJpja5mJT090Zc0HBh">
+        <button class="btn" id="export-store-xlsx" data-page-node-id="CDGlLm1AjIC85L8HAOOJ3Y">📥 导出Excel</button>
+        <button class="btn btn-orange" id="export-store-png" data-page-node-id="jykPANrYTPpVQ3mwLuSa3u">🖼 导出图片</button>
+      </div>
+    </div>
+    <div class="stage" id="store-stage" data-page-node-id="CvXlsvPt0uVFsqPmaazx6p">
+      <table class="report" id="store-table" data-page-node-id="eHd61NlvhTFSplGSpiLGwt">
+        <thead data-page-node-id="YQ9DzlNlyXpIxVTxrcGYEw">
+          <tr data-page-node-id="hQBySEDAGnmTbeOP3Evgnv">
+            <th colspan="6" class="title-cell" data-page-node-id="VW4A5JtGvdyy1preaFwzH6">门店业绩完成情况（高新 / 北郊，截止--）</th>
+          </tr>
+          <tr data-page-node-id="krC0PBLQWqj81OpFyYpXr4">
+            <th class="sub-head" data-page-node-id="Hq8ZMAvhLAlW0OSy5EClZx">门店类别</th>
+            <th class="sub-head" data-page-node-id="9fLe2sGBLbWM5YpRUheuiH">月累计<br data-page-node-id="HiTQekxwXnspe4pv9lFUgu">(单位：元)</th>
+            <th class="sub-head" id="store-expand" style="width:36px;cursor:pointer;" title="展开所有日期列" data-page-node-id="RO7mI7PcxxcI5l78cGX4rZ">+展开</th>
+          </tr>
+        </thead>
+        <tbody id="store-body" data-page-node-id="RG9u5tPu0HNzwU3HbG59Eq"></tbody>
+      </table>
+      <div class="legend" data-page-node-id="2w0QudfVoEY6rk45u0itSt">
+        <span data-page-node-id="kRI29MZRMGT6TBrk2E7AVd">高新店 = 收款员工为「南媛」；经开店 = 收款员工≠「南媛」</span>
+        <span data-page-node-id="zi421g4ss1rByDtto0P9qA">月累计为「元」</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 导入数据明细（全部导入订单，扁平展示） -->
+  <div class="panel" data-page-node-id="impDtlPanel">
+    <details open data-page-node-id="impDtl">
+      <summary data-page-node-id="impDtlSum">⑥ 导入数据明细（全部导入订单，含 VAB 命中标记）</summary>
+      <div id="import-details" style="margin-top:10px;" data-page-node-id="impDtlBody"></div>
+    </details>
+  </div>
+
+</div>
+
+<div class="toast" id="toast" data-page-node-id="cCI9nBoKLJBdwH301glleG"></div>
+
+<script src="assets/app.js?v=20260917-01"></script></body>
+</html>

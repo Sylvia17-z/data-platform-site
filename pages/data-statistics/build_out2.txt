@@ -1,0 +1,8 @@
+[OK] app.js 语法检查通过
+[OK] index.html：源 CSS 覆盖全部 41 个类
+[OK] mobile.html：源 CSS 覆盖全部 41 个类
+[PASS] index.html   1140464 字节  script=4/4  style=1
+[PASS] mobile.html  1136706 字节  script=4/4  style=1
+
+完成：已内联并校验通过
+BUILD_EXIT=0

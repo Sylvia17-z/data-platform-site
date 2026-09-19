@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>数据统计平台</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="app">
+    <!-- 侧边栏 -->
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-mark">◈</span>
+        <span class="brand-name">数据统计平台</span>
+      </div>
+      <nav id="nav" class="nav"></nav>
+      <button class="sidebar-toggle" id="sidebar-toggle" title="收起 / 展开侧边栏">«</button>
+    </aside>
+
+    <!-- 主区 -->
+    <main class="main">
+      <header class="topbar">
+        <button class="hamburger" id="hamburger" aria-label="菜单">☰</button>
+        <div class="crumb" id="crumb">数据统计平台</div>
+        <div class="top-actions">
+          <span class="clock" id="clock"></span>
+        </div>
+      </header>
+      <div class="tabbar" id="tabbar"></div>
+      <section class="content" id="content">
+        <div class="loading">从左侧选择一个功能模块开始（可同时打开多个）</div>
+      </section>
+    </main>
+    <div class="overlay" id="overlay"></div>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>月度分析面板</title>
+<style>
+  :root{
+    /* 藏蓝主题色板（与数据统计平台统一） */
+    --navy:#01418B;
+    --navy-900:#003366;
+    --navy-700:#0a4ea3;
+    --navy-100:#d6e0f0;
+    --navy-50:#f3f6fb;
+    --light-blue:#D7EFF9;
+    --ink:#0f172a;
+    --ink-soft:#5b6472;
+    --line:#000000;
+    --font:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei","Hiragino Sans GB",Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;font-family:var(--font);color:var(--ink);
+    background:var(--navy-50);font-size:14px;line-height:1.5;
+  }
+  .wrap{max-width:1240px;margin:0 auto;padding:18px 20px 40px;}
+  .topbar{
+    display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;
+    padding-bottom:14px;margin-bottom:16px;border-bottom:2px solid var(--navy);
+  }
+  .topbar h1{font-size:20px;margin:0;color:var(--navy-900);letter-spacing:.5px;}
+  .topbar .sub{color:var(--ink-soft);font-size:12.5px;}
+
+  /* 导入区 */
+  .import-card{
+    background:#fff;border:1px solid var(--navy-100);border-radius:10px;
+    padding:16px 18px;margin-bottom:18px;
+  }
+  .drop{
+    border:2px dashed var(--navy-100);border-radius:10px;background:var(--navy-50);
+    padding:22px;text-align:center;cursor:pointer;transition:.15s;
+  }
+  .drop:hover,.drop.drag{border-color:var(--navy-700);background:var(--light-blue);}
+  .drop b{color:var(--navy);}
+  .drop .hint{color:var(--ink-soft);font-size:12px;margin-top:6px;}
+  .schema{margin-top:10px;font-size:12px;color:var(--ink-soft);}
+  .schema code{background:var(--navy-50);padding:1px 6px;border-radius:4px;color:var(--navy-900);}
+  #file{display:none;}
+  .status{margin-top:10px;font-size:12.5px;min-height:18px;}
+  .status.ok{color:#0a7d3b;}
+  .status.err{color:#c0392b;}
+
+  /* KPI */
+  .kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(165px,1fr));gap:12px;margin-bottom:18px;}
+  .kpi{background:#fff;border:1px solid var(--navy-100);border-left:4px solid var(--navy);border-radius:8px;padding:12px 14px;}
+  .kpi .label{font-size:12px;color:var(--ink-soft);}
+  .kpi .val{font-size:20px;font-weight:700;color:var(--navy-900);margin-top:4px;font-variant-numeric:tabular-nums;}
+  .kpi .val small{font-size:12px;font-weight:500;color:var(--ink-soft);}
+
+  /* 图表 */
+  .charts{display:grid;grid-template-columns:repeat(2,1fr);gap:16px;margin-bottom:18px;}
+  .card{background:#fff;border:1px solid var(--navy-100);border-radius:10px;padding:14px 16px;}
+  .card h3{margin:0 0 10px;font-size:14px;color:var(--navy-900);}
+  .card h3 .bar{display:inline-block;width:4px;height:14px;background:var(--navy);border-radius:2px;margin-right:8px;vertical-align:-2px;}
+  svg{width:100%;height:auto;display:block;}
+  .legend{font-size:11.5px;color:var(--ink-soft);margin-top:6px;}
+
+  /* 表 */
+  .table-card{background:#fff;border:1px solid var(--navy-100);border-radius:10px;padding:14px 16px;overflow:auto;}
+  table{border-collapse:collapse;width:100%;font-size:12.5px;font-variant-numeric:tabular-nums;}
+  th,td{border:1px solid var(--line);padding:5px 8px;text-align:right;white-space:nowrap;}
+  th{background:var(--navy);color:#fff;position:sticky;top:0;}
+  td.lbl,th.lbl{text-align:left;background:var(--navy-50);color:var(--navy-900);font-weight:600;}
+  tbody tr:nth-child(even) td{background:var(--navy-50);}
+  .empty{color:var(--ink-soft);text-align:center;padding:30px 0;}
+  @media(max-width:720px){ .charts{grid-template-columns:1fr;} }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="topbar">
+    <h1>月度分析面板</h1>
+    <span class="sub">导入「订单项目收退款表-明细」类 Excel，按月聚合业绩 / 渠道 / 科室 / 到访维度</span>
+  </div>
+
+  <div class="import-card">
+    <div class="drop" id="drop">
+      <div><b>点击或拖拽</b> 选择 Excel 文件（.xlsx）</div>
+      <div class="hint">支持「订单项目收退款表-明细」同结构文件；数据仅在本机浏览器解析，不上传。</div>
+    </div>
+    <input type="file" id="file" accept=".xlsx,.xls" />
+    <div class="schema">期望字段（按关键字自动匹配）：<code>收款时间</code> <code>收款金额-现款支付</code> <code>收款金额-合计</code> <code>实际收款合计</code> <code>充值金额</code> <code>客户来源一级渠道</code> <code>开单科室</code> <code>开单咨询师</code> <code>到访类型</code> <code>会员号</code> <code>收款单号</code></div>
+    <div class="status" id="status"></div>
+  </div>
+
+  <div id="dashboard" style="display:none">
+    <div class="kpi-grid" id="kpi"></div>
+    <div class="charts">
+      <div class="card"><h3><span class="bar"></span>月度收款趋势（现款支付）</h3><div id="chartTrend"></div></div>
+      <div class="card"><h3><span class="bar"></span>一级渠道分布（现款支付）</h3><div id="chartCh"></div><div class="legend">按收款金额-现款支付汇总，取 Top10</div></div>
+      <div class="card"><h3><span class="bar"></span>开单科室分布（现款支付）</h3><div id="chartDept"></div><div class="legend">按收款金额-现款支付汇总，取 Top10</div></div>
+      <div class="card"><h3><span class="bar"></span>到访类型分布（笔数）</h3><div id="chartVisit"></div></div>
+    </div>
+    <div class="table-card">
+      <h3 style="margin:0 0 10px;color:var(--navy-900);font-size:14px;"><span style="display:inline-block;width:4px;height:14px;background:var(--navy);border-radius:2px;margin-right:8px;vertical-align:-2px;"></span>月度 × 一级渠道 现款支付明细</h3>
+      <div id="table"></div>
+    </div>
+  </div>
+
+  <div id="placeholder" class="empty">尚未导入数据 —— 请先选择 Excel 文件。</div>
+</div>
+
+<script src="./vendor/xlsx.full.min.js"></script>
+<script>
+(function(){
+  'use strict';
+  var drop=document.getElementById('drop'), file=document.getElementById('file'), status=document.getElementById('status');
+  drop.addEventListener('click',function(){file.click();});
+  file.addEventListener('change',function(e){ if(e.target.files[0]) loadFile(e.target.files[0]); });
+  ['dragover','dragenter'].forEach(function(ev){drop.addEventListener(ev,function(e){e.preventDefault();drop.classList.add('drag');});});
+  ['dragleave','drop'].forEach(function(ev){drop.addEventListener(ev,function(e){e.preventDefault();drop.classList.remove('drag');});});
+  drop.addEventListener('drop',function(e){ var f=e.dataTransfer&&e.dataTransfer.files[0]; if(f) loadFile(f); });
+
+  function setStatus(msg,type){ status.textContent=msg; status.className='status'+(type?(' '+type):''); }
+
+  var COLS={ date:'收款时间', cash:'收款金额-现款支付', total:'收款金额-合计', actual:'实际收款合计',
+    recharge:'充值金额', ch1:'客户来源一级渠道', ch2:'客户来源二级渠道', dept:'开单科室',
+    consultant:'开单咨询师', dev:'客户开发人', visit:'到访类型', member:'会员号', receipt:'收款单号' };
+
+  function resolveHeaders(headers){
+    var map={};
+    Object.keys(COLS).forEach(function(k){
+      var kw=COLS[k];
+      var idx=headers.findIndex(function(h){ return h && String(h).indexOf(kw)>=0; });
+      if(idx>=0) map[k]=headers[idx]; // 存表头名（sheet_to_json 的每行对象以表头名为键）
+    });
+    return map;
+  }
+  function num(v){ if(v===null||v===undefined||v==='') return 0; var n=parseFloat(String(v).replace(/,/g,'')); return isNaN(n)?0:n; }
+  function monthKey(s){
+    if(s==null||s==='') return null;
+    var d=new Date(String(s).replace(/\.\d+$/,''));
+    if(isNaN(d.getTime())){
+      var m=String(s).match(/(\d{4})[-/年](\d{1,2})/); if(m) return m[1]+'-'+('0'+m[2]).slice(-2);
+      return null;
+    }
+    return d.getFullYear()+'-'+('0'+(d.getMonth()+1)).slice(-2);
+  }
+  function fmt(n){ return n.toLocaleString('zh-CN',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+  function fmtInt(n){ return n.toLocaleString('zh-CN'); }
+
+  function loadFile(f){
+    setStatus('正在解析 '+f.name+' …');
+    var reader=new FileReader();
+    reader.onload=function(e){
+      try{
+        var wb=XLSX.read(new Uint8Array(e.target.result),{type:'array'});
+        var ws=wb.SheetNames.length?wb.Sheets[wb.SheetNames[0]]:null;
+        if(!ws){ setStatus('文件中没有可读取的工作表。','err'); return; }
+        var rows=XLSX.utils.sheet_to_json(ws,{defval:''});
+        if(!rows.length){ setStatus('工作表为空，请检查数据。','err'); return; }
+        var headers=Object.keys(rows[0]);
+        var map=resolveHeaders(headers);
+        if(map.date==null||map.cash==null){ setStatus('未匹配到关键列（收款时间 / 收款金额-现款支付），请确认文件结构。','err'); return; }
+        render(rows,map,f.name);
+        setStatus('已导入 '+rows.length+' 行，覆盖月份：'+ (window.__months||[]).join('、'),'ok');
+      }catch(err){ setStatus('解析失败：'+err.message,'err'); }
+    };
+    reader.readAsArrayBuffer(f);
+  }
+
+  function render(rows,map){
+    var byMonth={}, byCh={}, byDept={}, byVisit={}, custSet=new Set(), recvSet=new Set();
+    var sumCash=0,sumTotal=0,sumActual=0,sumRecharge=0;
+    var chSet=new Set();
+    rows.forEach(function(r){
+      var cash=num(r[map.cash]); sumCash+=cash;
+      if(map.total!=null) sumTotal+=num(r[map.total]);
+      if(map.actual!=null) sumActual+=num(r[map.actual]);
+      if(map.recharge!=null) sumRecharge+=num(r[map.recharge]);
+      var mk=monthKey(r[map.date]); if(!mk) return;
+      byMonth[mk]=byMonth[mk]||{cash:0}; byMonth[mk].cash+=cash;
+      if(map.ch1!=null){ var c=String(r[map.ch1]||'未归类'); byCh[c]=(byCh[c]||0)+cash; chSet.add(c); }
+      if(map.dept!=null){ var d=String(r[map.dept]||'未归类'); byDept[d]=(byDept[d]||0)+cash; }
+      if(map.visit!=null){ var v=String(r[map.visit]||'未归类'); byVisit[v]=(byVisit[v]||0)+1; }
+      if(map.member!=null){ var m=String(r[map.member]).trim(); if(m && m!=='公司所有' && m!=='无' && m!=='未归类') custSet.add(m); }
+      if(map.receipt!=null){ var rc=String(r[map.receipt]||'').trim(); if(rc) recvSet.add(rc); }
+    });
+
+    var months=Object.keys(byMonth).sort();
+    window.__months=months;
+    document.getElementById('placeholder').style.display='none';
+    document.getElementById('dashboard').style.display='block';
+
+    // KPI
+    var rowsCount=rows.length;
+    var kpis=[
+      {label:'总现款收款',val:fmt(sumCash),unit:'元'},
+      {label:'总合计收款',val:fmt(sumTotal),unit:'元'},
+      {label:'总实际收款',val:fmt(sumActual),unit:'元'},
+      {label:'总充值金额',val:fmt(sumRecharge),unit:'元'},
+      {label:'收款笔数',val:fmtInt(recvSet.size||rowsCount),unit:'笔'},
+      {label:'客户数(去重)',val:fmtInt(custSet.size),unit:'人'},
+      {label:'覆盖月份',val:String(months.length),unit:'个'}
+    ];
+    document.getElementById('kpi').innerHTML=kpis.map(function(k){
+      return '<div class="kpi"><div class="label">'+k.label+'</div><div class="val">'+k.val+' <small>'+k.unit+'</small></div></div>';
+    }).join('');
+
+    // 趋势（竖向柱）
+    drawTrend('chartTrend', months.map(function(m){return {label:m.slice(5)+'月',value:byMonth[m].cash};}));
+    // 一级渠道 Top10
+    var chTop=Object.keys(byCh).map(function(k){return {label:k,value:byCh[k]};}).sort(function(a,b){return b.value-a.value;}).slice(0,10);
+    drawBars('chartCh', chTop);
+    // 科室 Top10
+    var deptTop=Object.keys(byDept).map(function(k){return {label:k,value:byDept[k]};}).sort(function(a,b){return b.value-a.value;}).slice(0,10);
+    drawBars('chartDept', deptTop);
+    // 到访类型
+    var visitArr=Object.keys(byVisit).map(function(k){return {label:k,value:byVisit[k]};}).sort(function(a,b){return b.value-a.value;});
+    drawBars('chartVisit', visitArr);
+
+    // 表：月份 × 一级渠道
+    drawMatrix(months, byMonth, byCh, map?null:null, rows, map);
+  }
+
+  function maxVal(arr){ return arr.reduce(function(m,x){return Math.max(m,x.value);},0)||1; }
+
+  function drawTrend(id,data){
+    var W=520,H=200,padL=10,padB=24,padT=10,padR=10;
+    var n=data.length||1, bw=Math.max(18,(W-padL-padR)/n*0.6), gap=(W-padL-padR)/n;
+    var mx=maxVal(data), svg='';
+    data.forEach(function(d,i){
+      var h=mx? (d.value/mx)*(H-padB-padT):0;
+      var x=padL+gap*i+(gap-bw)/2, y=H-padB-h;
+      svg+='<rect x="'+x.toFixed(1)+'" y="'+y.toFixed(1)+'" width="'+bw.toFixed(1)+'" height="'+h.toFixed(1)+'" fill="#01418B" rx="2"></rect>';
+      svg+='<text x="'+(x+bw/2).toFixed(1)+'" y="'+(y-4).toFixed(1)+'" font-size="10" fill="#003366" text-anchor="middle">'+shortNum(d.value)+'</text>';
+      svg+='<text x="'+(x+bw/2).toFixed(1)+'" y="'+(H-8)+'" font-size="10.5" fill="#5b6472" text-anchor="middle">'+d.label+'</text>';
+    });
+    document.getElementById(id).innerHTML='<svg viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="xMidYMid meet">'+svg+'</svg>';
+  }
+
+  function drawBars(id,data){
+    var rowH=22,gap=4,W=520,padL=92,padR=58;
+    var H=data.length*(rowH+gap)+8, mx=maxVal(data), svg='';
+    data.forEach(function(d,i){
+      var y=8+i*(rowH+gap);
+      var w=mx? (d.value/mx)*(W-padL-padR):0;
+      var label=d.label.length>7?d.label.slice(0,7)+'…':d.label;
+      svg+='<text x="'+(padL-6)+'" y="'+(y+rowH/2+4)+'" font-size="11.5" fill="#0f172a" text-anchor="end">'+escapeHtml(label)+'</text>';
+      svg+='<rect x="'+padL+'" y="'+y+'" width="'+Math.max(1,w).toFixed(1)+'" height="'+rowH+'" fill="#0a4ea3" rx="3"></rect>';
+      svg+='<text x="'+(padL+Math.max(1,w)+6)+'" y="'+(y+rowH/2+4)+'" font-size="10.5" fill="#5b6472">'+shortNum(d.value)+'</text>';
+    });
+    document.getElementById(id).innerHTML='<svg viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="xMidYMid meet">'+svg+'</svg>';
+  }
+
+  function drawMatrix(months,byMonth,byCh,_,rows,map){
+    // 计算月份 × 渠道 现款支付
+    var cell={}; var chans=Object.keys(byCh).sort(function(a,b){return byCh[b]-byCh[a];}).slice(0,6);
+    rows.forEach(function(r){
+      var mk=monthKey(r[map.date]); if(!mk) return;
+      var c=(map.ch1!=null)?String(r[map.ch1]||'未归类'):'未归类';
+      if(chans.indexOf(c)<0) c='其他';
+      if(c==='其他'){ if(!chans.includes('其他')) chans.push('其他'); }
+      cell[mk]=cell[mk]||{}; cell[mk][c]=(cell[mk][c]||0)+num(r[map.cash]);
+    });
+    if(chans.indexOf('其他')>=0){ /* 保持 */ }
+    var head='<tr><th class="lbl">月份＼渠道</th>'+chans.map(function(c){return '<th>'+escapeHtml(c)+'</th>';}).join('')+'<th>合计</th></tr>';
+    var body=months.map(function(m){
+      var sum=0, tds=chans.map(function(c){ var v=cell[m]&&cell[m][c]?cell[m][c]:0; sum+=v; return '<td>'+fmt(v)+'</td>'; }).join('');
+      return '<tr><td class="lbl">'+m+'</td>'+tds+'<td><b>'+fmt(sum)+'</b></td></tr>';
+    }).join('');
+    document.getElementById('table').innerHTML='<table>'+head+body+'</table>';
+  }
+
+  function shortNum(n){ if(Math.abs(n)>=10000) return (n/10000).toFixed(1)+'万'; if(Math.abs(n)>=1000) return (n/1000).toFixed(1)+'k'; return fmt(n); }
+  function escapeHtml(s){ return String(s).replace(/[&<>]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;'}[c];}); }
+})();
+</script>
+</body>
+</html>
