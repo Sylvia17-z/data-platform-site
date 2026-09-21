@@ -100,6 +100,27 @@
 
   .empty{padding:30px;text-align:center;color:var(--ink-soft);}
   .foot-note{color:var(--ink-soft);font-size:12px;margin-top:8px;}
+
+  /* VAB 行内操作按钮 */
+  table.tbl td.vab-ops{white-space:nowrap;}
+  .op{font-family:var(--font);font-size:12px;border:1px solid var(--navy-100);background:#fff;color:var(--navy);
+    border-radius:6px;padding:3px 9px;margin-right:4px;cursor:pointer;}
+  .op:hover{background:var(--navy-50);}
+  .op.danger{color:var(--no);border-color:#f3c0bb;}
+  .op.danger:hover{background:var(--no-bg);}
+  /* VAB 弹窗 */
+  .modal-mask{position:fixed;inset:0;background:rgba(15,23,42,.45);display:none;align-items:center;justify-content:center;z-index:50;}
+  .modal{background:#fff;border-radius:12px;width:min(460px,92vw);max-height:88vh;overflow:auto;box-shadow:0 12px 40px rgba(0,0,0,.25);}
+  .modal-head{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--navy-100);}
+  .modal-head span{font-size:15px;font-weight:600;color:var(--navy-900);}
+  .modal-x{border:none;background:none;font-size:22px;line-height:1;color:var(--ink-soft);cursor:pointer;padding:0 4px;}
+  .modal-x:hover{color:var(--no);}
+  .modal-body{padding:14px 16px;display:flex;flex-direction:column;gap:10px;}
+  .modal-foot{padding:12px 16px;border-top:1px solid var(--navy-100);display:flex;justify-content:flex-end;gap:8px;}
+  .mf{display:flex;flex-direction:column;gap:4px;}
+  .mf label{font-size:12.5px;color:var(--ink-soft);}
+  .mf input,.mf select{font-family:var(--font);font-size:13.5px;border:1px solid var(--navy-100);border-radius:7px;padding:7px 9px;color:var(--ink);background:#fff;}
+  .mf .mv{font-size:14px;color:var(--ink);padding:4px 2px;word-break:break-all;}
 </style>
 </head>
 <body>
@@ -117,11 +138,21 @@
       </div>
       <div class="toolbar">
         <div class="grp">
-          <label class="fbtn">导入 VAB 会员清单
+          <label class="fbtn">批量导入
             <input type="file" id="fileVab" accept=".xlsx,.xls" />
           </label>
+          <button type="button" class="btn" id="vabAdd">＋ 新增</button>
+          <button type="button" class="btn" id="vabExport">批量导出</button>
+          <button type="button" class="btn" id="vabTemplate">下载导入模板</button>
         </div>
-        <span class="hint" id="vabHint">尚未导入清单</span>
+        <div class="grp">
+          <span style="font-size:12.5px;color:var(--ink-soft);">导入方式：</span>
+          <select id="vabImportMode">
+            <option value="replace">覆盖导入</option>
+            <option value="append">追加导入</option>
+          </select>
+        </div>
+        <span class="hint" id="vabHint">尚未导入清单（可下载模板后批量导入，或直接「新增」）</span>
       </div>
       <div class="stats" id="vabStats" style="display:none;">
         <div class="stat"><div class="v" id="vabTotal">0</div><div class="k">清单人数</div></div>
@@ -207,6 +238,18 @@
       <div class="empty" id="chargeEmpty">请导入「收费明细」Excel 以生成报表。</div>
       <div class="foot-note" id="chargeNote"></div>
     </section>
+
+    <!-- ============ VAB 会员 增/改/查 弹窗 ============ -->
+    <div class="modal-mask" id="vabModal" style="display:none;">
+      <div class="modal">
+        <div class="modal-head">
+          <span id="vabModalTitle">VAB 会员</span>
+          <button type="button" class="modal-x" id="vabModalClose" aria-label="关闭">×</button>
+        </div>
+        <div class="modal-body" id="vabModalBody"></div>
+        <div class="modal-foot" id="vabModalFoot"></div>
+      </div>
+    </div>
   </div>
 
   <script src="assets/vendor/xlsx.full.min.js"></script>
@@ -295,17 +338,14 @@
     });
   }
 
-  /* ---------- VAB 清单加载 ---------- */
-  function loadVab(rows){
-    App.vab = rows.map(r=>({
-      户主: String(pick(r,['户主'])).trim(),
-      客户姓名: String(pick(r,['客户姓名'])).trim(),
-      会员号: normNum(pick(r,['会员号'])),
-      客户等级: String(pick(r,['客户等级'])).trim(),
-      健康管家: String(pick(r,['健康管家'])).trim(),
-      主诊医生: String(pick(r,['主诊医生'])).trim(),
-      是否参与考核: String(pick(r,['是否参与考核'])).trim(),
-    }));
+  /* ---------- VAB 序号 / 持久化 ---------- */
+  let _vabSeq = 0;
+  const VAB_LS_KEY = 'med_vab_list';
+  function newVabId(){ return 'v'+(++_vabSeq); }
+  function seedVabSeq(){
+    _vabSeq = App.vab.reduce((m,r)=>Math.max(m, parseInt(String(r._id||'v0').replace(/\D/g,''))||0), 0);
+  }
+  function rebuildVabIndex(){
     App.vabByNum = new Map();
     App.vabByNameExact = new Map();
     App.vabByNameNorm = new Map();
@@ -318,11 +358,55 @@
       }
     });
     App.vabLoaded = App.vab.length>0;
+  }
+  function persistVab(){
+    try{ localStorage.setItem(VAB_LS_KEY, JSON.stringify(App.vab)); }catch(e){}
+  }
+  // 页面加载时从本地缓存恢复（实现「直接展示在页面上 / 免重复导入」）
+  function loadVabFromStorage(){
+    try{
+      const raw = localStorage.getItem(VAB_LS_KEY);
+      if(raw){
+        const arr = JSON.parse(raw);
+        if(Array.isArray(arr) && arr.length){
+          App.vab = arr.map(r=>{ if(!r._id) r._id = newVabId(); return r; });
+          seedVabSeq();
+          rebuildVabIndex();
+          renderVab();
+        }
+      }
+    }catch(e){}
+  }
+
+  /* ---------- VAB 清单加载（批量导入，支持覆盖/追加） ---------- */
+  function loadVab(rows, appendOverride){
+    if(!Array.isArray(rows) || !rows.length) return;
+    const sel = document.getElementById('vabImportMode');
+    const append = (typeof appendOverride==='boolean')
+      ? appendOverride
+      : !!(sel && sel.value==='append');
+    seedVabSeq();
+    const mapped = rows.map(r=>({
+      _id: newVabId(),
+      户主: String(pick(r,['户主'])).trim(),
+      客户姓名: String(pick(r,['客户姓名'])).trim(),
+      会员号: normNum(pick(r,['会员号'])),
+      客户等级: String(pick(r,['客户等级'])).trim(),
+      健康管家: String(pick(r,['健康管家'])).trim(),
+      主诊医生: String(pick(r,['主诊医生'])).trim(),
+      是否参与考核: String(pick(r,['是否参与考核'])).trim(),
+    }));
+    App.vab = append ? App.vab.concat(mapped) : mapped;
+    rebuildVabIndex();
+    persistVab();
     renderVab();
     // VAB 重新导入后，若业务表已存在则重渲染
     if(App.lastOrder) renderBusiness('order', App.lastOrder);
     if(App.lastCharge) renderBusiness('charge', App.lastCharge);
+    const hint = document.getElementById('vabHint');
+    if(hint) hint.textContent = '已导入 '+App.vab.length+' 人（含页面编辑/新增，已本地缓存）';
   }
+  function loadVabReplace(rows){ loadVab(rows, false); }
 
   function findVabByNum(num){
     if(!num) return null;
@@ -341,15 +425,21 @@
     const cols = COLS.vab;
     const thead = document.querySelector('#vabTable thead');
     const tbody = document.querySelector('#vabTable tbody');
-    thead.innerHTML = '<tr>'+cols.map(c=>'<th>'+esc(c.t)+'</th>').join('')+'</tr>';
+    thead.innerHTML = '<tr>'+cols.map(c=>'<th>'+esc(c.t)+'</th>').join('')+'<th>操作</th></tr>';
     const rows = App.vab.slice(0, RENDER_CAP);
-    tbody.innerHTML = rows.map(r=>'<tr>'+cols.map(c=>'<td>'+esc(r[c.k])+'</td>').join('')+'</tr>').join('');
+    tbody.innerHTML = rows.map(r=>'<tr>'+cols.map(c=>'<td>'+esc(r[c.k])+'</td>').join('')
+      + '<td class="vab-ops">'
+      + '<button type="button" class="op" data-act="view" data-id="'+esc(r._id)+'">查看</button>'
+      + '<button type="button" class="op" data-act="edit" data-id="'+esc(r._id)+'">编辑</button>'
+      + '<button type="button" class="op danger" data-act="del" data-id="'+esc(r._id)+'">删除</button>'
+      + '</td></tr>').join('');
     document.getElementById('vabTotal').textContent = App.vab.length;
     document.getElementById('vabStats').style.display = App.vab.length? 'flex':'none';
     document.getElementById('vabEmpty').style.display = App.vab.length? 'none':'block';
-    document.getElementById('vabHint').textContent = App.vab.length
-      ? ('已导入 '+App.vab.length+' 人（收退款/收费明细匹配基准已就绪）')
-      : '尚未导入清单';
+    const hint = document.getElementById('vabHint');
+    if(hint) hint.textContent = App.vab.length
+      ? ('已导入 '+App.vab.length+' 人（含页面编辑/新增，已本地缓存）')
+      : '尚未导入清单（可下载模板后批量导入，或直接「新增」）';
   }
 
   /* ---------- 渲染：业务明细（order / charge） ---------- */
@@ -477,9 +567,90 @@
     if(e.data && e.data.type==='app:setMod') setMod(e.data.mod);
   });
   (function initMod(){
+    loadVabFromStorage();
     const p = new URLSearchParams(location.search).get('mod');
     setMod(p || 'vab');
   })();
+
+  /* ---------- VAB 会员：增 / 改 / 删 / 查看 / 模板 / 导出 ---------- */
+  const VAB_FIELDS = [
+    {k:'户主',t:'户主'},{k:'客户姓名',t:'客户姓名'},{k:'会员号',t:'会员号(唯一标识)'},
+    {k:'客户等级',t:'客户等级'},{k:'健康管家',t:'健康管家'},{k:'主诊医生',t:'主诊医生'},
+    {k:'是否参与考核',t:'是否参与考核'},
+  ];
+  function openVabModal(id, mode){
+    const isView = mode==='view';
+    const row = id ? App.vab.find(r=>r._id===id) : null;
+    const body = document.getElementById('vabModalBody');
+    body.innerHTML = VAB_FIELDS.map(f=>{
+      const val = row ? (row[f.k]||'') : '';
+      if(isView){
+        return '<div class="mf"><label>'+esc(f.t)+'</label><div class="mv">'+esc(val||'—')+'</div></div>';
+      }
+      if(f.k==='是否参与考核'){
+        return '<div class="mf"><label>'+esc(f.t)+'</label><select data-k="'+f.k+'">'
+          + '<option value="是"'+(val==='是'?' selected':'')+'>是</option>'
+          + '<option value="否"'+(val==='否'?' selected':'')+'>否</option></select></div>';
+      }
+      return '<div class="mf"><label>'+esc(f.t)+'</label><input data-k="'+f.k+'" value="'+esc(val)+'" /></div>';
+    }).join('');
+    document.getElementById('vabModalTitle').textContent = (row? (isView?'查看':'编辑') : '新增') + ' VAB 会员';
+    const foot = document.getElementById('vabModalFoot');
+    foot.innerHTML = isView ? '' : '<button type="button" class="btn" id="vabSaveBtn">保存</button>';
+    document.getElementById('vabModal').style.display = 'flex';
+    if(!isView){
+      document.getElementById('vabSaveBtn').addEventListener('click', ()=>saveVabModal(id));
+    }
+  }
+  function saveVabModal(id){
+    const body = document.getElementById('vabModalBody');
+    const data = {};
+    body.querySelectorAll('[data-k]').forEach(el=>{ data[el.getAttribute('data-k')] = (el.value||'').trim(); });
+    if(id){
+      const row = App.vab.find(r=>r._id===id);
+      if(row) Object.assign(row, data);
+    } else {
+      data._id = newVabId();
+      App.vab.push(data);
+    }
+    rebuildVabIndex();
+    persistVab();
+    renderVab();
+    if(App.lastOrder) renderBusiness('order', App.lastOrder);
+    if(App.lastCharge) renderBusiness('charge', App.lastCharge);
+    closeVabModal();
+  }
+  function closeVabModal(){
+    const m = document.getElementById('vabModal');
+    if(m) m.style.display = 'none';
+  }
+  function deleteVab(id){
+    const row = App.vab.find(r=>r._id===id);
+    const name = row ? (row.客户姓名 || row.会员号 || '该会员') : '该会员';
+    if(!confirm('确认删除「'+name+'」？删除后不可恢复。')) return;
+    App.vab = App.vab.filter(r=>r._id!==id);
+    rebuildVabIndex();
+    persistVab();
+    renderVab();
+    if(App.lastOrder) renderBusiness('order', App.lastOrder);
+    if(App.lastCharge) renderBusiness('charge', App.lastCharge);
+  }
+  function downloadVabTemplate(){
+    const aoa = [COLS.vab.map(c=>c.t)];
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'VAB模板');
+    XLSX.writeFile(wb, 'VAB会员清单_导入模板.xlsx');
+  }
+  function exportVab(){
+    if(!App.vab.length){ alert('当前无 VAB 会员数据，无法导出。'); return; }
+    const aoa = [COLS.vab.map(c=>c.t)];
+    App.vab.forEach(r=> aoa.push(COLS.vab.map(c=> (r[c.k]!=null? r[c.k] : ''))));
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'VAB会员');
+    XLSX.writeFile(wb, 'VAB会员清单_'+Date.now()+'.xlsx');
+  }
 
   /* ---------- 事件绑定 ---------- */
   function bindFile(id, handler){
@@ -498,8 +669,8 @@
     });
   }
   bindFile('fileVab', loadVab);
-  bindFile('fileOrderVab', loadVab);
-  bindFile('fileChargeVab', loadVab);
+  bindFile('fileOrderVab', loadVabReplace);
+  bindFile('fileChargeVab', loadVabReplace);
   bindFile('fileOrder', parseOrder);
   bindFile('fileCharge', parseCharge);
 
@@ -507,6 +678,22 @@
   document.getElementById('chargeFilter').addEventListener('change', ()=>{ if(App.lastCharge) renderBusiness('charge', App.lastCharge); });
   document.getElementById('orderExport').addEventListener('click', ()=>exportCsv('order'));
   document.getElementById('chargeExport').addEventListener('click', ()=>exportCsv('charge'));
+
+  /* VAB 清单：行内操作 / 弹窗 / 模板 / 导出 / 新增 */
+  document.querySelector('#vabTable tbody').addEventListener('click', (e)=>{
+    const btn = e.target.closest ? e.target.closest('button[data-act]') : null;
+    if(!btn) return;
+    const id = btn.getAttribute('data-id');
+    const act = btn.getAttribute('data-act');
+    if(act==='view') openVabModal(id,'view');
+    else if(act==='edit') openVabModal(id,'edit');
+    else if(act==='del') deleteVab(id);
+  });
+  document.getElementById('vabModalClose').addEventListener('click', closeVabModal);
+  document.getElementById('vabModal').addEventListener('click', (e)=>{ if(e.target.id==='vabModal') closeVabModal(); });
+  document.getElementById('vabExport').addEventListener('click', exportVab);
+  document.getElementById('vabTemplate').addEventListener('click', downloadVabTemplate);
+  document.getElementById('vabAdd').addEventListener('click', ()=>openVabModal(null,'edit'));
   </script>
 </body>
 </html>
