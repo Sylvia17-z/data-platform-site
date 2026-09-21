@@ -1477,6 +1477,86 @@ function filterOrdersByTab(key){
   return list;
 }
 
+// 导入明细分页状态
+let detailPage = 1;
+let detailPageSize = 20;
+
+// 是否手机端视图（与 index.html 的 @media (max-width:640px) 断点保持一致）
+function isMobileView(){
+  try { return !!(window.matchMedia && window.matchMedia('(max-width: 640px)').matches); }
+  catch(e){ return false; }
+}
+
+// 桌面端表格行（含分页起始偏移，# 列显示全局行号）
+function detailRowCells(r, i, start){
+  const vab = isVabMember(r.memberNo);
+  return `<tr data-uid="${esc(r._uid)}">
+    <td style="text-align:center;color:var(--c-muted);">${start+i+1}</td>
+    <td>${esc(r.name)}</td>
+    <td>${esc(r.memberNo)}</td>
+    <td>${esc(r.channelClass)}</td>
+    <td>${esc(r.channelL1)}</td>
+    <td>${esc(r.channelL2)}</td>
+    <td>${esc(r.channelL3)}</td>
+    <td>${esc(r.consultant)}</td>
+    <td>${esc(r.cashier)}</td>
+    <td>${r.payTime?r.payTime.toLocaleString('zh-CN'):''}</td>
+    <td style="text-align:right;">${fmt(r.cashPay)}</td>
+    <td style="text-align:center;${vab?'color:#1a73e8;font-weight:600;':''}">${vab?'✔':'—'}</td>
+    <td style="text-align:center;"><button class="detail-del" type="button" data-uid="${esc(r._uid)}" title="删除该条数据">×</button></td>
+  </tr>`;
+}
+
+// 手机端卡片（每字段 标签:值，删除按钮在右上角）
+function detailCardHTML(r){
+  const vab = isVabMember(r.memberNo);
+  const row = (k,v,cls='') => `<span>${k}</span><b class="${cls}">${v}</b>`;
+  return `<div class="detail-card" data-uid="${esc(r._uid)}">
+    <div class="dc-head">
+      <span class="dc-name">${esc(r.name||'—')}</span>
+      <span class="dc-vab ${vab?'hit':''}">${vab?'VAB ✔':'VAB —'}</span>
+      <button class="detail-del dc-del" type="button" data-uid="${esc(r._uid)}" title="删除该条数据">×</button>
+    </div>
+    <div class="dc-rows">
+      ${row('会员号', esc(r.memberNo))}
+      ${row('渠道分类', esc(r.channelClass))}
+      ${row('一级渠道', esc(r.channelL1))}
+      ${row('二级渠道', esc(r.channelL2))}
+      ${row('三级渠道', esc(r.channelL3))}
+      ${row('咨询师', esc(r.consultant))}
+      ${row('收款员工', esc(r.cashier))}
+      ${row('收款时间', r.payTime?esc(r.payTime.toLocaleString('zh-CN')):'')}
+      ${row('现款支付', esc(fmt(r.cashPay)), 'amt')}
+    </div>
+  </div>`;
+}
+
+// 分页工具条：上一页/下一页 + 窗口化页码 + 每页条数选择
+function renderPager(page, pageCount){
+  if(pageCount <= 1) return '';
+  const mk = (label, pageNo, opts) => {
+    opts = opts || {};
+    return `<button type="button" class="pg-btn ${opts.active?'active':''}" data-page="${pageNo}" ${opts.disabled?'disabled':''}>${label}</button>`;
+  };
+  const nums = [...new Set([1, pageCount, page, page-1, page+1].filter(n => n>=1 && n<=pageCount))].sort((a,b)=>a-b);
+  const parts = [ mk('上一页', page-1, {disabled: page<=1}) ];
+  let prev = 0;
+  for(const n of nums){
+    if(n - prev > 1) parts.push('<span class="pg-sep">…</span>');
+    parts.push(mk(String(n), n, {active: n===page}));
+    prev = n;
+  }
+  parts.push(mk('下一页', page+1, {disabled: page>=pageCount}));
+  const sizeOpts = [10,20,50,100].map(s=>`<option value="${s}" ${s===detailPageSize?'selected':''}>每页 ${s}</option>`).join('');
+  return `<div class="detail-pager">
+    ${parts.join('')}
+    <span class="pg-info">第 ${page}/${pageCount} 页</span>
+    <label class="detail-filter" style="margin:0 0 0 14px;">每页
+      <select id="detail-pagesize-filter" class="detail-select" style="min-width:auto;">${sizeOpts}</select>
+    </label>
+  </div>`;
+}
+
 // 6c. 导入数据明细（扁平展示全部导入订单 + 标签筛选，便于核对原始数据 / VAB 命中）
 function renderImportDetails(){
   const el = $('import-details');
@@ -1487,24 +1567,13 @@ function renderImportDetails(){
   const list = applyDetailSort(listRaw);
   const vabCount = list.filter(r=>isVabMember(r.memberNo)).length;
   const total = list.reduce((a,b)=>a+(Number(b.cashPay)||0),0);
-  const body = list.map((r,i)=>{
-    const vab = isVabMember(r.memberNo);
-    return `<tr data-uid="${esc(r._uid)}">
-      <td style="text-align:center;color:var(--c-muted);">${i+1}</td>
-      <td>${esc(r.name)}</td>
-      <td>${esc(r.memberNo)}</td>
-      <td>${esc(r.channelClass)}</td>
-      <td>${esc(r.channelL1)}</td>
-      <td>${esc(r.channelL2)}</td>
-      <td>${esc(r.channelL3)}</td>
-      <td>${esc(r.consultant)}</td>
-      <td>${esc(r.cashier)}</td>
-      <td>${r.payTime?r.payTime.toLocaleString('zh-CN'):''}</td>
-      <td style="text-align:right;">${fmt(r.cashPay)}</td>
-      <td style="text-align:center;${vab?'color:#1a73e8;font-weight:600;':''}">${vab?'✔':'—'}</td>
-      <td style="text-align:center;"><button class="detail-del" type="button" data-uid="${esc(r._uid)}" title="删除该条数据">×</button></td>
-    </tr>`;
-  }).join('');
+  // 分页计算（排序后的完整列表分页展示；合计/行数统计仍基于完整 list）
+  const pageCount = Math.max(1, Math.ceil(list.length / detailPageSize));
+  if(detailPage > pageCount) detailPage = pageCount;
+  if(detailPage < 1) detailPage = 1;
+  const start = (detailPage-1) * detailPageSize;
+  const pageItems = list.slice(start, start + detailPageSize);
+  const isMobile = isMobileView();
   // 月度 / 日期 筛选下拉（选项来自当前导入订单中实际出现的月份/日期，按时间升序）
   const months = [...new Set(orders.map(r=>r.payTime?fmtMonth(r.payTime):null).filter(Boolean))].sort();
   const dates  = [...new Set(orders.map(r=>r.payTime?fmtDate(r.payTime):null).filter(Boolean))].sort();
@@ -1534,24 +1603,43 @@ function renderImportDetails(){
     .concat(['<th>操作</th>']).join('');
   const tabLabel = DETAIL_TABS.find(t=>t.key===detailTab).label;
   const filterNote = (detailMonth?('月度 '+detailMonth+' · '):'')+(detailDate?('日期 '+detailDate+' · '):'');
+  // 手机端排序条（桌面端隐藏，由表格表头排序代替）
+  const mobileSort = `
+    <div class="detail-mobile-bar">
+      <label class="detail-filter">排序
+        <select id="detail-mobile-sort" class="detail-select" style="min-width:auto;">
+          <option value="">默认顺序</option>
+          ${DETAIL_SORT_COLS.map(([k,l])=>`<option value="${k}" ${detailSort.key===k?'selected':''}>${l}</option>`).join('')}
+        </select>
+      </label>
+    </div>`;
+  // 内容区：手机端卡片式 / 桌面端表格
+  const content = isMobile
+    ? `<div class="detail-cards">${pageItems.map(r=>detailCardHTML(r)).join('')}</div>`
+    : `<div class="table-wrap" style="max-height:420px;overflow:auto;border:1px solid var(--c-border);border-radius:8px;">
+        <table class="data">
+          <thead><tr>${sortThs}</tr></thead>
+          <tbody>${pageItems.map((r,i)=>detailRowCells(r,i,start)).join('')}</tbody>
+          <tfoot><tr style="font-weight:700;background:var(--c-blue-tint);color:var(--c-head);">
+            <td colspan="10" style="text-align:right;">合计（${list.length} 行 · 命中VAB ${vabCount} 行）</td>
+            <td style="text-align:right;">${fmt(total)}</td>
+            <td style="text-align:center;">${vabCount}</td>
+            <td></td>
+          </tr></tfoot>
+        </table>
+      </div>`;
+  const rangeNote = list.length > detailPageSize
+    ? ` · 本页 ${start+1}-${Math.min(start+detailPageSize, list.length)}`
+    : '';
   el.innerHTML = `
     ${filterBar}
     <div class="detail-tabs">${tabs}</div>
+    ${mobileSort}
     <div style="padding:6px 0 10px;color:var(--c-muted);font-size:12px;">
-      当前标签「${tabLabel}」· ${filterNote}共 ${list.length} 行 · 现款支付合计 ¥${fmt(total)} · 命中VAB ${vabCount} 行
+      当前标签「${tabLabel}」· ${filterNote}共 ${list.length} 行 · 现款支付合计 ¥${fmt(total)} · 命中VAB ${vabCount} 行${rangeNote}
     </div>
-    <div class="table-wrap" style="max-height:420px;overflow:auto;border:1px solid var(--c-border);border-radius:8px;">
-      <table class="data">
-        <thead><tr>${sortThs}</tr></thead>
-        <tbody>${body}</tbody>
-        <tfoot><tr style="font-weight:700;background:var(--c-blue-tint);color:var(--c-head);">
-          <td colspan="10" style="text-align:right;">合计（${list.length} 行 · 命中VAB ${vabCount} 行）</td>
-          <td style="text-align:right;">${fmt(total)}</td>
-          <td style="text-align:center;">${vabCount}</td>
-          <td></td>
-        </tr></tfoot>
-      </table>
-    </div>`;
+    ${content}
+    ${renderPager(detailPage, pageCount)}`;
   // 事件委托（绑定一次）：标签切换 + 删除某条数据（删除后全表同步更新）+ 月度/日期筛选
   if(!el.dataset.bound){
     el.addEventListener('click', onImportDetailsClick);
@@ -1565,27 +1653,40 @@ function onImportDetailsClick(e){
   const del = e.target.closest && e.target.closest('.detail-del');
   if(del){ deleteOrder(del.dataset.uid); return; }
   const tab = e.target.closest && e.target.closest('.detail-tab');
-  if(tab){ detailTab = tab.dataset.tab; renderImportDetails(); return; }
+  if(tab){ detailTab = tab.dataset.tab; detailPage = 1; renderImportDetails(); return; }
+  // 分页按钮（含上一页/下一页/页码）：data-page 为 1 基页码
+  const pg = e.target.closest && e.target.closest('[data-page]');
+  if(pg){ detailPage = parseInt(pg.dataset.page, 10) || 1; renderImportDetails(); return; }
   // 表头排序：同列再次点击切换升/降序，不同列默认升序
   const th = e.target.closest && e.target.closest('th[data-sort]');
   if(th){
     const k = th.dataset.sort;
     if(detailSort.key === k) detailSort.dir = -detailSort.dir;
     else detailSort = { key:k, dir:1 };
+    detailPage = 1;
     renderImportDetails();
     return;
   }
   const reset = e.target.closest && e.target.closest('#detail-filter-reset');
-  if(reset){ detailMonth = ''; detailDate = ''; renderImportDetails(); }
+  if(reset){ detailMonth = ''; detailDate = ''; detailPage = 1; renderImportDetails(); }
 }
 
-// 导入明细筛选：月度 / 日期下拉变更（与当前标签取交集，重新渲染明细）
+// 导入明细筛选：月度 / 日期 / 每页条数 / 手机端排序 下拉变更
 function onImportDetailsChange(e){
   if(!e || !e.target) return;
   const m = e.target.closest && e.target.closest('#detail-month-filter');
-  if(m){ detailMonth = m.value || ''; renderImportDetails(); return; }
+  if(m){ detailMonth = m.value || ''; detailPage = 1; renderImportDetails(); return; }
   const d = e.target.closest && e.target.closest('#detail-date-filter');
-  if(d){ detailDate = d.value || ''; renderImportDetails(); }
+  if(d){ detailDate = d.value || ''; detailPage = 1; renderImportDetails(); return; }
+  const ps = e.target.closest && e.target.closest('#detail-pagesize-filter');
+  if(ps){ detailPageSize = parseInt(ps.value, 10) || 20; detailPage = 1; renderImportDetails(); return; }
+  const ms = e.target.closest && e.target.closest('#detail-mobile-sort');
+  if(ms){
+    const v = ms.value;
+    detailSort = v ? { key:v, dir:1 } : { key:'', dir:1 };
+    detailPage = 1;
+    renderImportDetails();
+  }
 }
 
 // 删除一条订单并同步刷新所有统计表

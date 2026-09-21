@@ -277,6 +277,31 @@
   table.data tbody tr:hover{background:#eef4ff;}
   table.data tfoot td{position:sticky;bottom:0;z-index:2;background:var(--c-blue-tint);font-weight:700;color:var(--c-head);}
 
+  /* 明细分页条 */
+  .detail-pager{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:10px 0 4px;font-size:12px;color:var(--c-muted);}
+  .detail-pager .pg-btn{cursor:pointer;border:1px solid var(--c-border);background:#fff;color:var(--c-text);padding:4px 11px;border-radius:8px;font-size:12px;font-family:inherit;font-weight:500;line-height:1;min-width:30px;}
+  .detail-pager .pg-btn:hover:not(:disabled){border-color:var(--c-head);color:var(--c-head);}
+  .detail-pager .pg-btn:disabled{opacity:.45;cursor:not-allowed;}
+  .detail-pager .pg-btn.active{background:var(--c-head);color:#fff;border-color:var(--c-head);font-weight:600;}
+  .detail-pager .pg-sep{color:var(--c-border);padding:0 2px;}
+  .detail-pager .pg-info{margin-left:auto;}
+
+  /* 手机端排序条（桌面端隐藏） */
+  .detail-mobile-bar{display:none;flex-wrap:wrap;align-items:center;gap:8px;margin:2px 0 10px;}
+
+  /* 手机端卡片式明细 */
+  .detail-cards{display:flex;flex-direction:column;gap:10px;margin-top:4px;}
+  .detail-card{border:1px solid var(--c-border);border-radius:var(--radius-sm);background:#fff;padding:10px 12px;}
+  .detail-card .dc-head{display:flex;align-items:center;gap:8px;margin-bottom:6px;}
+  .detail-card .dc-name{font-weight:700;color:var(--c-head);font-size:14px;}
+  .detail-card .dc-vab{font-size:12px;color:var(--c-muted);}
+  .detail-card .dc-vab.hit{color:#1a73e8;font-weight:600;}
+  .detail-card .dc-del{margin-left:auto;}
+  .detail-card .dc-rows{display:grid;grid-template-columns:auto 1fr;gap:3px 12px;font-size:12px;}
+  .detail-card .dc-rows > span{color:var(--c-muted);}
+  .detail-card .dc-rows > b{font-weight:500;color:var(--c-text);word-break:break-all;}
+  .detail-card .dc-rows > b.amt{color:var(--c-head);font-weight:700;}
+
   /* ============ 提示横幅 ============ */
   #debug-banner{margin-bottom:14px;padding:9px 14px;background:#fff8dc;border:1px solid #d4a017;border-radius:var(--radius-sm);font-size:12px;color:#5c4a00;}
   #render-error{margin-top:0 !important;padding:12px 14px !important;background:#fde4e4;color:#b3261e;border:1px solid #b3261e;border-radius:var(--radius-sm);font-size:13px;}
@@ -292,6 +317,7 @@
 
     .grid-2{grid-template-columns:1fr;}
     .chip{white-space:normal;border-radius:12px;} /* 手机端允许长警示条（如 VAB 未上传提醒）换行，nowrap 会横向溢出被裁切 */
+    .detail-mobile-bar{display:flex;} /* 手机端显示排序条（桌面端由表头排序代替） */
   }
 </style>
 </head>
