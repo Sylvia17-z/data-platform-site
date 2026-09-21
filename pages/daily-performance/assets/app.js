@@ -590,7 +590,17 @@ function calculate(orders, vabSet, cutoff){
 
   // --- 6. 商务部（口径：客户来源渠道分类/一级渠道/二级渠道 任一为「商务部」或「市场部」；
   //      市场部数据并入商务部统一核算，故不再单独落入"其他"） ---
-  const r6 = orders.filter(r => chanHas(r, '商务部') || chanHas(r, '市场部'));
+  //      注：渠道分类=推荐 的订单改由下方 r6b 单独处理，避免与 chanHas 商务部/市场部 重复计入，
+  //      故此处先把推荐类排除，r6b 再并入商务部，二者互不重叠。
+  const r6 = orders.filter(r => (chanHas(r, '商务部') || chanHas(r, '市场部')) && (r.channelClass||'') !== '推荐');
+
+  // --- 6b. 推荐渠道补充（新增逻辑，不动 r1~r6 原有规则）---
+  // 渠道分类=推荐 且 一级分类包含「营销部」→ 计入营销部业绩：
+  //   二级含「自然到店」→ 品牌组-自然到店(r5b)，否则 → 电商组(r3b)
+  // 渠道分类=推荐 且 一级分类包含「商务部」→ 计入商务部业绩(r6b)
+  const r3b = orders.filter(r => isRecToYingxiao(r) && !(r.channelL2||'').includes('自然到店'));
+  const r5b = orders.filter(r => isRecToYingxiao(r) && (r.channelL2||'').includes('自然到店'));
+  const r6b = orders.filter(r => isRecToShangwu(r));
 
   // --- 7. 合计（全部行） ---
   const rAll = orders;
@@ -635,17 +645,18 @@ function calculate(orders, vabSet, cutoff){
   // 注：原"活动组-自拓活动"板块已整体下线（不展示、不计算），其金额并入"其他"
   const sumBrandOther = sum(r1);
   const sumActSupport = sum(r2);
-  const sumEcom = sum(r3);
+  const sumEcom = sum(r3) + sum(r3b);
   const sumShort = sum(r4);
-  const sumNature = sum(r5);
-  const sumCommerce = sum(r6);
+  const sumNature = sum(r5) + sum(r5b);
+  const sumCommerce = sum(r6) + sum(r6b);
   const sumOther = sumAll - (sumBrandOther + sumActSupport + sumEcom + sumShort + sumNature + sumCommerce);
 
   return {
     rows: {
-      '品牌组-其他': r1, '活动组-活动支持': r2, '电商组': r3, '短视频组': r4,
-      '品牌组-自然到店': r5,
-      '商务部': r6, '其他': orders.filter(()=>true),
+      '品牌组-其他': r1, '活动组-活动支持': r2,
+      '电商组': [...r3, ...r3b], '短视频组': r4,
+      '品牌组-自然到店': [...r5, ...r5b],
+      '商务部': [...r6, ...r6b], '其他': orders.filter(()=>true),
       '合计': rAll, '新增业绩': r9, '基础业绩': orders, '管家部': r11,
       '北郊': r14, '高新': rGaoXin,
     },
@@ -1371,6 +1382,17 @@ function isVabMember(memberNo){
 function chanHas(r, val){
   return (r.channelClass||'') === val || (r.channelL1||'') === val || (r.channelL2||'') === val;
 }
+
+// 推荐渠道归类（新增逻辑，不改原有 r1~r6）：渠道分类=推荐 时按「一级渠道」落地到营销部/商务部
+// 一级分类包含「营销部」→ 计入营销部业绩（二级含自然到店 → 品牌组-自然到店，否则 → 电商组）
+// 一级分类包含「商务部」→ 计入商务部业绩
+function isRecToYingxiao(r){
+  return (r.channelClass||'') === '推荐' && (r.channelL1||'').includes('营销部');
+}
+function isRecToShangwu(r){
+  return (r.channelClass||'') === '推荐' && (r.channelL1||'').includes('商务部');
+}
+
 const DETAIL_TABS = [
   {key:'all',           label:'全部数据'},
   {key:'today',         label:'当日数据'},
@@ -1397,7 +1419,7 @@ function filterOrdersByTab(key){
   else if(key === 'today') list = orders.filter(r => isToday(r));
   else if(key === 'today_gaoxin')  list = orders.filter(r => isToday(r) && (r.cashier||'').trim() === '南媛');
   else if(key === 'today_beijiao') list = orders.filter(r => isToday(r) && (r.cashier||'').trim() !== '南媛');
-  else if(key === 'shangwu') list = orders.filter(r => isToday(r) && (chanHas(r,'商务部') || chanHas(r,'市场部')));
+  else if(key === 'shangwu') list = orders.filter(r => isToday(r) && (chanHas(r,'商务部') || chanHas(r,'市场部') || isRecToShangwu(r)));
   else if(key === 'newperf')  list = orders.filter(r => isToday(r) && isVabMember(r.memberNo));
   else if(key === 'bigspend'){
     // 按日 + 单会员号 聚合现款，≥20000 的(日,会员)组整组显示（单会员号现款消费≥两万）
@@ -1411,7 +1433,7 @@ function filterOrdersByTab(key){
     const hit = new Set([...sumMap.entries()].filter(([k,v])=>v>=20000).map(([k])=>k));
     list = orders.filter(r=>{ const m=String(r.memberNo||'').trim(); return m && hit.has(fmtDate(r.payTime)+'|'+m); });
   }
-  else if(key === 'yingxiao') list = orders.filter(r => isToday(r) && chanHas(r,'营销部'));
+  else if(key === 'yingxiao') list = orders.filter(r => isToday(r) && (chanHas(r,'营销部') || isRecToYingxiao(r)));
   // 员工消费：渠道分类=公司所有 且 客户渠道标记为"员工本人及家属"。
   // 实测真实导出表里该标记落在【二级渠道】(L2)，旧导出可能在【三级渠道】(L3)，故 L2/L3 任一命中即可；
   // 原代码只查 L3 导致整组 0 行。按全月统计（不限当日），与「管家部」全月审计口径一致。
