@@ -1402,12 +1402,40 @@ const DETAIL_TABS = [
   {key:'newperf',       label:'新增业绩'},
   {key:'bigspend',      label:'消费≥2万'},
   {key:'yingxiao',      label:'营销部'},
+  {key:'recommend',     label:'推荐'},
   {key:'staff',         label:'员工消费'},
   {key:'steward',       label:'管家部'},
 ];
 let detailTab = 'all';
 let detailMonth = ''; // 月度筛选：''=全部，'YYYY-MM'
 let detailDate = '';  // 日期筛选：''=全部，'YYYY-MM-DD'
+let detailSort = { key:'', dir:1 }; // 列排序：''=未排序；dir 1=升序 -1=降序（再次点击同列切换）
+
+// 明细表排序取值：日期按时间戳、金额按数值、VAB 按 0/1，其余按中文字符串比较
+function detailSortVal(r, key){
+  switch(key){
+    case 'payTime': return r.payTime ? r.payTime.getTime() : 0;
+    case 'cashPay': return Number(r.cashPay)||0;
+    case 'vab':     return isVabMember(r.memberNo) ? 1 : 0;
+    default:        return String(r[key]||'');
+  }
+}
+// 可排序列定义（# 与 操作 列不排序）
+const DETAIL_SORT_COLS = [
+  ['name','姓名'], ['memberNo','会员号'], ['channelClass','渠道分类'], ['channelL1','一级渠道'],
+  ['channelL2','二级渠道'], ['channelL3','三级渠道'], ['consultant','咨询师'], ['cashier','收款员工'],
+  ['payTime','收款时间'], ['cashPay','现款支付'], ['vab','VAB'],
+];
+// 对筛选后的列表就地排序（无排序状态时保持导入顺序）
+function applyDetailSort(list){
+  if(!detailSort.key) return list;
+  const k = detailSort.key, dir = detailSort.dir;
+  return list.slice().sort((a,b)=>{
+    const va = detailSortVal(a,k), vb = detailSortVal(b,k);
+    if(typeof va === 'string' && typeof vb === 'string') return va.localeCompare(vb,'zh-CN')*dir;
+    return (va - vb)*dir;
+  });
+}
 
 // 按标签筛选导入订单；"当日"=数据中的最新日期（latestOrderDate）；月度/日期筛选叠加取交集
 function filterOrdersByTab(key){
@@ -1434,6 +1462,9 @@ function filterOrdersByTab(key){
     list = orders.filter(r=>{ const m=String(r.memberNo||'').trim(); return m && hit.has(fmtDate(r.payTime)+'|'+m); });
   }
   else if(key === 'yingxiao') list = orders.filter(r => isToday(r) && (chanHas(r,'营销部') || isRecToYingxiao(r)));
+  // 推荐页签：渠道分类=推荐 的订单（当日口径，与商务部/营销部页签一致），
+  // 用于核对新归类逻辑落位（一级含营销部→营销部，含商务部→商务部，未匹配→其他）
+  else if(key === 'recommend') list = orders.filter(r => isToday(r) && (r.channelClass||'') === '推荐');
   // 员工消费：渠道分类=公司所有 且 客户渠道标记为"员工本人及家属"。
   // 实测真实导出表里该标记落在【二级渠道】(L2)，旧导出可能在【三级渠道】(L3)，故 L2/L3 任一命中即可；
   // 原代码只查 L3 导致整组 0 行。按全月统计（不限当日），与「管家部」全月审计口径一致。
@@ -1452,7 +1483,8 @@ function renderImportDetails(){
   if(!el) return;
   const orders = state.orders || [];
   if(orders.length === 0){ el.innerHTML = '<div class="file-meta" style="padding:12px 0;">尚未导入订单数据</div>'; return; }
-  const list = filterOrdersByTab(detailTab);
+  const listRaw = filterOrdersByTab(detailTab);
+  const list = applyDetailSort(listRaw);
   const vabCount = list.filter(r=>isVabMember(r.memberNo)).length;
   const total = list.reduce((a,b)=>a+(Number(b.cashPay)||0),0);
   const body = list.map((r,i)=>{
@@ -1491,6 +1523,15 @@ function renderImportDetails(){
       ${(detailMonth||detailDate)?'<button type="button" id="detail-filter-reset" class="detail-reset" title="清除月度/日期筛选">清除筛选</button>':''}
     </div>`;
   const tabs = DETAIL_TABS.map(t=>`<button class="detail-tab ${t.key===detailTab?'active':''}" data-tab="${t.key}">${t.label}</button>`).join('');
+  // 表头：# 与 操作 不排序，其余列点击排序（当前排序列显示 ▲升序 / ▼降序）
+  const sortThs = ['<th>#</th>']
+    .concat(DETAIL_SORT_COLS.map(([k,label])=>{
+      const active = detailSort.key===k;
+      const arrow = active ? (detailSort.dir===1?' ▲':' ▼') : '';
+      return `<th data-sort="${k}" title="点击按${label}${active?(detailSort.dir===1?'升序':'降序'):'排序'}" `
+        + `style="cursor:pointer;user-select:none;white-space:nowrap;${active?'color:#1a4f8b;text-decoration:underline;':''}">${label}${arrow}</th>`;
+    }))
+    .concat(['<th>操作</th>']).join('');
   const tabLabel = DETAIL_TABS.find(t=>t.key===detailTab).label;
   const filterNote = (detailMonth?('月度 '+detailMonth+' · '):'')+(detailDate?('日期 '+detailDate+' · '):'');
   el.innerHTML = `
@@ -1501,10 +1542,7 @@ function renderImportDetails(){
     </div>
     <div class="table-wrap" style="max-height:420px;overflow:auto;border:1px solid var(--c-border);border-radius:8px;">
       <table class="data">
-        <thead><tr>
-          <th>#</th><th>姓名</th><th>会员号</th><th>渠道分类</th><th>一级渠道</th><th>二级渠道</th><th>三级渠道</th>
-          <th>咨询师</th><th>收款员工</th><th>收款时间</th><th>现款支付</th><th>VAB</th><th>操作</th>
-        </tr></thead>
+        <thead><tr>${sortThs}</tr></thead>
         <tbody>${body}</tbody>
         <tfoot><tr style="font-weight:700;background:var(--c-blue-tint);color:var(--c-head);">
           <td colspan="10" style="text-align:right;">合计（${list.length} 行 · 命中VAB ${vabCount} 行）</td>
@@ -1528,6 +1566,15 @@ function onImportDetailsClick(e){
   if(del){ deleteOrder(del.dataset.uid); return; }
   const tab = e.target.closest && e.target.closest('.detail-tab');
   if(tab){ detailTab = tab.dataset.tab; renderImportDetails(); return; }
+  // 表头排序：同列再次点击切换升/降序，不同列默认升序
+  const th = e.target.closest && e.target.closest('th[data-sort]');
+  if(th){
+    const k = th.dataset.sort;
+    if(detailSort.key === k) detailSort.dir = -detailSort.dir;
+    else detailSort = { key:k, dir:1 };
+    renderImportDetails();
+    return;
+  }
   const reset = e.target.closest && e.target.closest('#detail-filter-reset');
   if(reset){ detailMonth = ''; detailDate = ''; renderImportDetails(); }
 }
