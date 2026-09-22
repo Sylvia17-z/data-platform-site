@@ -76,6 +76,9 @@
   .warn{background:var(--no-bg);border:1px solid #f3c0bb;color:var(--no);
     border-radius:8px;padding:8px 12px;font-size:12.5px;margin-bottom:10px;display:none;}
   .warn.show{display:block;}
+  .vab-linked{background:var(--ok-bg);border:1px solid #b7e3c8;color:var(--ok);
+    border-radius:8px;padding:8px 12px;font-size:12.5px;margin-bottom:10px;display:none;}
+  .vab-linked.show{display:block;}
 
   .table-scroll{
     background:#fff;border:1px solid var(--navy-100);border-radius:10px;
@@ -167,15 +170,12 @@
     <section class="mod-panel" data-mod="order">
       <div class="panel-head">
         <h2>💰 收退款数据明细</h2>
-        <span class="desc">导入订单项目收退款表-明细；按会员号匹配 VAB 清单，补全管家 / 医生 / 是否参与考核，未匹配行已标注。</span>
+        <span class="desc">导入订单项目收退款表-明细；按会员号直接匹配 VAB 会员清单（由「VAB 会员清单」面板统一管理，无需重复导出），补全管家 / 医生 / 是否参与考核，未匹配行已标注。</span>
       </div>
       <div class="toolbar">
         <div class="grp">
           <label class="fbtn">导入收退款明细
             <input type="file" id="fileOrder" accept=".xlsx,.xls" />
-          </label>
-          <label class="fbtn opt">（可选）导入 VAB 清单
-            <input type="file" id="fileOrderVab" accept=".xlsx,.xls" />
           </label>
         </div>
         <div class="grp">
@@ -188,7 +188,7 @@
         </div>
         <button class="btn" id="orderExport" disabled>导出 CSV</button>
       </div>
-      <div class="warn" id="orderWarn">未检测到 VAB 清单，请先在「VAB 会员清单」面板导入，或点击上方「（可选）导入 VAB 清单」。</div>
+      <div class="warn" id="orderWarn">尚未导入 VAB 会员清单，请先在「VAB 会员清单」面板导入（数据自动共享，无需重复导出）。</div>
       <div class="stats" id="orderStats" style="display:none;">
         <div class="stat"><div class="v" id="orderTotal">0</div><div class="k">明细行数</div></div>
         <div class="stat match"><div class="v" id="orderMatched">0</div><div class="k">匹配 VAB</div></div>
@@ -205,15 +205,12 @@
     <section class="mod-panel" data-mod="charge">
       <div class="panel-head">
         <h2>🧾 收费明细数据明细</h2>
-        <span class="desc">导入收费明细；按患者姓名匹配 VAB 清单（姓名 → 会员号 / 管家 / 医生 / 是否参与考核），未匹配行已标注。</span>
+        <span class="desc">导入收费明细；按患者姓名直接匹配 VAB 会员清单（由「VAB 会员清单」面板统一管理，无需重复导出），（姓名 → 会员号 / 管家 / 医生 / 是否参与考核），未匹配行已标注。</span>
       </div>
       <div class="toolbar">
         <div class="grp">
           <label class="fbtn">导入收费明细
             <input type="file" id="fileCharge" accept=".xlsx,.xls" />
-          </label>
-          <label class="fbtn opt">（可选）导入 VAB 清单
-            <input type="file" id="fileChargeVab" accept=".xlsx,.xls" />
           </label>
         </div>
         <div class="grp">
@@ -226,7 +223,7 @@
         </div>
         <button class="btn" id="chargeExport" disabled>导出 CSV</button>
       </div>
-      <div class="warn" id="chargeWarn">未检测到 VAB 清单，请先在「VAB 会员清单」面板导入，或点击上方「（可选）导入 VAB 清单」。</div>
+      <div class="warn" id="chargeWarn">尚未导入 VAB 会员清单，请先在「VAB 会员清单」面板导入（数据自动共享，无需重复导出）。</div>
       <div class="stats" id="chargeStats" style="display:none;">
         <div class="stat"><div class="v" id="chargeTotal">0</div><div class="k">明细行数</div></div>
         <div class="stat match"><div class="v" id="chargeMatched">0</div><div class="k">匹配 VAB</div></div>
@@ -406,7 +403,6 @@
     const hint = document.getElementById('vabHint');
     if(hint) hint.textContent = '已导入 '+App.vab.length+' 人（含页面编辑/新增，已本地缓存）';
   }
-  function loadVabReplace(rows){ loadVab(rows, false); }
 
   function findVabByNum(num){
     if(!num) return null;
@@ -467,9 +463,20 @@
     document.getElementById(mod+'Empty').style.display = total? 'none':'block';
     document.getElementById(mod+'Export').disabled = !total;
 
-    // VAB 匹配提示
+    // VAB 匹配提示：直接识别「VAB 会员清单」面板已导入/持久化的数据，无需额外导出
     const warn = document.getElementById(mod+'Warn');
-    warn.classList.toggle('show', total>0 && !App.vabLoaded);
+    if(total>0 && App.vabLoaded){
+      warn.className = 'vab-linked';
+      warn.textContent = '已直接关联 VAB 会员清单 '+App.vab.length+' 人，收退款/收费明细自动按会员号 / 姓名匹配管家、医生与是否参与考核。';
+      warn.classList.add('show');
+    } else if(total>0 && !App.vabLoaded){
+      warn.className = 'warn';
+      warn.textContent = '尚未导入 VAB 会员清单，请先在「VAB 会员清单」面板导入（数据自动共享，无需重复导出）。';
+      warn.classList.add('show');
+    } else {
+      warn.className = 'warn';
+      warn.classList.remove('show');
+    }
 
     const note = document.getElementById(mod+'Note');
     if(total>RENDER_CAP){
@@ -669,8 +676,6 @@
     });
   }
   bindFile('fileVab', loadVab);
-  bindFile('fileOrderVab', loadVabReplace);
-  bindFile('fileChargeVab', loadVabReplace);
   bindFile('fileOrder', parseOrder);
   bindFile('fileCharge', parseCharge);
 
