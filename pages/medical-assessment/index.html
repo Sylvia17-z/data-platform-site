@@ -296,6 +296,9 @@
     lastOrder: null,         // 已解析的收退款明细（用于 VAB 重导入后重渲染）
     lastCharge: null,
     vabLoaded: false,
+    vabRev: 0,               // 数据版本号：VAB 变更时自增，用于缓存失效
+    orderRev: 0,             // 收退款明细版本号
+    chargeRev: 0,            // 收费明细版本号
   };
 
   /* ---------- 视图状态：筛选 / 排序 / 分页（性能：仅渲染当前页，避免大表卡顿） ---------- */
@@ -315,15 +318,25 @@
     const x = String(s==null?'':s).trim();
     return x!=='' && /^\-?\d+(\.\d+)?$/.test(x);
   }
+  // 懒缓存搜索串：每行只拼接一次，避免每次按键重建大字符串
+  function hayVab(r){
+    if(r._hay==null){
+      r._hay = [r.户主,r.客户姓名,r.会员号,r.客户等级,r.健康管家,r.主诊医生,r.是否参与考核]
+        .map(x=>String(x==null?'':x).toLowerCase()).join(' ');
+    }
+    return r._hay;
+  }
+  function hayBiz(r){
+    if(r._hayBiz==null){
+      r._hayBiz = Object.keys(r).map(k=>String(r[k]==null?'':r[k])).join(' ').toLowerCase();
+    }
+    return r._hayBiz;
+  }
   function filterVab(list, st){
     const q = st.search.trim().toLowerCase();
     return list.filter(r=>{
       if(st.kaohe!=='all' && String(r.是否参与考核)!==st.kaohe) return false;
-      if(q){
-        const hay = [r.户主, r.客户姓名, r.会员号, r.客户等级, r.健康管家, r.主诊医生, r.是否参与考核]
-          .map(x=>String(x==null?'':x).toLowerCase()).join(' ');
-        if(!hay.includes(q)) return false;
-      }
+      if(q && !hayVab(r).includes(q)) return false;
       return true;
     });
   }
@@ -335,29 +348,27 @@
         if(st.filter==='y' && !isM) return false;
         if(st.filter==='n' && isM) return false;
       }
-      if(q){
-        const hay = Object.keys(r).map(k=>String(r[k]==null?'':r[k])).join(' ').toLowerCase();
-        if(!hay.includes(q)) return false;
-      }
+      if(q && !hayBiz(r).includes(q)) return false;
       return true;
     });
   }
+  // 复用一个 Intl.Collator 做中文比较（比每次 String.localeCompare 快很多）
+  const collator = (typeof Intl!=='undefined' && typeof Intl.Collator==='function')
+    ? new Intl.Collator('zh-Hans-CN') : null;
   function applySort(list, key, dir){
-    if(!key) return list;
-    const arr = list.slice();
+    if(!key || !list || !list.length) return list;
+    // 预先取出排序键，避免比较时反复 String()/trim()
+    const arr = list.map(r=>{ const v = r[key]==null?'':r[key]; return {r, k:String(v).trim()}; });
     arr.sort((a,b)=>{
-      const av = a[key]==null?'':a[key];
-      const bv = b[key]==null?'':b[key];
-      const as = String(av).trim(), bs = String(bv).trim();
-      let cmp;
-      if(isNumericStr(as) && isNumericStr(bs)){
-        cmp = Number(as) - Number(bs);
-      } else {
-        cmp = as.localeCompare(bs, 'zh-Hans-CN');
+      const an = isNumericStr(a.k), bn = isNumericStr(b.k);
+      if(an && bn) return (Number(a.k)-Number(b.k)) * dir;
+      if(!an && !bn){
+        const c = collator ? collator.compare(a.k, b.k) : a.k.localeCompare(b.k, 'zh-Hans-CN');
+        return c * dir;
       }
-      return cmp * dir;
+      return (an ? -1 : 1) * dir; // 数字优先于文本
     });
-    return arr;
+    return arr.map(x=>x.r);
   }
   function sortTh(c, st){
     const isSorted = st.sortKey===c.k;
@@ -405,6 +416,33 @@
     if(mod==='vab'){ renderVab(); return; }
     if(mod==='order'){ if(App.lastOrder) renderBusiness('order', App.lastOrder); return; }
     if(mod==='charge'){ if(App.lastCharge) renderBusiness('charge', App.lastCharge); return; }
+  }
+
+  /* ---------- 缓存的「筛选+排序」工作集：仅数据/筛选/排序变化时重算，翻页只切片 ---------- */
+  const _work = { vab:{sig:'',rows:[]}, order:{sig:'',rows:[]}, charge:{sig:'',rows:[]} };
+  function getWork(mod){
+    const st = viewState[mod];
+    const all = mod==='vab' ? App.vab : (mod==='order' ? App.lastOrder : App.lastCharge);
+    if(!all) return [];
+    const rev = mod==='vab' ? App.vabRev : (mod==='order' ? App.orderRev : App.chargeRev);
+    const sig = [rev, st.search, (mod==='vab'? st.kaohe : st.filter), st.sortKey, st.sortDir].join('|');
+    const w = _work[mod];
+    if(w.sig===sig) return w.rows;            // 命中缓存：翻页/改每页条数不再全表重算
+    let rows = mod==='vab' ? filterVab(all, st) : filterBiz(all, st);
+    rows = applySort(rows, st.sortKey, st.sortDir);
+    w.sig = sig; w.rows = rows;
+    return rows;
+  }
+
+  /* ---------- 渲染调度：rAF 合并同帧多次重渲染，避免连续触发卡顿 ---------- */
+  const _rafQueued = {};
+  function scheduleRender(mod){
+    const run = ()=>{ _rafQueued[mod]=false; render(mod); };
+    if(typeof requestAnimationFrame==='function'){
+      if(_rafQueued[mod]) return;            // 同帧已排期，直接合并
+      _rafQueued[mod]=true;
+      requestAnimationFrame(run);
+    } else { run(); }
   }
 
   /* ---------- 列定义 ---------- */
@@ -459,21 +497,63 @@
     return y+'-'+m;
   }
 
-  /* ---------- 文件读取 ---------- */
+  /* ---------- 文件读取（Web Worker 解析 + 同步降级，避免大文件阻塞主线程） ---------- */
+  function syncParse(ab){
+    const wb = XLSX.read(ab, {type:'array'});
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    return XLSX.utils.sheet_to_json(ws, {defval:''});
+  }
+  function workerParse(ab){
+    return new Promise((resolve,reject)=>{
+      let worker;
+      try{
+        const xlsxUrl = new URL('assets/vendor/xlsx.full.min.js', location.href).href;
+        const src = "self.onmessage=function(ev){try{importScripts(" + JSON.stringify(xlsxUrl) + ");var wb=XLSX.read(ev.data,{type:'array'});var ws=wb.Sheets[wb.SheetNames[0]];var rows=XLSX.utils.sheet_to_json(ws,{defval:''});self.postMessage({ok:true,rows:rows});}catch(e){self.postMessage({ok:false,err:String(e)});}};";
+        const blob = new Blob([src], {type:'application/javascript'});
+        worker = new Worker(URL.createObjectURL(blob));
+      }catch(e){ return reject(e); }
+      const to = setTimeout(()=>{ try{worker.terminate();}catch(_){} reject(new Error('解析超时')); }, 20000);
+      worker.onmessage = ev=>{
+        clearTimeout(to);
+        try{worker.terminate();}catch(_){}
+        if(ev.data && ev.data.ok) resolve(ev.data.rows);
+        else reject(new Error((ev.data && ev.data.err) || 'worker 解析失败'));
+      };
+      worker.onerror = ()=>{ clearTimeout(to); try{worker.terminate();}catch(_){} reject(new Error('worker 解析错误')); };
+      worker.postMessage(ab);
+    });
+  }
   function readFile(file){
     return new Promise((resolve,reject)=>{
       const reader = new FileReader();
       reader.onload = e=>{
-        try{
-          const wb = XLSX.read(e.target.result, {type:'array'});
-          const ws = wb.Sheets[wb.SheetNames[0]];
-          const rows = XLSX.utils.sheet_to_json(ws, {defval:''});
-          resolve(rows);
-        }catch(err){ reject(err); }
+        const ab = e.target.result;
+        if(typeof Worker !== 'undefined'){
+          // 优先 Worker 解析（不阻塞主线程）；失败则同步降级（兼容 file:// 等环境）
+          workerParse(ab).then(resolve).catch(()=>{ try{ resolve(syncParse(ab)); }catch(err){ reject(err); } });
+        } else {
+          try{ resolve(syncParse(ab)); }catch(err){ reject(err); }
+        }
       };
       reader.onerror = ()=>reject(new Error('文件读取失败'));
       reader.readAsArrayBuffer(file);
     });
+  }
+
+  /* 表头映射：一次性把候选列名解析为真实列 key，避免逐行正则扫描（大表提速关键） */
+  function buildHeaderMap(rows){
+    if(!rows || !rows.length) return { get:()=>'' };
+    const keys = Object.keys(rows[0]);
+    function resolve(names){
+      for(const n of names){
+        const nn = normKey(n);
+        let hit = keys.find(k=>normKey(k)===nn);
+        if(hit===undefined) hit = keys.find(k=>{const kk=normKey(k); return kk.includes(nn)||nn.includes(kk);});
+        if(hit!==undefined) return hit;
+      }
+      return '';
+    }
+    return { resolve, get:(row,names)=>{ const k=resolve(names); return k? row[k] : ''; } };
   }
 
   /* ---------- VAB 序号 / 持久化 ---------- */
@@ -524,23 +604,25 @@
       ? appendOverride
       : !!(sel && sel.value==='append');
     seedVabSeq();
+    const hm = buildHeaderMap(rows);
     const mapped = rows.map(r=>({
       _id: newVabId(),
-      户主: String(pick(r,['户主'])).trim(),
-      客户姓名: String(pick(r,['客户姓名'])).trim(),
-      会员号: normNum(pick(r,['会员号'])),
-      客户等级: String(pick(r,['客户等级'])).trim(),
-      健康管家: String(pick(r,['健康管家'])).trim(),
-      主诊医生: String(pick(r,['主诊医生'])).trim(),
-      是否参与考核: String(pick(r,['是否参与考核'])).trim(),
+      户主: String(hm.get(r,['户主'])).trim(),
+      客户姓名: String(hm.get(r,['客户姓名'])).trim(),
+      会员号: normNum(hm.get(r,['会员号'])),
+      客户等级: String(hm.get(r,['客户等级'])).trim(),
+      健康管家: String(hm.get(r,['健康管家'])).trim(),
+      主诊医生: String(hm.get(r,['主诊医生'])).trim(),
+      是否参与考核: String(hm.get(r,['是否参与考核'])).trim(),
     }));
     App.vab = append ? App.vab.concat(mapped) : mapped;
     rebuildVabIndex();
+    App.vabRev++;                 // 数据变化 -> 失效筛选/排序缓存
     persistVab();
     renderVab();
     // VAB 重新导入后，若业务表已存在则重渲染
-    if(App.lastOrder) renderBusiness('order', App.lastOrder);
-    if(App.lastCharge) renderBusiness('charge', App.lastCharge);
+    if(App.lastOrder) scheduleRender('order');
+    if(App.lastCharge) scheduleRender('charge');
     const hint = document.getElementById('vabHint');
     if(hint) hint.textContent = '已导入 '+App.vab.length+' 人（含页面编辑/新增，已本地缓存）';
   }
@@ -565,9 +647,8 @@
     const tbody = document.querySelector('#vabTable tbody');
     thead.innerHTML = '<tr>'+cols.map(c=>sortTh(c, st)).join('')+'<th>操作</th></tr>';
 
-    // 筛选 + 排序
-    let list = filterVab(App.vab, st);
-    list = applySort(list, st.sortKey, st.sortDir);
+    // 筛选 + 排序（带缓存，仅在数据/筛选/排序变化时重算）
+    const list = getWork('vab');
     filteredCount.vab = list.length;
 
     // 分页（性能：仅渲染当前页）
@@ -626,9 +707,8 @@
       warn.classList.remove('show');
     }
 
-    // 筛选 + 排序
-    let list = filterBiz(allRows, st);
-    list = applySort(list, st.sortKey, st.sortDir);
+    // 筛选 + 排序（带缓存，翻页不重算全表）
+    const list = getWork(mod);
     filteredCount[mod] = list.length;
 
     // 分页（性能：仅渲染当前页）
@@ -651,15 +731,16 @@
   }
 
   function parseOrder(rows){
+    const hm = buildHeaderMap(rows);
     const out = rows.map(r=>{
-      const num = normNum(pick(r,['会员号','关联客户信息-会员号']));
-      const name = String(pick(r,['客户姓名','关联客户信息-客户姓名'])).trim();
-      const month = toMonth(pick(r,['收款时间']));
+      const num = normNum(hm.get(r,['会员号','关联客户信息-会员号']));
+      const name = String(hm.get(r,['客户姓名','关联客户信息-客户姓名'])).trim();
+      const month = toMonth(hm.get(r,['收款时间']));
       const itemParts = [
-        pick(r,['品项一级分类','一级分类']),
-        pick(r,['品项二级分类','二级分类']),
-        pick(r,['品项三级分类','三级分类']),
-        pick(r,['品项名称','关联订单条目信息-品项名称']),
+        hm.get(r,['品项一级分类','一级分类']),
+        hm.get(r,['品项二级分类','二级分类']),
+        hm.get(r,['品项三级分类','三级分类']),
+        hm.get(r,['品项名称','关联订单条目信息-品项名称']),
       ].map(s=>String(s).trim()).filter(Boolean);
       const item = itemParts.join(' / ');
       const v = findVabByNum(num);
@@ -671,14 +752,16 @@
       };
     });
     App.lastOrder = out;
+    App.orderRev++;               // 数据变化 -> 失效筛选/排序缓存
     renderBusiness('order', out);
   }
 
   function parseCharge(rows){
+    const hm = buildHeaderMap(rows);
     const out = rows.map(r=>{
-      const name = String(pick(r,['患者姓名','姓名'])).trim();
-      const month = toMonth(pick(r,['收费时间']));
-      const item = String(pick(r,['药品/项目名称','药品名称','项目名称'])).trim();
+      const name = String(hm.get(r,['患者姓名','姓名'])).trim();
+      const month = toMonth(hm.get(r,['收费时间']));
+      const item = String(hm.get(r,['药品/项目名称','药品名称','项目名称'])).trim();
       const v = findVabByName(name);
       return {
         月份: month, 会员号: v? v.会员号:'', 客户姓名: name,
@@ -688,6 +771,7 @@
       };
     });
     App.lastCharge = out;
+    App.chargeRev++;              // 数据变化 -> 失效筛选/排序缓存
     renderBusiness('charge', out);
   }
 
@@ -768,16 +852,17 @@
     body.querySelectorAll('[data-k]').forEach(el=>{ data[el.getAttribute('data-k')] = (el.value||'').trim(); });
     if(id){
       const row = App.vab.find(r=>r._id===id);
-      if(row) Object.assign(row, data);
+      if(row){ Object.assign(row, data); row._hay = undefined; } // 失效该行的搜索缓存
     } else {
       data._id = newVabId();
       App.vab.push(data);
     }
     rebuildVabIndex();
+    App.vabRev++;                 // 数据变化 -> 失效筛选/排序缓存
     persistVab();
     renderVab();
-    if(App.lastOrder) renderBusiness('order', App.lastOrder);
-    if(App.lastCharge) renderBusiness('charge', App.lastCharge);
+    if(App.lastOrder) scheduleRender('order');
+    if(App.lastCharge) scheduleRender('charge');
     closeVabModal();
   }
   function closeVabModal(){
@@ -790,10 +875,11 @@
     if(!confirm('确认删除「'+name+'」？删除后不可恢复。')) return;
     App.vab = App.vab.filter(r=>r._id!==id);
     rebuildVabIndex();
+    App.vabRev++;                 // 数据变化 -> 失效筛选/排序缓存
     persistVab();
     renderVab();
-    if(App.lastOrder) renderBusiness('order', App.lastOrder);
-    if(App.lastCharge) renderBusiness('charge', App.lastCharge);
+    if(App.lastOrder) scheduleRender('order');
+    if(App.lastCharge) scheduleRender('charge');
   }
   function downloadVabTemplate(){
     const aoa = [COLS.vab.map(c=>c.t)];
@@ -836,12 +922,12 @@
   document.getElementById('orderFilter').addEventListener('change', e=>{
     viewState.order.filter = e.target.value;
     viewState.order.page = 1;
-    if(App.lastOrder) renderBusiness('order', App.lastOrder);
+    if(App.lastOrder) scheduleRender('order');
   });
   document.getElementById('chargeFilter').addEventListener('change', e=>{
     viewState.charge.filter = e.target.value;
     viewState.charge.page = 1;
-    if(App.lastCharge) renderBusiness('charge', App.lastCharge);
+    if(App.lastCharge) scheduleRender('charge');
   });
   document.getElementById('orderExport').addEventListener('click', ()=>exportCsv('order'));
   document.getElementById('chargeExport').addEventListener('click', ()=>exportCsv('charge'));
@@ -850,22 +936,22 @@
   document.getElementById('vabSearch').addEventListener('input', debounce(e=>{
     viewState.vab.search = e.target.value;
     viewState.vab.page = 1;
-    renderVab();
+    scheduleRender('vab');
   }, 250));
   document.getElementById('vabKaohe').addEventListener('change', e=>{
     viewState.vab.kaohe = e.target.value;
     viewState.vab.page = 1;
-    renderVab();
+    scheduleRender('vab');
   });
   document.getElementById('orderSearch').addEventListener('input', debounce(e=>{
     viewState.order.search = e.target.value;
     viewState.order.page = 1;
-    if(App.lastOrder) renderBusiness('order', App.lastOrder);
+    if(App.lastOrder) scheduleRender('order');
   }, 250));
   document.getElementById('chargeSearch').addEventListener('input', debounce(e=>{
     viewState.charge.search = e.target.value;
     viewState.charge.page = 1;
-    if(App.lastCharge) renderBusiness('charge', App.lastCharge);
+    if(App.lastCharge) scheduleRender('charge');
   }, 250));
 
   /* 可排序表头：点击切换 升/降序（事件委托到 thead，表头每次重渲染仍生效） */
@@ -879,7 +965,7 @@
       if(st.sortKey===key){ st.sortDir = -st.sortDir; }
       else { st.sortKey = key; st.sortDir = 1; }
       st.page = 1;
-      render(mod);
+      scheduleRender(mod);
     });
     /* 分页器：翻页 / 跳页 / 改每页条数（事件委托到 pager 容器） */
     const pager = document.getElementById(mod+'Pager');
