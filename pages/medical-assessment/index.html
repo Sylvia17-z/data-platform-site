@@ -228,7 +228,7 @@
         <div class="grp">
           <input type="text" id="orderSearch" class="inp" placeholder="搜索会员号 / 姓名 / 管家 / 品项…" />
         </div>
-        <button class="btn" id="orderExport" disabled>导出 CSV</button>
+        <button class="btn" id="orderExport" disabled>导出 Excel</button>
         <button class="btn" id="orderClear">清空明细</button>
       </div>
       <div class="warn" id="orderWarn">尚未导入 VAB 会员清单，请先在「VAB 会员清单」面板导入（数据自动共享，无需重复导出）。</div>
@@ -272,7 +272,7 @@
         <div class="grp">
           <input type="text" id="chargeSearch" class="inp" placeholder="搜索会员号 / 姓名 / 管家 / 项目…" />
         </div>
-        <button class="btn" id="chargeExport" disabled>导出 CSV</button>
+        <button class="btn" id="chargeExport" disabled>导出 Excel</button>
         <button class="btn" id="chargeClear">清空明细</button>
       </div>
       <div class="warn" id="chargeWarn">尚未导入 VAB 会员清单，请先在「VAB 会员清单」面板导入（数据自动共享，无需重复导出）。</div>
@@ -308,7 +308,7 @@
           <span style="font-size:12.5px;color:var(--ink-soft);">统计月份：</span>
           <select id="statsMonth"><option value="">请选择月份</option></select>
         </div>
-        <button class="btn" id="statsExport" disabled>导出 CSV</button>
+        <button class="btn" id="statsExport" disabled>导出 Excel</button>
       </div>
       <div class="table-scroll">
         <table class="tbl" id="statsTable"><thead></thead><tbody></tbody></table>
@@ -372,7 +372,7 @@
   // 统计表状态（维度 + 统计月份 + 导出缓存）
   let statsDim = 'manager';                // 'manager'（管家维度）| 'doctor'（医生维度）
   let statsMonth = '';                     // 统计月份（随数据动态填充，默认取最新月）
-  let _statsCache = { cols:[], rows:[] };  // 渲染结果缓存，供 CSV 导出复用
+  let _statsCache = { cols:[], rows:[] };  // 渲染结果缓存，供导出复用
   let _statsRows = [];                     // 当前统计表行（含 _house/_visit 集合），供点击查看明细
 
   function debounce(fn, ms){
@@ -871,7 +871,7 @@
 
     const note = document.getElementById(mod+'Note');
     if(total>0){
-      note.textContent = '共 '+total+' 行，已按筛选 / 排序分页展示（每页 '+st.pageSize+' 条，筛选后 '+filteredCount[mod]+' 行）；点击「导出 CSV」可获取全部 '+total+' 行数据。';
+      note.textContent = '共 '+total+' 行，已按筛选 / 排序分页展示（每页 '+st.pageSize+' 条，筛选后 '+filteredCount[mod]+' 行）；点击「导出 Excel」可获取全部 '+total+' 行数据。';
     } else { note.textContent = ''; }
 
     renderPager(mod);
@@ -926,25 +926,17 @@
     renderBusiness('charge', out);
   }
 
-  /* ---------- CSV 导出 ---------- */
-  function csvCell(v){
-    const s = String(v==null?'':v);
-    if(/[",\n\r]/.test(s)) return '"'+s.replace(/"/g,'""')+'"';
-    return s;
-  }
-  function exportCsv(mod){
+  /* ---------- Excel 导出（.xlsx，复用已加载的 XLSX 库） ---------- */
+  function exportXlsx(mod){
     const all = mod==='order' ? App.lastOrder : App.lastCharge;
     if(!all || !all.length) return;
     const cols = COLS[mod];
-    const header = cols.map(c=>csvCell(c.t)).join(',');
-    const lines = all.map(r=>cols.map(c=>csvCell(r[c.k])).join(','));
-    const csv = '﻿'+header+'\n'+lines.join('\n');
-    const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = '医管考核_'+mod+'_'+Date.now()+'.csv';
-    document.body.appendChild(a); a.click(); a.remove();
-    URL.revokeObjectURL(url);
+    const aoa = [cols.map(c=>c.t)];
+    all.forEach(r=> aoa.push(cols.map(c=> r[c.k]!=null ? r[c.k] : '' )));
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, mod==='order' ? '收退款明细' : '收费明细');
+    XLSX.writeFile(wb, '医管考核_'+mod+'_'+Date.now()+'.xlsx');
   }
 
   function esc(s){
@@ -1079,18 +1071,15 @@
     _statsCache = { cols, rows };   // 供导出复用
   }
 
-  function exportStatsCsv(){
+  function exportStatsXlsx(){
     const { cols, rows } = _statsCache;
     if(!cols.length || !rows.length) return;
-    const header = cols.map(c=>csvCell(c.t)).join(',');
-    const lines = rows.map(r=>cols.map(c=>csvCell(r[c.k])).join(','));
-    const csv = '﻿'+header+'\n'+lines.join('\n');
-    const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = '医管考核_统计表_'+Date.now()+'.csv';
-    document.body.appendChild(a); a.click(); a.remove();
-    URL.revokeObjectURL(url);
+    const aoa = [cols.map(c=>c.t)];
+    rows.forEach(r=> aoa.push(cols.map(c=> r[c.k]!=null ? r[c.k] : '' )));
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, '统计表');
+    XLSX.writeFile(wb, '医管考核_统计表_'+Date.now()+'.xlsx');
   }
 
   /* ---------- 统计表：点击行查看命中的客户明细 ---------- */
@@ -1283,8 +1272,8 @@
     viewState.charge.page = 1;
     if(App.lastCharge) scheduleRender('charge');
   });
-  document.getElementById('orderExport').addEventListener('click', ()=>exportCsv('order'));
-  document.getElementById('chargeExport').addEventListener('click', ()=>exportCsv('charge'));
+  document.getElementById('orderExport').addEventListener('click', ()=>exportXlsx('order'));
+  document.getElementById('chargeExport').addEventListener('click', ()=>exportXlsx('charge'));
   document.getElementById('orderClear').addEventListener('click', ()=>{
     if(!App.lastOrder || !App.lastOrder.length){ return; }
     if(!confirm('确认清空已导入的收退款明细？此操作仅清除本页记录（本地缓存），不影响已导出的文件。')) return;
@@ -1297,7 +1286,7 @@
   });
   document.getElementById('statsDim').addEventListener('change', e=>{ statsDim = e.target.value; renderStats(); });
   document.getElementById('statsMonth').addEventListener('change', e=>{ statsMonth = e.target.value; renderStats(); });
-  document.getElementById('statsExport').addEventListener('click', ()=>exportStatsCsv());
+  document.getElementById('statsExport').addEventListener('click', ()=>exportStatsXlsx());
 
   /* 搜索框：防抖 250ms，输入即筛选（性能：避免连续重渲染卡顿） */
   document.getElementById('vabSearch').addEventListener('input', debounce(e=>{
