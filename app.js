@@ -49,11 +49,12 @@ const MODULES = [
     group: '数据统计',
     type: 'embed',
     src: '/pages/medical-assessment/index.html',
-    desc: '医疗管理考核相关的数据统计（VAB 会员清单、收退款明细、收费明细三类报表）',
+    desc: '医疗管理考核相关的数据统计（VAB 会员清单、收退款明细、收费明细、统计表）',
     children: [
       { id: 'ma-vab', name: 'VAB会员清单', icon: '📇', mod: 'vab' },
       { id: 'ma-order', name: '收退款数据明细', icon: '💰', mod: 'order' },
       { id: 'ma-charge', name: '收费明细数据明细', icon: '🧾', mod: 'charge' },
+      { id: 'ma-stats', name: '统计表', icon: '📊', mod: 'stats' },
     ],
   },
 ];
