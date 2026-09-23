@@ -676,52 +676,107 @@
     }catch(e){}
   }
 
-  /* ---------- 收退款 / 收费明细 持久化（仿 VAB：刷新免重导，主动清空仍可清除） ---------- */
+  /* ---------- 收退款 / 收费明细 持久化（仿 VAB：刷新免重导，主动清空仍可清除） ----------
+     存储策略：localStorage 优先（同步、快）；但业务明细动辄数万行，JSON 序列化后常超出
+     localStorage 约 5MB 配额（QuotaExceededError 会被 try/catch 静默吞掉，表现为「刷新后需重新导入」）。
+     因此写入时同时镜像到 IndexedDB（配额远大于 localStorage），恢复时 localStorage 未命中则回退 IndexedDB。 */
   const ORDER_LS_KEY  = 'med_order_list';
   const CHARGE_LS_KEY = 'med_charge_list';
+  const ORDER_IDB_KEY  = 'order';
+  const CHARGE_IDB_KEY = 'charge';
+  let _idbDbP = null;
+  function idbOpen(){
+    if(_idbDbP) return _idbDbP;
+    _idbDbP = new Promise((res,rej)=>{
+      try{
+        if(typeof indexedDB==='undefined' || !indexedDB) return rej(new Error('no indexedDB'));
+        const req = indexedDB.open('med_assess_db', 1);
+        req.onupgradeneeded = ()=>{ try{ req.result.createObjectStore('kv'); }catch(_){} };
+        req.onsuccess = ()=>res(req.result);
+        req.onerror = ()=>rej(req.error || new Error('idb open failed'));
+      }catch(e){ rej(e); }
+    });
+    _idbDbP.catch(()=>{ _idbDbP = null; });   // 打开失败后允许下次重试
+    return _idbDbP;
+  }
+  function idbSet(key, val){
+    return idbOpen().then(db=>new Promise((res,rej)=>{
+      try{
+        const tx = db.transaction('kv','readwrite');
+        if(val==null) tx.objectStore('kv').delete(key);
+        else tx.objectStore('kv').put(val, key);
+        tx.oncomplete = ()=>{ try{db.close();}catch(_){} res(); };
+        tx.onerror = tx.onabort = ()=>{ try{db.close();}catch(_){} rej(tx.error); };
+      }catch(e){ rej(e); }
+    }));
+  }
+  function idbGet(key){
+    return idbOpen().then(db=>new Promise((res,rej)=>{
+      try{
+        const tx = db.transaction('kv','readonly');
+        const rq = tx.objectStore('kv').get(key);
+        rq.onsuccess = ()=>{ try{db.close();}catch(_){} res(rq.result); };
+        rq.onerror = ()=>{ try{db.close();}catch(_){} rej(rq.error); };
+      }catch(e){ rej(e); }
+    })).catch(()=>null);
+  }
   function persistOrder(){
+    const has = App.lastOrder && App.lastOrder.length;
     try{
-      if(App.lastOrder && App.lastOrder.length) localStorage.setItem(ORDER_LS_KEY, JSON.stringify(App.lastOrder));
+      if(has) localStorage.setItem(ORDER_LS_KEY, JSON.stringify(App.lastOrder));
       else localStorage.removeItem(ORDER_LS_KEY);
-    }catch(e){}
+    }catch(e){
+      try{ localStorage.removeItem(ORDER_LS_KEY); }catch(_){}  // 超配额：清掉可能残留的旧快照，避免恢复到过期数据
+    }
+    idbSet(ORDER_IDB_KEY, has? App.lastOrder : null).catch(()=>{});
   }
   function persistCharge(){
+    const has = App.lastCharge && App.lastCharge.length;
     try{
-      if(App.lastCharge && App.lastCharge.length) localStorage.setItem(CHARGE_LS_KEY, JSON.stringify(App.lastCharge));
+      if(has) localStorage.setItem(CHARGE_LS_KEY, JSON.stringify(App.lastCharge));
       else localStorage.removeItem(CHARGE_LS_KEY);
-    }catch(e){}
+    }catch(e){
+      try{ localStorage.removeItem(CHARGE_LS_KEY); }catch(_){}  // 超配额：清掉可能残留的旧快照，避免恢复到过期数据
+    }
+    idbSet(CHARGE_IDB_KEY, has? App.lastCharge : null).catch(()=>{});
   }
-  // 页面加载时恢复业务表（不主动清空的情况下免重复导入）
+  // 恢复公共：写入内存 + 失效筛选/排序缓存 + 渲染（返回是否成功恢复）
+  function applyBizRestore(mod, arr){
+    if(!Array.isArray(arr) || !arr.length) return false;
+    if(mod==='order'){ App.lastOrder = arr; App.orderRev++; }
+    else { App.lastCharge = arr; App.chargeRev++; }
+    renderBusiness(mod, arr);
+    return true;
+  }
+  // 页面加载时恢复业务表（不主动清空的情况下免重复导入）：localStorage 未命中则回退 IndexedDB
   function loadOrderFromStorage(){
+    let restored = false;
     try{
       const raw = localStorage.getItem(ORDER_LS_KEY);
-      if(raw){
-        const arr = JSON.parse(raw);
-        if(Array.isArray(arr) && arr.length){
-          App.lastOrder = arr;
-          App.orderRev++;                       // 失效筛选/排序缓存
-          renderBusiness('order', App.lastOrder);
-        }
-      }
+      if(raw) restored = applyBizRestore('order', JSON.parse(raw));
     }catch(e){}
+    if(!restored){
+      idbGet(ORDER_IDB_KEY).then(arr=>{
+        if(applyBizRestore('order', arr)) renderStats();   // 异步恢复成功后重算统计表
+      }).catch(()=>{});
+    }
   }
   function loadChargeFromStorage(){
+    let restored = false;
     try{
       const raw = localStorage.getItem(CHARGE_LS_KEY);
-      if(raw){
-        const arr = JSON.parse(raw);
-        if(Array.isArray(arr) && arr.length){
-          App.lastCharge = arr;
-          App.chargeRev++;                      // 失效筛选/排序缓存
-          renderBusiness('charge', App.lastCharge);
-        }
-      }
+      if(raw) restored = applyBizRestore('charge', JSON.parse(raw));
     }catch(e){}
+    if(!restored){
+      idbGet(CHARGE_IDB_KEY).then(arr=>{
+        if(applyBizRestore('charge', arr)) renderStats();
+      }).catch(()=>{});
+    }
   }
   // 主动清空明细：清除内存数据 + 本地缓存 + 重置 UI（用户可随时调用）
   function clearBiz(mod){
-    if(mod==='order'){ App.lastOrder = null; try{ localStorage.removeItem(ORDER_LS_KEY); }catch(e){} }
-    else { App.lastCharge = null; try{ localStorage.removeItem(CHARGE_LS_KEY); }catch(e){} }
+    if(mod==='order'){ App.lastOrder = null; try{ localStorage.removeItem(ORDER_LS_KEY); }catch(e){} idbSet(ORDER_IDB_KEY, null).catch(()=>{}); }
+    else { App.lastCharge = null; try{ localStorage.removeItem(CHARGE_LS_KEY); }catch(e){} idbSet(CHARGE_IDB_KEY, null).catch(()=>{}); }
     const tbody = document.querySelector('#'+mod+'Table tbody');
     if(tbody) tbody.innerHTML = '';
     const thead = document.querySelector('#'+mod+'Table thead');
