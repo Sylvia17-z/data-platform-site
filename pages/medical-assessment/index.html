@@ -705,8 +705,8 @@
         const tx = db.transaction('kv','readwrite');
         if(val==null) tx.objectStore('kv').delete(key);
         else tx.objectStore('kv').put(val, key);
-        tx.oncomplete = ()=>{ try{db.close();}catch(_){} res(); };
-        tx.onerror = tx.onabort = ()=>{ try{db.close();}catch(_){} rej(tx.error); };
+        tx.oncomplete = ()=>res();
+        tx.onerror = tx.onabort = ()=>rej(tx.error);
       }catch(e){ rej(e); }
     }));
   }
@@ -715,8 +715,8 @@
       try{
         const tx = db.transaction('kv','readonly');
         const rq = tx.objectStore('kv').get(key);
-        rq.onsuccess = ()=>{ try{db.close();}catch(_){} res(rq.result); };
-        rq.onerror = ()=>{ try{db.close();}catch(_){} rej(rq.error); };
+        rq.onsuccess = ()=>res(rq.result);
+        rq.onerror = ()=>rej(rq.error);
       }catch(e){ rej(e); }
     })).catch(()=>null);
   }
