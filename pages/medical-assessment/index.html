@@ -566,7 +566,20 @@
 
   /* ---------- 文件读取（Web Worker 解析 + 同步降级，避免大文件阻塞主线程） ---------- */
   function syncParse(ab){
-    const wb = XLSX.read(ab, {type:'array'});
+    let wb;
+    try {
+      wb = XLSX.read(ab, {type:'array'});        // 优先按二进制工作簿（.xlsx）解析
+    } catch(e){
+      // 二进制解析失败：多为 .csv 导出（XLSX.read 对纯文本会报 "Invalid array length"），
+      // 回退为文本解析，保证「收费明细/收退款」csv 也能正常导入并持久化
+      try {
+        let text = (typeof TextDecoder!=='undefined')
+          ? new TextDecoder('utf-8').decode(ab)
+          : Buffer.from(ab).toString('utf-8');
+        if(text.charCodeAt(0)===0xFEFF) text = text.slice(1); // 去 UTF-8 BOM
+        wb = XLSX.read(text, {type:'string'});
+      } catch(_){ throw e; }
+    }
     const ws = wb.Sheets[wb.SheetNames[0]];
     return XLSX.utils.sheet_to_json(ws, {defval:''});
   }
