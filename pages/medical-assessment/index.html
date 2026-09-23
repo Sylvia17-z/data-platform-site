@@ -216,6 +216,7 @@
           <input type="text" id="orderSearch" class="inp" placeholder="搜索会员号 / 姓名 / 管家 / 品项…" />
         </div>
         <button class="btn" id="orderExport" disabled>导出 CSV</button>
+        <button class="btn" id="orderClear">清空明细</button>
       </div>
       <div class="warn" id="orderWarn">尚未导入 VAB 会员清单，请先在「VAB 会员清单」面板导入（数据自动共享，无需重复导出）。</div>
       <div class="stats" id="orderStats" style="display:none;">
@@ -255,6 +256,7 @@
           <input type="text" id="chargeSearch" class="inp" placeholder="搜索会员号 / 姓名 / 管家 / 项目…" />
         </div>
         <button class="btn" id="chargeExport" disabled>导出 CSV</button>
+        <button class="btn" id="chargeClear">清空明细</button>
       </div>
       <div class="warn" id="chargeWarn">尚未导入 VAB 会员清单，请先在「VAB 会员清单」面板导入（数据自动共享，无需重复导出）。</div>
       <div class="stats" id="chargeStats" style="display:none;">
@@ -596,6 +598,64 @@
     }catch(e){}
   }
 
+  /* ---------- 收退款 / 收费明细 持久化（仿 VAB：刷新免重导，主动清空仍可清除） ---------- */
+  const ORDER_LS_KEY  = 'med_order_list';
+  const CHARGE_LS_KEY = 'med_charge_list';
+  function persistOrder(){
+    try{
+      if(App.lastOrder && App.lastOrder.length) localStorage.setItem(ORDER_LS_KEY, JSON.stringify(App.lastOrder));
+      else localStorage.removeItem(ORDER_LS_KEY);
+    }catch(e){}
+  }
+  function persistCharge(){
+    try{
+      if(App.lastCharge && App.lastCharge.length) localStorage.setItem(CHARGE_LS_KEY, JSON.stringify(App.lastCharge));
+      else localStorage.removeItem(CHARGE_LS_KEY);
+    }catch(e){}
+  }
+  // 页面加载时恢复业务表（不主动清空的情况下免重复导入）
+  function loadOrderFromStorage(){
+    try{
+      const raw = localStorage.getItem(ORDER_LS_KEY);
+      if(raw){
+        const arr = JSON.parse(raw);
+        if(Array.isArray(arr) && arr.length){
+          App.lastOrder = arr;
+          App.orderRev++;                       // 失效筛选/排序缓存
+          renderBusiness('order', App.lastOrder);
+        }
+      }
+    }catch(e){}
+  }
+  function loadChargeFromStorage(){
+    try{
+      const raw = localStorage.getItem(CHARGE_LS_KEY);
+      if(raw){
+        const arr = JSON.parse(raw);
+        if(Array.isArray(arr) && arr.length){
+          App.lastCharge = arr;
+          App.chargeRev++;                      // 失效筛选/排序缓存
+          renderBusiness('charge', App.lastCharge);
+        }
+      }
+    }catch(e){}
+  }
+  // 主动清空明细：清除内存数据 + 本地缓存 + 重置 UI（用户可随时调用）
+  function clearBiz(mod){
+    if(mod==='order'){ App.lastOrder = null; try{ localStorage.removeItem(ORDER_LS_KEY); }catch(e){} }
+    else { App.lastCharge = null; try{ localStorage.removeItem(CHARGE_LS_KEY); }catch(e){} }
+    const tbody = document.querySelector('#'+mod+'Table tbody');
+    if(tbody) tbody.innerHTML = '';
+    const thead = document.querySelector('#'+mod+'Table thead');
+    if(thead) thead.innerHTML = '';
+    const stats = document.getElementById(mod+'Stats'); if(stats) stats.style.display='none';
+    const empty = document.getElementById(mod+'Empty'); if(empty) empty.style.display='block';
+    const exp = document.getElementById(mod+'Export'); if(exp) exp.disabled=true;
+    const warn = document.getElementById(mod+'Warn'); if(warn){ warn.className='warn'; warn.classList.remove('show'); }
+    const note = document.getElementById(mod+'Note'); if(note) note.textContent='';
+    const pager = document.getElementById(mod+'Pager'); if(pager) pager.innerHTML='';
+  }
+
   /* ---------- VAB 清单加载（批量导入，支持覆盖/追加） ---------- */
   function loadVab(rows, appendOverride){
     if(!Array.isArray(rows) || !rows.length) return;
@@ -753,6 +813,7 @@
     });
     App.lastOrder = out;
     App.orderRev++;               // 数据变化 -> 失效筛选/排序缓存
+    persistOrder();               // 持久化到本地，刷新免重导
     renderBusiness('order', out);
   }
 
@@ -772,6 +833,7 @@
     });
     App.lastCharge = out;
     App.chargeRev++;              // 数据变化 -> 失效筛选/排序缓存
+    persistCharge();              // 持久化到本地，刷新免重导
     renderBusiness('charge', out);
   }
 
@@ -811,7 +873,9 @@
     if(e.data && e.data.type==='app:setMod') setMod(e.data.mod);
   });
   (function initMod(){
-    loadVabFromStorage();
+    loadVabFromStorage();         // 先恢复 VAB（业务表匹配依赖它）
+    loadOrderFromStorage();       // 恢复收退款明细（刷新免重导）
+    loadChargeFromStorage();      // 恢复收费明细（刷新免重导）
     const p = new URLSearchParams(location.search).get('mod');
     setMod(p || 'vab');
   })();
@@ -931,6 +995,16 @@
   });
   document.getElementById('orderExport').addEventListener('click', ()=>exportCsv('order'));
   document.getElementById('chargeExport').addEventListener('click', ()=>exportCsv('charge'));
+  document.getElementById('orderClear').addEventListener('click', ()=>{
+    if(!App.lastOrder || !App.lastOrder.length){ return; }
+    if(!confirm('确认清空已导入的收退款明细？此操作仅清除本页记录（本地缓存），不影响已导出的文件。')) return;
+    clearBiz('order');
+  });
+  document.getElementById('chargeClear').addEventListener('click', ()=>{
+    if(!App.lastCharge || !App.lastCharge.length){ return; }
+    if(!confirm('确认清空已导入的收费明细？此操作仅清除本页记录（本地缓存），不影响已导出的文件。')) return;
+    clearBiz('charge');
+  });
 
   /* 搜索框：防抖 250ms，输入即筛选（性能：避免连续重渲染卡顿） */
   document.getElementById('vabSearch').addEventListener('input', debounce(e=>{
