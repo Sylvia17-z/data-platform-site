@@ -222,6 +222,10 @@
           </select>
         </div>
         <div class="grp">
+          <span style="font-size:12.5px;color:var(--ink-soft);">月份：</span>
+          <select id="orderMonth"><option value="">全部月份</option></select>
+        </div>
+        <div class="grp">
           <input type="text" id="orderSearch" class="inp" placeholder="搜索会员号 / 姓名 / 管家 / 品项…" />
         </div>
         <button class="btn" id="orderExport" disabled>导出 CSV</button>
@@ -260,6 +264,10 @@
             <option value="y">仅匹配</option>
             <option value="n">仅未匹配</option>
           </select>
+        </div>
+        <div class="grp">
+          <span style="font-size:12.5px;color:var(--ink-soft);">月份：</span>
+          <select id="chargeMonth"><option value="">全部月份</option></select>
         </div>
         <div class="grp">
           <input type="text" id="chargeSearch" class="inp" placeholder="搜索会员号 / 姓名 / 管家 / 项目…" />
@@ -356,8 +364,8 @@
   const DEFAULT_PAGE_SIZE = 200;
   const viewState = {
     vab:    { search:'', kaohe:'all', sortKey:null, sortDir:1, page:1, pageSize:DEFAULT_PAGE_SIZE },
-    order:  { search:'', filter:'all', sortKey:null, sortDir:1, page:1, pageSize:DEFAULT_PAGE_SIZE },
-    charge: { search:'', filter:'all', sortKey:null, sortDir:1, page:1, pageSize:DEFAULT_PAGE_SIZE },
+    order:  { search:'', filter:'all', month:'', sortKey:null, sortDir:1, page:1, pageSize:DEFAULT_PAGE_SIZE },
+    charge: { search:'', filter:'all', month:'', sortKey:null, sortDir:1, page:1, pageSize:DEFAULT_PAGE_SIZE },
   };
   const filteredCount = { vab:0, order:0, charge:0 };
 
@@ -399,12 +407,14 @@
   }
   function filterBiz(list, st){
     const q = st.search.trim().toLowerCase();
+    const month = st.month || '';
     return list.filter(r=>{
       if(st.filter!=='all'){
         const isM = r.匹配==='匹配';
         if(st.filter==='y' && !isM) return false;
         if(st.filter==='n' && isM) return false;
       }
+      if(month && r.月份!==month) return false;   // 按月份筛选
       if(q && !hayBiz(r).includes(q)) return false;
       return true;
     });
@@ -482,7 +492,7 @@
     const all = mod==='vab' ? App.vab : (mod==='order' ? App.lastOrder : App.lastCharge);
     if(!all) return [];
     const rev = mod==='vab' ? App.vabRev : (mod==='order' ? App.orderRev : App.chargeRev);
-    const sig = [rev, st.search, (mod==='vab'? st.kaohe : st.filter), st.sortKey, st.sortDir].join('|');
+    const sig = [rev, st.search, (mod==='vab'? st.kaohe : st.filter), st.month, st.sortKey, st.sortDir].join('|');
     const w = _work[mod];
     if(w.sig===sig) return w.rows;            // 命中缓存：翻页/改每页条数不再全表重算
     let rows = mod==='vab' ? filterVab(all, st) : filterBiz(all, st);
@@ -709,6 +719,9 @@
     const warn = document.getElementById(mod+'Warn'); if(warn){ warn.className='warn'; warn.classList.remove('show'); }
     const note = document.getElementById(mod+'Note'); if(note) note.textContent='';
     const pager = document.getElementById(mod+'Pager'); if(pager) pager.innerHTML='';
+    const monthSel = document.getElementById(mod+'Month');  // 清空时重置月份筛选
+    if(monthSel) monthSel.innerHTML = '<option value="">全部月份</option>';
+    viewState[mod].month = '';
     renderStats();                // 业务表清空后刷新统计表
   }
 
@@ -789,6 +802,20 @@
   }
 
   /* ---------- 渲染：业务明细（order / charge，支持筛选 / 排序 / 分页） ---------- */
+  // 同步月份下拉：依据当前明细的「月份」去重生成选项，保留（或重置）已选月份
+  function syncMonthOptions(mod, allRows){
+    const sel = document.getElementById(mod+'Month');
+    if(!sel) return;
+    const set = new Set();
+    (allRows||[]).forEach(r=>{ if(r.月份) set.add(r.月份); });
+    const months = [...set].sort();
+    let cur = viewState[mod].month;
+    if(cur && !months.includes(cur)){ cur = ''; viewState[mod].month = ''; }  // 数据变化后失效的月份重置
+    const opts = ['<option value="">全部月份</option>'].concat(
+      months.map(m=>'<option value="'+esc(m)+'"'+(m===cur?' selected':'')+'>'+esc(m)+'</option>'));
+    sel.innerHTML = opts.join('');
+  }
+
   function renderBusiness(mod, allRows){
     const cols = COLS[mod];
     const st = viewState[mod];
@@ -823,6 +850,9 @@
       warn.className = 'warn';
       warn.classList.remove('show');
     }
+
+    // 同步月份下拉（依据本面板明细的月份去重，保留已选）
+    syncMonthOptions(mod, allRows);
 
     // 筛选 + 排序（带缓存，翻页不重算全表）
     const list = getWork(mod);
@@ -1239,6 +1269,17 @@
   });
   document.getElementById('chargeFilter').addEventListener('change', e=>{
     viewState.charge.filter = e.target.value;
+    viewState.charge.page = 1;
+    if(App.lastCharge) scheduleRender('charge');
+  });
+  /* 月份下拉：更新视图状态并重渲染（order / charge） */
+  document.getElementById('orderMonth').addEventListener('change', e=>{
+    viewState.order.month = e.target.value;
+    viewState.order.page = 1;
+    if(App.lastOrder) scheduleRender('order');
+  });
+  document.getElementById('chargeMonth').addEventListener('change', e=>{
+    viewState.charge.month = e.target.value;
     viewState.charge.page = 1;
     if(App.lastCharge) scheduleRender('charge');
   });
