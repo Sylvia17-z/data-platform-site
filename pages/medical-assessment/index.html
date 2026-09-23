@@ -125,6 +125,15 @@
   .mf input,.mf select{font-family:var(--font);font-size:13.5px;border:1px solid var(--navy-100);border-radius:7px;padding:7px 9px;color:var(--ink);background:#fff;}
   .mf .mv{font-size:14px;color:var(--ink);padding:4px 2px;word-break:break-all;}
 
+  /* 统计表：行可点击 + 命中客户明细弹窗 */
+  table.tbl tbody tr.row-click{cursor:pointer;}
+  table.tbl tbody tr.row-click:hover{background:var(--navy-50);}
+  .stats-detail-head{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:6px;}
+  .stats-detail-head .stat{flex:1 1 120px;}
+  .tag-ok{display:inline-block;padding:1px 8px;border-radius:10px;background:#e8f6ee;color:#1f8a4c;font-size:12px;font-weight:600;}
+  .tag-no{display:inline-block;padding:1px 8px;border-radius:10px;background:#fdeaea;color:#c0392b;font-size:12px;font-weight:600;}
+  td.muted{color:var(--ink-soft);}
+
   /* 可排序表头 + 搜索框 + 分页器（性能：仅渲染当前页，避免大表卡顿） */
   .toolbar .inp{font-family:var(--font);font-size:13px;border:1px solid var(--navy-100);
     border-radius:7px;padding:6px 10px;background:#fff;color:var(--ink);min-width:190px;}
@@ -311,6 +320,18 @@
         <div class="modal-foot" id="vabModalFoot"></div>
       </div>
     </div>
+
+    <!-- ============ 统计表：命中客户明细 弹窗 ============ -->
+    <div class="modal-mask" id="statsDetailModal" style="display:none;">
+      <div class="modal" style="width:min(760px,94vw);">
+        <div class="modal-head">
+          <span id="statsDetailTitle">命中的客户明细</span>
+          <button type="button" class="modal-x" id="statsDetailClose" aria-label="关闭">×</button>
+        </div>
+        <div class="modal-body" id="statsDetailBody"></div>
+        <div class="modal-foot" id="statsDetailFoot"></div>
+      </div>
+    </div>
   </div>
 
   <script src="assets/vendor/xlsx.full.min.js"></script>
@@ -344,6 +365,7 @@
   let statsDim = 'manager';                // 'manager'（管家维度）| 'doctor'（医生维度）
   let statsMonth = '';                     // 统计月份（随数据动态填充，默认取最新月）
   let _statsCache = { cols:[], rows:[] };  // 渲染结果缓存，供 CSV 导出复用
+  let _statsRows = [];                     // 当前统计表行（含 _house/_visit 集合），供点击查看明细
 
   function debounce(fn, ms){
     let t;
@@ -980,8 +1002,11 @@
       house:o.house.size,
       visit:o.visit.size,
       rate: (month && o.house.size) ? (o.visit.size/o.house.size*100).toFixed(1)+'%' : '—',
+      _house:o.house,   // 保留具体户主集合，供点击明细枚举
+      _visit:o.visit,   // 保留月到店户主集合，供判定是否到店
     }));
     rows.sort((a,b)=> b.house - a.house);        // 按会员户主数降序
+    _statsRows = rows;                            // 供点击行时定位明细
 
     const dimLabel = dim==='manager' ? '健康管家' : '主诊医生';
     const cols = [
@@ -993,9 +1018,23 @@
     const thead = document.querySelector('#statsTable thead');
     const tbody = document.querySelector('#statsTable tbody');
     if(thead) thead.innerHTML = '<tr>'+cols.map(c=>'<th>'+esc(c.t)+'</th>').join('')+'</tr>';
-    if(tbody) tbody.innerHTML = rows.length
-      ? rows.map(r=>'<tr>'+cols.map(c=>'<td>'+esc(r[c.k])+'</td>').join('')+'</tr>').join('')
-      : '';
+    if(tbody){
+      tbody.innerHTML = rows.length
+        ? rows.map((r,i)=>'<tr class="row-click" data-idx="'+i+'" title="点击查看命中的客户明细">'
+            + cols.map(c=>'<td>'+esc(r[c.k])+'</td>').join('')+'</tr>').join('')
+        : '';
+      // 事件委托：tbody 元素持久，仅绑定一次，避免重复渲染叠加监听
+      if(!tbody._bound){
+        tbody.addEventListener('click', (e)=>{
+          const tr = e.target.closest('tr'); if(!tr) return;
+          const idx = tr.getAttribute('data-idx');
+          if(idx==null) return;
+          const row = _statsRows[+idx];
+          if(row) openStatsDetail(row);
+        });
+        tbody._bound = true;
+      }
+    }
 
     const hasData = vab.length || order.length || charge.length;
     const empty = document.getElementById('statsEmpty');
@@ -1022,6 +1061,70 @@
     a.href = url; a.download = '医管考核_统计表_'+Date.now()+'.csv';
     document.body.appendChild(a); a.click(); a.remove();
     URL.revokeObjectURL(url);
+  }
+
+  /* ---------- 统计表：点击行查看命中的客户明细 ---------- */
+  function openStatsDetail(row){
+    if(!row) return;
+    const dim = statsDim;                         // 'manager' | 'doctor'
+    const dimField = dim==='manager' ? '健康管家' : '主诊医生';
+    const dimLabel = dim==='manager' ? '健康管家' : '主诊医生';
+    const month = statsMonth;
+    const k = row.维度;                           // 维度值（如管家「管1」）
+    const visitSet = row._visit || new Set();      // 月到店户主集合
+    const vab = App.vab || [];
+
+    // 按户主分组该维度下的 VAB 会员（同户主可能含多名家庭成员）
+    const groups = new Map();                     // 户主 -> [vabRow,...]
+    vab.forEach(r=>{
+      if(r[dimField] !== k) return;
+      const h = r.户主 || '(空户主)';
+      if(!groups.has(h)) groups.set(h, []);
+      groups.get(h).push(r);
+    });
+
+    const total = groups.size;
+    const visited = [...groups.keys()].filter(h=>visitSet.has(h)).length;
+    const rate = (total && month) ? (visited/total*100).toFixed(1)+'%' : '—';
+
+    let html = '<div class="stats-detail-head">'
+      + '<div class="stat"><div class="v">'+esc(k)+'</div><div class="k">'+esc(dimLabel)+'</div></div>'
+      + '<div class="stat"><div class="v">'+total+'</div><div class="k">会员户主数(去重)</div></div>'
+      + '<div class="stat"><div class="v">'+visited+'</div><div class="k">月到店户主数</div></div>'
+      + '<div class="stat"><div class="v">'+esc(rate)+'</div><div class="k">到店率</div></div>'
+      + '</div>';
+
+    if(!total){
+      html += '<div class="empty" style="display:block">该维度下未匹配到 VAB 会员。</div>';
+    } else {
+      // 已到店户主排前，便于核对；组内成员按原顺序
+      const sortedHouse = [...groups.keys()]
+        .sort((a,b)=> (visitSet.has(b)?1:0) - (visitSet.has(a)?1:0));
+      html += '<div class="table-scroll"><table class="tbl">'
+        + '<thead><tr><th>户主</th><th>客户姓名</th><th>会员号</th><th>是否到店</th></tr></thead><tbody>';
+      sortedHouse.forEach(h=>{
+        const isV = visitSet.has(h);
+        const tag = isV ? '<span class="tag-ok">已到店</span>' : '<span class="tag-no">未到店</span>';
+        const members = groups.get(h);
+        members.forEach((r,i)=>{
+          html += '<tr>'
+            + '<td'+(i?' class="muted"':'')+'>'+esc(h)+'</td>'
+            + '<td>'+esc(r.客户姓名||'')+'</td>'
+            + '<td>'+esc(r.会员号||'')+'</td>'
+            + '<td>'+tag+'</td>'
+            + '</tr>';
+        });
+      });
+      html += '</tbody></table></div>';
+    }
+
+    document.getElementById('statsDetailTitle').textContent = dimLabel + '「' + k + '」命中的客户明细';
+    document.getElementById('statsDetailBody').innerHTML = html;
+    document.getElementById('statsDetailModal').style.display = 'flex';
+  }
+  function closeStatsDetail(){
+    const m = document.getElementById('statsDetailModal');
+    if(m) m.style.display = 'none';
   }
 
   /* ---------- VAB 会员：增 / 改 / 删 / 查看 / 模板 / 导出 ---------- */
@@ -1232,6 +1335,10 @@
   document.getElementById('vabExport').addEventListener('click', exportVab);
   document.getElementById('vabTemplate').addEventListener('click', downloadVabTemplate);
   document.getElementById('vabAdd').addEventListener('click', ()=>openVabModal(null,'edit'));
+
+  /* 统计表：命中客户明细弹窗 关闭 */
+  document.getElementById('statsDetailClose').addEventListener('click', closeStatsDetail);
+  document.getElementById('statsDetailModal').addEventListener('click', (e)=>{ if(e.target.id==='statsDetailModal') closeStatsDetail(); });
   </script>
 </body>
 </html>
