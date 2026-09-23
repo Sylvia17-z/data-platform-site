@@ -272,20 +272,24 @@
       <div class="foot-note" id="chargeNote"></div>
     </section>
 
-    <!-- ============ 面板 4：统计表（二级功能，聚合 VAB / 收退款 / 收费） ============ -->
+    <!-- ============ 面板 4：统计表（二级功能：管家/医生维度会员到店率） ============ -->
     <section class="mod-panel" data-mod="stats">
       <div class="panel-head">
         <h2>📊 统计表</h2>
-        <span class="desc">基于已导入的 VAB 会员清单、收退款明细、收费明细自动聚合（按健康管家 / 月份维度），数据更新或刷新页面后自动重算，无需重复导入。</span>
+        <span class="desc">会员到店率统计：按管家 / 医生维度，统计 VAB 会员户主数（去重）与指定月份的「月到店会员数（户主去重）」，自动计算到店率。数据更新或刷新页面后自动重算，无需重复导入。</span>
       </div>
       <div class="stats" id="statsKpi" style="margin-bottom:12px;"></div>
       <div class="toolbar">
         <div class="grp">
           <span style="font-size:12.5px;color:var(--ink-soft);">统计维度：</span>
           <select id="statsDim">
-            <option value="manager">按健康管家</option>
-            <option value="month">按月份</option>
+            <option value="manager">管家维度</option>
+            <option value="doctor">医生维度</option>
           </select>
+        </div>
+        <div class="grp">
+          <span style="font-size:12.5px;color:var(--ink-soft);">统计月份：</span>
+          <select id="statsMonth"><option value="">请选择月份</option></select>
         </div>
         <button class="btn" id="statsExport" disabled>导出 CSV</button>
       </div>
@@ -336,8 +340,9 @@
   };
   const filteredCount = { vab:0, order:0, charge:0 };
 
-  // 统计表状态（聚合维度 + 导出缓存）
-  let statsDim = 'manager';                // 'manager'（按健康管家）| 'month'（按月份）
+  // 统计表状态（维度 + 统计月份 + 导出缓存）
+  let statsDim = 'manager';                // 'manager'（管家维度）| 'doctor'（医生维度）
+  let statsMonth = '';                     // 统计月份（随数据动态填充，默认取最新月）
   let _statsCache = { cols:[], rows:[] };  // 渲染结果缓存，供 CSV 导出复用
 
   function debounce(fn, ms){
@@ -914,65 +919,77 @@
     renderStats();                // 基于已恢复的数据生成统计表
   })();
 
-  /* ---------- 统计表：聚合 VAB / 收退款 / 收费（按管家 / 月份） ---------- */
+  /* ---------- 统计表：管家/医生维度 会员到店率 ---------- */
   function renderStats(){
     const vab = App.vab || [];
     const order = App.lastOrder || [];
     const charge = App.lastCharge || [];
-    const vabTotal = vab.length;
-    const kaohe = vab.filter(r=>r.是否参与考核==='是').length;
-    const oTotal = order.length, oMatch = order.filter(r=>r.匹配==='匹配').length;
-    const cTotal = charge.length, cMatch = charge.filter(r=>r.匹配==='匹配').length;
+    const dim = statsDim;                         // 'manager' | 'doctor'
+    const dimField = dim==='manager' ? '健康管家' : '主诊医生';
+    const visitField = dim==='manager' ? 'VAB管家' : 'VAB医生';
 
-    // 1) 顶部 KPI 指标条
-    const kpi = [
-      {k:'VAB 会员总数', v:vabTotal},
-      {k:'参与考核人数', v: vabTotal ? kaohe+'（'+(kaohe/vabTotal*100).toFixed(1)+'%）' : '0'},
-      {k:'收退款明细行', v:oTotal},
-      {k:'收退款匹配率', v: oTotal ? (oMatch/oTotal*100).toFixed(1)+'%' : '—'},
-      {k:'收费明细行', v:cTotal},
-      {k:'收费匹配率', v: cTotal ? (cMatch/cTotal*100).toFixed(1)+'%' : '—'},
-    ];
-    const kpiEl = document.getElementById('statsKpi');
-    if(kpiEl) kpiEl.innerHTML = kpi.map(x=>
-      '<div class="stat"><div class="v">'+esc(x.v)+'</div><div class="k">'+esc(x.k)+'</div></div>').join('');
+    // 可用月份（order+charge 的 月份去重，升序）
+    const mset = new Set();
+    order.forEach(r=>{ if(r.月份) mset.add(r.月份); });
+    charge.forEach(r=>{ if(r.月份) mset.add(r.月份); });
+    const months = [...mset].sort();
 
-    // 2) 维度聚合表
-    const dim = statsDim;
-    let cols, rows;
-    if(dim==='manager'){
-      cols = [
-        {k:'维度',t:'健康管家'},{k:'vab',t:'VAB会员数'},{k:'kaohe',t:'参与考核'},
-        {k:'order',t:'收退款匹配行'},{k:'charge',t:'收费匹配行'},{k:'sum',t:'合计匹配行'},
-      ];
-      const map = new Map();
-      const bump = (name, key)=>{
-        const n = name || '（未填）';
-        if(!map.has(n)) map.set(n, {维度:n, vab:0, kaohe:0, order:0, charge:0});
-        map.get(n)[key]++;
-      };
-      vab.forEach(r=>{ bump(r.健康管家,'vab'); if(r.是否参与考核==='是') bump(r.健康管家,'kaohe'); });
-      order.forEach(r=>{ if(r.匹配==='匹配') bump(r.VAB管家||r.健康管家,'order'); });
-      charge.forEach(r=>{ if(r.匹配==='匹配') bump(r.VAB管家||r.健康管家,'charge'); });
-      rows = [...map.values()].map(o=>({维度:o.维度, vab:o.vab, kaohe:o.kaohe, order:o.order, charge:o.charge, sum:o.order+o.charge}));
-      rows.sort((a,b)=> (b.order+b.charge)-(a.order+a.charge));   // 按匹配量降序
-    } else {
-      cols = [
-        {k:'维度',t:'月份'},{k:'order',t:'收退款行'},{k:'orderMatch',t:'收退款匹配'},
-        {k:'charge',t:'收费行'},{k:'chargeMatch',t:'收费匹配'},
-      ];
-      const map = new Map();
-      const bump = (m, kind, matched)=>{
-        const k = m || '（未填）';
-        if(!map.has(k)) map.set(k, {维度:k, order:0, orderMatch:0, charge:0, chargeMatch:0});
-        const o = map.get(k); o[kind]++; if(matched) o[kind+'Match']++;
-      };
-      order.forEach(r=> bump(r.月份,'order', r.匹配==='匹配'));
-      charge.forEach(r=> bump(r.月份,'charge', r.匹配==='匹配'));
-      rows = [...map.values()];
-      rows.sort((a,b)=> a.维度 < b.维度 ? -1 : 1);               // 月份升序
+    // 同步月份下拉（保留已选；无则默认最新月）
+    const monthSel = document.getElementById('statsMonth');
+    let month = statsMonth;
+    if(monthSel){
+      if(!month || !months.includes(month)) month = months.length ? months[months.length-1] : '';
+      statsMonth = month;
+      const opts = ['<option value="">请选择月份</option>'].concat(
+        months.map(m=>'<option value="'+esc(m)+'"'+(m===month?' selected':'')+'>'+esc(m)+'</option>'));
+      monthSel.innerHTML = opts.join('');
     }
 
+    // 1) 顶部 KPI 概要（整体）
+    const allHouse = new Set();
+    vab.forEach(r=>{ if(r.户主) allHouse.add(r.户主); });
+    const visitHouse = new Set();
+    const inMonth = r => month && r.月份===month && r.户主;
+    order.forEach(r=>{ if(inMonth(r)) visitHouse.add(r.户主); });
+    charge.forEach(r=>{ if(inMonth(r)) visitHouse.add(r.户主); });
+    const totalHouse = allHouse.size;
+    const visitCount = visitHouse.size;
+    const overallRate = (totalHouse && month) ? (visitCount/totalHouse*100).toFixed(1)+'%' : '—';
+    const kpiEl = document.getElementById('statsKpi');
+    if(kpiEl) kpiEl.innerHTML = [
+      {k:'统计月份', v: month || '未选择'},
+      {k:'VAB会员户主数(去重)', v: totalHouse},
+      {k:'月到店户主数', v: month ? visitCount : '—'},
+      {k:'整体到店率', v: overallRate},
+    ].map(x=>'<div class="stat"><div class="v">'+esc(x.v)+'</div><div class="k">'+esc(x.k)+'</div></div>').join('');
+
+    // 2) 维度聚合：VAB会员户主数(去重) / 月到店VAB会员数(户主去重) / 到店率
+    const map = new Map();
+    const ensure = k => { if(!map.has(k)) map.set(k, {维度:k, house:new Set(), visit:new Set()}); return map.get(k); };
+    vab.forEach(r=>{ const k=r[dimField]; if(k) ensure(k).house.add(r.户主); });
+    const addVisit = r => {
+      if(!month || r.月份!==month || !r.户主) return;
+      const k = r[visitField] || r[dimField];
+      if(k) ensure(k).visit.add(r.户主);
+    };
+    order.forEach(addVisit);
+    charge.forEach(addVisit);
+
+    let rows = [...map.values()].map(o=>({
+      维度:o.维度,
+      house:o.house.size,
+      visit:o.visit.size,
+      rate: (month && o.house.size) ? (o.visit.size/o.house.size*100).toFixed(1)+'%' : '—',
+    }));
+    rows.sort((a,b)=> b.house - a.house);        // 按会员户主数降序
+
+    const dimLabel = dim==='manager' ? '健康管家' : '主诊医生';
+    const cols = [
+      {k:'维度', t:dimLabel},
+      {k:'house', t:'VAB会员户主数(去重)'},
+      {k:'visit', t:'月到店VAB会员数(户主去重)'},
+      {k:'rate', t:'到店率'},
+    ];
     const thead = document.querySelector('#statsTable thead');
     const tbody = document.querySelector('#statsTable tbody');
     if(thead) thead.innerHTML = '<tr>'+cols.map(c=>'<th>'+esc(c.t)+'</th>').join('')+'</tr>';
@@ -980,13 +997,14 @@
       ? rows.map(r=>'<tr>'+cols.map(c=>'<td>'+esc(r[c.k])+'</td>').join('')+'</tr>').join('')
       : '';
 
+    const hasData = vab.length || order.length || charge.length;
     const empty = document.getElementById('statsEmpty');
-    if(empty) empty.style.display = (vabTotal+oTotal+cTotal) ? 'none' : 'block';
+    if(empty) empty.style.display = hasData ? 'none' : 'block';
     const exp = document.getElementById('statsExport');
     if(exp) exp.disabled = !rows.length;
     const note = document.getElementById('statsNote');
-    if(note) note.textContent = (vabTotal+oTotal+cTotal)
-      ? ('共 '+rows.length+' 行（'+(dim==='manager'?'按健康管家':'按月份')+'维度）')
+    if(note) note.textContent = hasData
+      ? ('共 '+rows.length+' 行（'+(dim==='manager'?'管家维度':'医生维度')+(month?' · '+month:'')+'）；整体到店率 '+overallRate)
       : '';
 
     _statsCache = { cols, rows };   // 供导出复用
@@ -1134,6 +1152,7 @@
     clearBiz('charge');
   });
   document.getElementById('statsDim').addEventListener('change', e=>{ statsDim = e.target.value; renderStats(); });
+  document.getElementById('statsMonth').addEventListener('change', e=>{ statsMonth = e.target.value; renderStats(); });
   document.getElementById('statsExport').addEventListener('click', ()=>exportStatsCsv());
 
   /* 搜索框：防抖 250ms，输入即筛选（性能：避免连续重渲染卡顿） */
