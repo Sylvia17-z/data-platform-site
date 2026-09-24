@@ -1058,12 +1058,32 @@
     }
 
     // 1) 顶部 KPI 概要（整体）
-    const allHouse = new Set();
-    vab.forEach(r=>{ if(r.户主) allHouse.add(r.户主); });
+    // 放宽口径（已到访）：客户当月收退款明细「或」收费明细任一来源有记录即视为已到访。
+    //   识别方式从「精确匹配 户主」放宽为「户主 / 会员号 / 客户姓名 任一命中 VAB 户主即计为该户主到访」，
+    //   避免会员号不一致导致漏计；分母仍为 VAB 会员户主数(去重)，故整体到店率恒 ≤ 100%。
+    const normKey = s => String(s==null?'':s).trim().toLowerCase();
+    const vabKeyIndex = new Map();   // 规范化键(户主/会员号/姓名) -> VAB 户主
+    const vabByHouse = new Map();    // VAB 户主 -> VAB 行
+    vab.forEach(r=>{
+      const h = r.户主; if(!h) return;
+      if(!vabByHouse.has(h)) vabByHouse.set(h, r);
+      [h, r.会员号, r.客户姓名].filter(Boolean).map(normKey).forEach(k=>{ if(k) vabKeyIndex.set(k, h); });
+    });
+    const resolveHouse = r => {
+      for(const c of [r.户主, r.会员号, r.客户姓名].filter(Boolean).map(normKey)){
+        if(vabKeyIndex.has(c)) return vabKeyIndex.get(c);
+      }
+      return '';
+    };
+    const allHouse = new Set(vabByHouse.keys());
     const visitHouse = new Set();
-    const inMonth = r => month && r.月份===month && r.户主;
-    order.forEach(r=>{ if(inMonth(r)) visitHouse.add(r.户主); });
-    charge.forEach(r=>{ if(inMonth(r)) visitHouse.add(r.户主); });
+    const markVisit = r => {
+      if(!month || r.月份!==month) return;
+      const h = resolveHouse(r);
+      if(h) visitHouse.add(h);
+    };
+    order.forEach(markVisit);
+    charge.forEach(markVisit);
     const totalHouse = allHouse.size;
     const visitCount = visitHouse.size;
     const overallRate = (totalHouse && month) ? (visitCount/totalHouse*100).toFixed(1)+'%' : '—';
@@ -1076,16 +1096,20 @@
     ].map(x=>'<div class="stat"><div class="v">'+esc(x.v)+'</div><div class="k">'+esc(x.k)+'</div></div>').join('');
 
     // 2) 维度聚合：VAB会员户主数(去重) / 月到店VAB会员数(户主去重) / 到店率
+    //    放宽口径对齐 KPI：明细记录按「户主/会员号/客户姓名」任一命中 VAB 户主即计为该户主到访，
+    //    并归入该户主在 VAB 中的维度(管家/医生)，与分母口径一致，故维度到店率恒 ≤ 100%。
     const map = new Map();
     const ensure = k => { if(!map.has(k)) map.set(k, {维度:k, house:new Set(), visit:new Set()}); return map.get(k); };
     vab.forEach(r=>{ const k=r[dimField]; if(k) ensure(k).house.add(r.户主); });
-    const addVisit = r => {
-      if(!month || r.月份!==month || !r.户主) return;
-      const k = r[visitField] || r[dimField];
-      if(k) ensure(k).visit.add(r.户主);
+    const addVisitDim = r => {
+      if(!month || r.月份!==month) return;
+      const h = resolveHouse(r); if(!h) return;
+      const vrow = vabByHouse.get(h);
+      const k = (vrow && (vrow[visitField] || vrow[dimField])) || (r[visitField] || r[dimField]);
+      if(k) ensure(k).visit.add(h);
     };
-    order.forEach(addVisit);
-    charge.forEach(addVisit);
+    order.forEach(addVisitDim);
+    charge.forEach(addVisitDim);
 
     let rows = [...map.values()].map(o=>({
       维度:o.维度,
