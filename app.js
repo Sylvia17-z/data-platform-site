@@ -54,7 +54,9 @@ const MODULES = [
       { id: 'ma-vab', name: 'VAB会员清单', icon: '📇', mod: 'vab' },
       { id: 'ma-order', name: '收退款数据明细', icon: '💰', mod: 'order' },
       { id: 'ma-charge', name: '收费明细数据明细', icon: '🧾', mod: 'charge' },
-      { id: 'ma-stats', name: '统计表', icon: '📊', mod: 'stats' },
+      { id: 'ma-stats', name: '到店率统计', icon: '📊', mod: 'stats' },
+      { id: 'ma-projects', name: '重点项目达成情况统计', icon: '🎯', mod: 'projects' },
+      { id: 'ma-consumption', name: '累计消费统计', icon: '💳', mod: 'consumption' },
     ],
   },
 ];
