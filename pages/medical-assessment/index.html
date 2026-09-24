@@ -350,7 +350,7 @@
     <section class="mod-panel" data-mod="projects">
       <div class="panel-head">
         <h2>🎯 重点项目达成情况统计</h2>
-        <span class="desc">按管家 / 医生维度，统计各重点项目类别（沿用 Sheet2 项目名→13 大类映射）的覆盖会员户主数、购买笔数与现款支付金额；上传「项目分类映射」后按类别聚合，可选填「目标金额」计算达成率。</span>
+        <span class="desc">按管家 / 医生维度考核 12 个重点项目类别的普及率达成：覆盖率 = 考核窗口内该类别有消费的会员户主数 ÷ 该维度会员户主总数；季度考核倒推 3 个月、半年倒推 6 个月、年度倒推 12 个月（以所选「考核基准月」为终点，含基准月）；覆盖率 ≥ 普及率目标 即达成。</span>
       </div>
       <div class="toolbar">
         <div class="grp">
@@ -361,8 +361,8 @@
           </select>
         </div>
         <div class="grp">
-          <span style="font-size:12.5px;color:var(--ink-soft);">统计月份：</span>
-          <select id="projMonth"><option value="">全部月份</option></select>
+          <span style="font-size:12.5px;color:var(--ink-soft);">考核基准月：</span>
+          <select id="projMonth"><option value="">全部时间</option></select>
         </div>
         <div class="grp">
           <label class="fbtn">导入项目分类映射
@@ -1393,15 +1393,56 @@
       }
     }catch(e){}
   }
-  function getCategory(itemName, c1){
-    const nm = normName(String(itemName||''));
-    if(projMap.has(nm)) return projMap.get(nm).cat;
-    if(c1) return c1;
-    return '未分类';
+  /* 重点项目考核口径（内置）：普及率目标(%) + 考核周期 + 归类关键词（按顺序首个命中生效）
+     季度考核倒推 3 个月、半年考核倒推 6 个月、年度考核倒推 12 个月（以所选「考核基准月」为终点，含基准月） */
+  const PROJ_DEFS = [
+    {cat:'血年轻管理',     target:60, months:6,  cycle:'半年·倒推6个月',  keys:['血年轻管理','血氧','血净','重金属排毒']},
+    {cat:'细胞管理',       target:60, months:12, cycle:'年度·倒推12个月', keys:['细胞管理','外泌体','吉祥四宝','梅利奥信息肽','干细胞','细胞']},
+    {cat:'PRP',            target:60, months:12, cycle:'年度·倒推12个月', keys:['PRP','prp']},
+    {cat:'营养管理',       target:60, months:3,  cycle:'季度·倒推3个月',  keys:['营养管理','靶向营养素','定制营养包','21天打卡','营养素','营养包','营养']},
+    {cat:'免疫管理',       target:60, months:6,  cycle:'半年·倒推6个月',  keys:['免疫管理','脂多糖','胸腺法新','胸腺蛋白肽','免疫41项','免疫78项','免疫']},
+    {cat:'能量滴',         target:60, months:3,  cycle:'季度·倒推3个月',  keys:['能量滴','静脉三宝']},
+    {cat:'肠道菌群',       target:30, months:12, cycle:'年度·倒推12个月', keys:['肠道菌群','菌群移植','5R','定制益生菌','益生菌','菌群','移植']},
+    {cat:'GP96',           target:10, months:12, cycle:'年度·12个月',     keys:['GP96','gp96','Gp96','gp96']},
+    {cat:'预防管理',       target:60, months:12, cycle:'年度·倒推12个月', keys:['预防管理','肿瘤全面早筛','肿瘤早筛','自身免疫性疾病风险','心脑血管风险','早筛']},
+    {cat:'荷尔蒙管理',     target:20, months:12, cycle:'年度·倒推12个月', keys:['荷尔蒙管理','荷尔蒙贴片','荷尔蒙芯片','DHEA','生长因子','荷尔蒙']},
+    {cat:'北院区理疗项目', target:20, months:3,  cycle:'季度·倒推3个月',  keys:['北院区理疗','理疗','肠疗','热疗','氧疗']},
+    {cat:'女性健康中心',   target:50, months:12, cycle:'年度·倒推12个月', keys:['女性健康中心','黏膜年轻态','卵巢抗衰','盆底肌','私密','面部抗衰']},
+  ];
+  // 考核回溯窗口：以 baseMonth 为终点，往前共 n 个月（含 baseMonth），返回 'YYYY-MM' 集合
+  function monthWindow(baseMonth, n){
+    const m = /^(\d{4})-(\d{1,2})$/.exec(String(baseMonth).trim());
+    const out = new Set();
+    if(!m){ out.add(String(baseMonth).trim()); return out; }
+    let y = +m[1], mo = +m[2];
+    for(let i=0;i<n;i++){
+      out.add(y + '-' + String(mo).padStart(2,'0'));
+      mo--; if(mo===0){ mo=12; y--; }
+    }
+    return out;
+  }
+  // 明细行 → 重点项目类别：①上传映射（项目名精确）覆盖 ②内置关键词匹配（按定义顺序首个命中）；未命中返回 null（不属任何重点项目）
+  function resolveProjDef(row){
+    const nm = normName(String(row.品项名称||''));
+    if(projMap.has(nm)){
+      const cat = projMap.get(nm).cat;
+      const d = PROJ_DEFS.find(x=>x.cat===cat);
+      if(d) return d;
+    }
+    const full = String(row.品项||'') + ' | ' + String(row.品项名称||'') + ' | ' + String(row.品项一级分类||'');
+    for(const d of PROJ_DEFS){
+      if(d.keys.some(k=>full.indexOf(k)>=0)) return d;
+    }
+    return null;
   }
   function renderProjects(){
     const order = App.lastOrder||[];
+    const vab = App.vab||[];
     const dim = projDim;
+    const dimField = dim==='manager' ? '健康管家' : '主诊医生';
+    const dimLabel = dimField;
+
+    // 考核基准月（取收退款月份去重，升序，默认最新月）
     const mset = new Set();
     order.forEach(r=>{ if(r.月份) mset.add(r.月份); });
     const months = [...mset].sort();
@@ -1410,68 +1451,106 @@
     if(monthSel){
       if(!month || !months.includes(month)) month = months.length ? months[months.length-1] : '';
       projMonth = month;
-      monthSel.innerHTML = ['<option value="">全部月份</option>'].concat(
+      monthSel.innerHTML = ['<option value="">全部时间</option>'].concat(
         months.map(m=>'<option value="'+esc(m)+'"'+(m===month?' selected':'')+'>'+esc(m)+'</option>')).join('');
     }
+
+    // 分母：该维度下 VAB 会员户主（去重）
     const { resolveHouse, vabByHouse } = buildHouseResolver();
-    const map = new Map();   // key: 维度|类别
-    const ensure = key => { if(!map.has(key)) map.set(key, {维度:'',类别:'',house:new Set(),n:0,pay:0,refund:0,net:0,target:0}); return map.get(key); };
+    const dimHouse = new Map();   // 维度值 -> Set(户主)
+    vab.forEach(r=>{
+      const k = r[dimField]; if(!k) return;
+      if(!dimHouse.has(k)) dimHouse.set(k, new Set());
+      if(r.户主) dimHouse.get(k).add(r.户主);
+    });
+
+    // 分子：倒推窗口内该类别有消费记录的户主 + 现款支付金额
+    const covHouse = new Map();   // 类别 -> Map(维度 -> Set(户主))
+    const covPay = new Map();     // 类别 -> Map(维度 -> 现款支付金额)
+    let uncatRows = 0;
     order.forEach(r=>{
-      if(month && r.月份!==month) return;
+      const def = resolveProjDef(r);
+      if(!def){
+        if(!month || r.月份===month) uncatRows++;
+        return;
+      }
+      if(month){
+        const win = monthWindow(month, def.months);
+        if(!win.has(r.月份)) return;
+      }
       const h = resolveHouse(r); if(!h) return;
       const vrow = vabByHouse.get(h);
-      const k = vrow ? (dim==='manager'? vrow.健康管家 : vrow.主诊医生) : (dim==='manager'? r.VAB管家 : r.VAB医生);
+      const k = vrow ? vrow[dimField] : (dim==='manager'? r.VAB管家 : r.VAB医生);
       if(!k) return;
-      const cat = getCategory(r.品项名称, r.品项一级分类);
-      const pm = projMap.get(normName(String(r.品项名称||'')));
-      const target = pm ? pm.target : 0;
-      const key = k+'|'+cat;
-      const o = ensure(key);
-      o.维度 = k; o.类别 = cat;
-      o.house.add(h); o.n++;
-      o.pay += toNum(r.现款支付金额); o.refund += toNum(r.退款金额);
-      o.net += (toNum(r.现款支付金额) - toNum(r.退款金额));
-      o.target += target;
+      if(!covHouse.has(def.cat)) covHouse.set(def.cat, new Map());
+      const m1 = covHouse.get(def.cat);
+      if(!m1.has(k)) m1.set(k, new Set());
+      m1.get(k).add(h);
+      if(!covPay.has(def.cat)) covPay.set(def.cat, new Map());
+      const m2 = covPay.get(def.cat);
+      m2.set(k, (m2.get(k)||0) + toNum(r.现款支付金额));
     });
-    let rows = [...map.values()].map(o=>({
-      维度:o.维度, 类别:o.类别, house:o.house.size, n:o.n, pay:o.pay, refund:o.refund, net:o.net,
-      target:o.target, rate: o.target>0 ? (o.net/o.target*100).toFixed(1)+'%' : '—',
-    }));
-    rows.sort((a,b)=> a.维度===b.维度 ? b.net-a.net : a.维度.localeCompare(b.维度,'zh'));
-    const dimLabel = dim==='manager' ? '健康管家' : '主诊医生';
+
+    // 完整考核表：每维度 × 12 个重点类别（无覆盖也展示 0，便于横向对比）
+    const rows = [];
+    const dimValues = [...dimHouse.keys()].sort((a,b)=> dimHouse.get(b).size - dimHouse.get(a).size);
+    dimValues.forEach(k=>{
+      const total = dimHouse.get(k).size;
+      PROJ_DEFS.forEach(d=>{
+        const ch = (covHouse.get(d.cat) && covHouse.get(d.cat).get(k)) || new Set();
+        const covered = ch.size;
+        const rate = total ? covered/total*100 : 0;
+        const pay = (covPay.get(d.cat) && covPay.get(d.cat).get(k)) || 0;
+        const gap = rate - d.target;
+        rows.push({
+          维度:k, 类别:d.cat, 周期:d.cycle,
+          total, covered, rate, target:d.target,
+          状态: total===0 ? '—' : (rate>=d.target ? '达成' : '未达成'),
+          差值: total===0 ? '' : (gap>=0 ? ('+'+gap.toFixed(1)+'%') : ('-'+(-gap).toFixed(1)+'%')),
+          pay,
+        });
+      });
+    });
+
     const cols = [
       {k:'维度', t:dimLabel},
-      {k:'类别', t:'重点项目类别'},
-      {k:'house', t:'覆盖会员户主数'},
-      {k:'n', t:'购买笔数'},
-      {k:'pay', t:'现款支付金额'},
-      {k:'refund', t:'退款金额'},
-      {k:'net', t:'净金额'},
-      {k:'target', t:'目标金额'},
-      {k:'rate', t:'达成率'},
+      {k:'类别', t:'重点项目'},
+      {k:'周期', t:'考核周期'},
+      {k:'total', t:'会员户主数'},
+      {k:'covered', t:'覆盖户主数'},
+      {k:'rate', t:'覆盖率', fmt:'pct'},
+      {k:'target', t:'普及率目标', fmt:'pct'},
+      {k:'状态', t:'达成情况'},
+      {k:'差值', t:'距目标'},
+      {k:'pay', t:'现款支付金额', fmt:'money'},
     ];
     const thead = document.querySelector('#projTable thead');
     const tbody = document.querySelector('#projTable tbody');
     if(thead) thead.innerHTML = '<tr>'+cols.map(c=>'<th>'+esc(c.t)+'</th>').join('')+'</tr>';
     if(tbody) tbody.innerHTML = rows.length ? rows.map(r=>'<tr>'+cols.map(c=>{
-      const isMoney = ['pay','refund','net','target'].includes(c.k);
-      const v = isMoney ? money(r[c.k]) : r[c.k];
-      const cls = c.k==='rate' ? (r.rate!=='—' && parseFloat(r.rate)>100 ? 'match-y' : 'match-n') : (isMoney?'num':'');
+      let v = r[c.k];
+      if(c.fmt==='pct') v = (Number(v)||0).toFixed(1)+'%';
+      else if(c.fmt==='money') v = money(r[c.k]);
+      let cls = '';
+      if(c.k==='状态') cls = r.状态==='达成' ? 'match-y' : (r.状态==='未达成' ? 'match-n' : '');
+      else if(c.k==='差值') cls = String(r.差值).charAt(0)==='+' ? 'match-y' : (String(r.差值).charAt(0)==='-' ? 'match-n' : '');
+      else if(c.fmt==='money') cls='num';
       return '<td'+(cls?' class="'+cls+'"':'')+'>'+esc(v)+'</td>';
     }).join('')+'</tr>').join('') : '';
-    const hasData = (App.vab.length||0) || order.length;
+    const hasData = vab.length || order.length;
     const empty = document.getElementById('projEmpty');
     if(empty) empty.style.display = hasData ? 'none' : 'block';
     const exp = document.getElementById('projExport');
     if(exp) exp.disabled = !rows.length;
     const note = document.getElementById('projNote');
     if(note) note.textContent = hasData
-      ? ('共 '+rows.length+' 行（'+(dim==='manager'?'管家维度':'医生维度')+(month?' · '+month:'')+'）；已映射项目 '+projMap.size+' 条')
+      ? ('共 '+rows.length+' 行（'+dimLabel+'维度'+(month ? ' · 基准月 '+month+'，按各类别考核周期倒推' : ' · 全部时间')+'）；未归入重点类别的明细 '+uncatRows+' 行')
       : '';
     const warn = document.getElementById('projWarn');
     if(warn){
-      if(projMap.size){ warn.className='vab-linked'; warn.classList.remove('show'); }
-      else { warn.className='vab-linked'; warn.classList.add('show'); warn.textContent='尚未导入项目分类映射：当前以收退款「品项一级分类」作为重点项目类别；上传 Sheet2 映射可切换为 13 大类口径。'; }
+      warn.className='vab-linked';
+      if(projMap.size){ warn.classList.add('show'); warn.textContent='已启用「导入项目分类映射」覆盖（'+projMap.size+' 条单品映射），未映射单品仍按内置关键词归类。'; }
+      else { warn.classList.add('show'); warn.textContent='内置 12 类重点项目口径已启用：季度倒推3个月 / 半年倒推6个月 / 年度倒推12个月；单品归类按备注关键词匹配（首个命中生效），可用「导入项目分类映射」按项目名覆盖。'; }
     }
     _projCache = { cols, rows };
   }
@@ -1481,8 +1560,9 @@
     if(!cols.length || !rows.length) return;
     const aoa = [cols.map(c=>c.t)];
     rows.forEach(r=> aoa.push(cols.map(c=>{
-      const isMoney = ['pay','refund','net','target'].includes(c.k);
-      return isMoney ? (Number(r[c.k])||0) : (r[c.k]!=null? r[c.k] : '');
+      if(c.fmt==='money') return Number(r[c.k])||0;
+      if(c.fmt==='pct') return (Number(r[c.k])||0).toFixed(1)+'%';
+      return r[c.k]!=null? r[c.k] : '';
     })));
     const ws = XLSX.utils.aoa_to_sheet(aoa);
     const wb = XLSX.utils.book_new();
