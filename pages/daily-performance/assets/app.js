@@ -183,6 +183,8 @@ function persistOrders(){
   catch(e){ /* 配额超限/隐私模式：降级到 IndexedDB */ }
   // 2) IndexedDB 异步兜底（更大配额，防 localStorage 静默失败）
   idbSet(ORDERS_STORAGE_KEY, payload).catch(()=>{});
+  // 3) 桥接父窗口：跨域 / 一次性 origin 的 iframe 内部存储不可靠，转交稳定的顶层壳窗口持久化
+  try{ if(window.parent && window.parent !== window) window.parent.postMessage({ type:'dp:persist', key:ORDERS_STORAGE_KEY, payload }, '*'); }catch(e){}
   showOrdersSaved(lsOk);
 }
 function restoreOrders(){
@@ -196,6 +198,8 @@ function restoreOrders(){
       if(applyOrdersRaw(saved) && typeof _postRestore === 'function') _postRestore();
     }
   }).catch(()=>{});
+  // 桥接父窗口：向壳请求持久化数据（与壳在 iframe load 时主动推送互补，覆盖壳监听尚未就绪等时序）
+  try{ if(window.parent && window.parent !== window) window.parent.postMessage({ type:'dp:request', key:ORDERS_STORAGE_KEY }, '*'); }catch(e){}
 }
 // IDB 异步恢复成功后由 initApp 注入的回调：重新渲染并触发重算
 let _postRestore = null;
@@ -207,6 +211,17 @@ function showOrdersSaved(ok){
   el.textContent = ok ? '· 已本地保存' : '· 已本地保存(IDB)';
   el.className = 'file-meta';
 }
+// 接收套壳父窗口推送 / 应答的持久化数据（跨域 iframe 内部存储不可靠时的恢复通道）。
+// 仅当本页尚未自行恢复（state.orders 为空）时应用，避免同源场景下的重复重渲染。
+// 直接调用 runRestoredRecompute（函数声明，随时可用）：即便 initApp 已先以空数据渲染，
+// 此处也会用恢复出的数据重新渲染 + 重算，确保表格不空白。
+window.addEventListener('message', (e) => {
+  const m = (e && e.data) || null;
+  if(!m || m.type !== 'dp:payload' || !m.key) return;
+  if(m.key !== ORDERS_STORAGE_KEY) return;
+  if(state.orders.length > 0) return;
+  if(applyOrdersRaw(m.payload)) runRestoredRecompute();
+});
 function clearManualOverrides(){
   state.manual = { month:{}, daily:{} };
   persistManual();
@@ -558,24 +573,27 @@ function pickField(row, candidates){
 }
 
 function normalizeOrder(r){
+  // 字符串字段统一 trim：Excel 单元格常带首尾空格，不清洗会导致
+  // 「微信小程序」/「线上400」等精确/包含匹配失效，金额被误落入"其他"
+  const s = (v) => String(v == null ? '' : v).trim();
   return {
-    name: pickField(r, ['客户姓名','客户']),
+    name: s(pickField(r, ['客户姓名','客户'])),
     // 会员号列名兼容多种写法：会员号 / 会员编号 / 会员ID / 会员卡号 / 卡号 / VAB会员号
     // 若真实订单表用"会员编号"等命名而只匹配"会员号"，memberNo 会为空 → 全部 VAB 匹配失败 → 新增业绩恒为 0
-    memberNo: pickField(r, ['会员号','会员编号','会员ID','会员卡号','卡号','VAB会员号','member_no']),
-    developer: pickField(r, ['客户开发人']),
-    consultant: pickField(r, ['开单健康管家','开单咨询师','咨询师','服务顾问','开单人','主诊咨询师']),
-    channelClass: pickField(r, ['客户来源渠道分类','渠道分类']),
-    channelL1: pickField(r, ['客户来源一级渠道','一级渠道']),
-    channelL2: pickField(r, ['客户来源二级渠道','二级渠道']),
-    channelL3: pickField(r, ['客户来源三级渠道','三级渠道','渠道L3','客户来源三级','三级来源']),
+    memberNo: s(pickField(r, ['会员号','会员编号','会员ID','会员卡号','卡号','VAB会员号','member_no'])),
+    developer: s(pickField(r, ['客户开发人'])),
+    consultant: s(pickField(r, ['开单健康管家','开单咨询师','咨询师','服务顾问','开单人','主诊咨询师'])),
+    channelClass: s(pickField(r, ['客户来源渠道分类','渠道分类'])),
+    channelL1: s(pickField(r, ['客户来源一级渠道','一级渠道'])),
+    channelL2: s(pickField(r, ['客户来源二级渠道','二级渠道'])),
+    channelL3: s(pickField(r, ['客户来源三级渠道','三级渠道','渠道L3','客户来源三级','三级来源'])),
     cashPay: Number(pickField(r, ['现款支付'])) || 0,
-    visitType: pickField(r, ['到访类型']),
+    visitType: s(pickField(r, ['到访类型'])),
     payTime: parseDateLoose(pickField(r, ['收款时间'])),
-    receiptNo: pickField(r, ['收款单号']),
-    cashier: pickField(r, ['收款员工']),
-    payType: pickField(r, ['收款类型']),
-    payMethod: pickField(r, ['收款详情汇总','收款方式','详情']),
+    receiptNo: s(pickField(r, ['收款单号'])),
+    cashier: s(pickField(r, ['收款员工'])),
+    payType: s(pickField(r, ['收款类型'])),
+    payMethod: s(pickField(r, ['收款详情汇总','收款方式','详情'])),
   };
 }
 
@@ -647,35 +665,41 @@ function calculate(orders, vabSet, cutoff){
   });
 
   const sum = (rows) => rows.reduce((a,b)=>a + (Number(b.cashPay)||0), 0);
+  // 渠道字段统一 trim 后比较：容忍历史持久化数据 / Excel 单元格的首尾空格，
+  // 避免「微信小程序 」「品牌组 」等值匹配失效而误落入"其他"
+  const CC  = r => (r.channelClass||'').trim();
+  const L1  = r => (r.channelL1||'').trim();
+  const L2  = r => (r.channelL2||'').trim();
 
   // --- 1. 品牌组-其他 ---
+  // （括号明确分组：两个分支均要求 营销部+品牌组，避免 && / || 优先级歧义）
   const r1 = orders.filter(r =>
-    r.channelClass === '营销部' &&
-    r.channelL1 === '品牌组' &&
-    ['微信小程序','微信公众号','客服手机','前台座机'].includes(r.channelL2) ||
-    (r.channelClass === '营销部' && r.channelL1 === '品牌组' && (r.channelL2||'').includes('阿里') && (r.channelL2||'').includes('高德'))
+    (CC(r) === '营销部' &&
+     L1(r) === '品牌组' &&
+     ['微信小程序','微信公众号','客服手机','前台座机'].includes(L2(r))) ||
+    (CC(r) === '营销部' && L1(r) === '品牌组' && L2(r).includes('阿里') && L2(r).includes('高德'))
   );
 
   // --- 2. 活动组-活动支持 ---
-  const r2 = orders.filter(r => r.channelClass==='营销部' && r.channelL1==='活动组' && r.channelL2==='活动支持');
+  const r2 = orders.filter(r => CC(r)==='营销部' && L1(r)==='活动组' && L2(r)==='活动支持');
 
   // --- 3. 电商组（接受 一级渠道=电商组 / 客户转介绍 / 企业团检） ---
-  const r3 = orders.filter(r => r.channelClass==='营销部' && ['电商组','客户转介绍','企业团检'].includes(r.channelL1));
+  const r3 = orders.filter(r => CC(r)==='营销部' && ['电商组','客户转介绍','企业团检'].includes(L1(r)));
 
   // --- 3c. 电商组补充（2026-09-29 需求）：营销部 + 品牌组 + 二级渠道=线上400 → 归入电商组 ---
-  const r3c = orders.filter(r => r.channelClass==='营销部' && r.channelL1==='品牌组' && (r.channelL2||'').includes('线上400'));
+  const r3c = orders.filter(r => CC(r)==='营销部' && L1(r)==='品牌组' && L2(r).includes('线上400'));
 
   // --- 4. 短视频组 ---
-  const r4 = orders.filter(r => r.channelClass==='营销部' && r.channelL1==='短视频组');
+  const r4 = orders.filter(r => CC(r)==='营销部' && L1(r)==='短视频组');
 
   // --- 5. 品牌组-自然到店（包含自然到店关键字） ---
-  const r5 = orders.filter(r => r.channelClass==='营销部' && r.channelL1==='品牌组' && (r.channelL2||'').includes('自然到店'));
+  const r5 = orders.filter(r => CC(r)==='营销部' && L1(r)==='品牌组' && L2(r).includes('自然到店'));
 
   // --- 6. 商务部（口径：客户来源渠道分类/一级渠道/二级渠道 任一为「商务部」或「市场部」；
   //      市场部数据并入商务部统一核算，故不再单独落入"其他"） ---
   //      注：渠道分类=推荐 的订单改由下方 r6b 单独处理，避免与 chanHas 商务部/市场部 重复计入，
   //      故此处先把推荐类排除，r6b 再并入商务部，二者互不重叠。
-  const r6 = orders.filter(r => (chanHas(r, '商务部') || chanHas(r, '市场部')) && (r.channelClass||'') !== '推荐');
+  const r6 = orders.filter(r => (chanHas(r, '商务部') || chanHas(r, '市场部')) && (r.channelClass||'').trim() !== '推荐');
 
   // --- 6b. 推荐渠道补充（新增逻辑，不动 r1~r6 原有规则）---
   // 渠道分类=推荐 且 一级分类包含「营销部」→ 计入营销部业绩：
@@ -1505,17 +1529,17 @@ function isVabMember(memberNo){
 // 渠道类页签容错匹配：真实导出表里"部门"可能落在 渠道分类/一级渠道/二级渠道 任一列，
 // 故任一字段等于目标值即命中（营销部/商务部/市场部 实际在 channelClass；公司所有 在 channelL1）。
 function chanHas(r, val){
-  return (r.channelClass||'') === val || (r.channelL1||'') === val || (r.channelL2||'') === val;
+  return (r.channelClass||'').trim() === val || (r.channelL1||'').trim() === val || (r.channelL2||'').trim() === val;
 }
 
 // 推荐渠道归类（新增逻辑，不改原有 r1~r6）：渠道分类=推荐 时按「一级渠道」落地到营销部/商务部
 // 一级分类包含「营销部」→ 计入营销部业绩（二级含自然到店 → 品牌组-自然到店，否则 → 电商组）
 // 一级分类包含「商务部」→ 计入商务部业绩
 function isRecToYingxiao(r){
-  return (r.channelClass||'') === '推荐' && (r.channelL1||'').includes('营销部');
+  return (r.channelClass||'').trim() === '推荐' && (r.channelL1||'').includes('营销部');
 }
 function isRecToShangwu(r){
-  return (r.channelClass||'') === '推荐' && (r.channelL1||'').includes('商务部');
+  return (r.channelClass||'').trim() === '推荐' && (r.channelL1||'').includes('商务部');
 }
 
 const DETAIL_TABS = [
@@ -1549,7 +1573,7 @@ function detailSortVal(r, key){
 // 可排序列定义（# 与 操作 列不排序）
 const DETAIL_SORT_COLS = [
   ['name','姓名'], ['memberNo','会员号'], ['channelClass','渠道分类'], ['channelL1','一级渠道'],
-  ['channelL2','二级渠道'], ['channelL3','三级渠道'], ['consultant','咨询师'], ['cashier','收款员工'],
+  ['channelL2','二级渠道'], ['consultant','咨询师'], ['cashier','收款员工'],
   ['payTime','收款时间'], ['cashPay','现款支付'], ['vab','VAB'],
 ];
 // 对筛选后的列表就地排序（无排序状态时保持导入顺序）
@@ -1590,7 +1614,7 @@ function filterOrdersByTab(key){
   else if(key === 'yingxiao') list = orders.filter(r => isToday(r) && (chanHas(r,'营销部') || isRecToYingxiao(r)));
   // 推荐页签：渠道分类=推荐 的订单（当日口径，与商务部/营销部页签一致），
   // 用于核对新归类逻辑落位（一级含营销部→营销部，含商务部→商务部，未匹配→其他）
-  else if(key === 'recommend') list = orders.filter(r => isToday(r) && (r.channelClass||'') === '推荐');
+  else if(key === 'recommend') list = orders.filter(r => isToday(r) && (r.channelClass||'').trim() === '推荐');
   // 员工消费：渠道分类=公司所有 且 客户渠道标记为"员工本人及家属"。
   // 实测真实导出表里该标记落在【二级渠道】(L2)，旧导出可能在【三级渠道】(L3)，故 L2/L3 任一命中即可；
   // 原代码只查 L3 导致整组 0 行。按全月统计（不限当日），与「管家部」全月审计口径一致。
@@ -1604,7 +1628,7 @@ function filterOrdersByTab(key){
   const f = detailFilters || {};
   if(f.name){ const q=String(f.name).toLowerCase(); list=list.filter(r=>String(r.name||'').toLowerCase().includes(q)); }
   if(f.memberNo){ const q=String(f.memberNo).toLowerCase(); list=list.filter(r=>String(r.memberNo||'').toLowerCase().includes(q)); }
-  ['channelClass','channelL1','channelL2','channelL3','consultant','cashier'].forEach(k=>{
+  ['channelClass','channelL1','channelL2','consultant','cashier'].forEach(k=>{
     if(f[k]) list=list.filter(r=>String(r[k]||'').trim()===f[k]);
   });
   if(f.cashPay) list=list.filter(r=>fmt(r.cashPay)===f.cashPay);
@@ -1633,7 +1657,6 @@ function detailRowCells(r, i, start){
     <td>${esc(r.channelClass)}</td>
     <td>${esc(r.channelL1)}</td>
     <td>${esc(r.channelL2)}</td>
-    <td>${esc(r.channelL3)}</td>
     <td>${esc(r.consultant)}</td>
     <td>${esc(r.cashier)}</td>
     <td>${r.payTime?r.payTime.toLocaleString('zh-CN'):''}</td>
@@ -1658,7 +1681,6 @@ function detailCardHTML(r){
       ${row('渠道分类', esc(r.channelClass))}
       ${row('一级渠道', esc(r.channelL1))}
       ${row('二级渠道', esc(r.channelL2))}
-      ${row('三级渠道', esc(r.channelL3))}
       ${row('咨询师', esc(r.consultant))}
       ${row('收款员工', esc(r.cashier))}
       ${row('收款时间', r.payTime?esc(r.payTime.toLocaleString('zh-CN')):'')}
@@ -1744,7 +1766,6 @@ function renderImportDetails(){
       ${fSel('channelClass','渠道分类',distinct('channelClass'))}
       ${fSel('channelL1','一级渠道',distinct('channelL1'))}
       ${fSel('channelL2','二级渠道',distinct('channelL2'))}
-      ${fSel('channelL3','三级渠道',distinct('channelL3'))}
       ${fSel('consultant','咨询师',distinct('consultant'))}
       ${fSel('cashier','收款员工',distinct('cashier'))}
       ${fSel('cashPay','现款支付',cashVals)}
@@ -1789,7 +1810,7 @@ function renderImportDetails(){
           <thead><tr>${sortThs}</tr></thead>
           <tbody>${pageItems.map((r,i)=>detailRowCells(r,i,start)).join('')}</tbody>
           <tfoot><tr style="font-weight:700;background:var(--c-blue-tint);color:var(--c-head);">
-            <td colspan="10" style="text-align:right;">合计（${list.length} 行 · 命中VAB ${vabCount} 行）</td>
+            <td colspan="9" style="text-align:right;">合计（${list.length} 行 · 命中VAB ${vabCount} 行）</td>
             <td style="text-align:right;">${fmt(total)}</td>
             <td style="text-align:center;">${vabCount}</td>
             <td></td>

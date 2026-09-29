@@ -11,7 +11,7 @@ const state = { modules: [], tabs: [], current: null };
 
 // 发布版本号：每次重新发布时更新（日期+序号），用于 iframe 缓存穿透，确保线上改动即时可见。
 // file:// 双击打开时不加查询串（带查询串的 iframe 在 file:// 下可能无法加载）。
-const SITE_VER = '20260929d';
+const SITE_VER = '20260929f';
 function withVer(src) {
   if (location.protocol === 'file:') return src;
   return src + (src.indexOf('?') >= 0 ? '&' : '?') + 'v=' + SITE_VER;
@@ -70,6 +70,30 @@ const MODULES = [
 ];
 
 const $ = (sel) => document.querySelector(sel);
+
+// 子页面（iframe）持久化桥接：把 iframe 内部的订单数据交由稳定的顶层壳窗口保管，
+// 避免部署环境下 iframe 处于一次性 / 跨域 origin 导致其内部 localStorage / IndexedDB 刷新后丢失。
+// 协议：iframe → 壳：dp:persist（写入）/ dp:request（索取）；壳 → iframe：dp:payload（推送 / 应答）。
+function pushEmbeddedState(frame){
+  try {
+    ['dailyPerformance_orders'].forEach(k => {
+      const saved = localStorage.getItem(k);
+      if(saved && frame.contentWindow) frame.contentWindow.postMessage({ type:'dp:payload', key:k, payload:saved }, '*');
+    });
+  } catch(_){}
+}
+window.addEventListener('message', (e) => {
+  const m = (e && e.data) || null;
+  if(!m || typeof m !== 'object') return;
+  if(m.type === 'dp:persist' && typeof m.key === 'string' && typeof m.payload === 'string'){
+    try { localStorage.setItem(m.key, m.payload); } catch(_){}
+  } else if(m.type === 'dp:request' && typeof m.key === 'string'){
+    try {
+      const payload = localStorage.getItem(m.key);
+      if(e.source && e.source.postMessage) e.source.postMessage({ type:'dp:payload', key:m.key, payload: payload }, '*');
+    } catch(_){}
+  }
+});
 
 /* ---------- 启动 ---------- */
 async function boot() {
@@ -182,7 +206,7 @@ function createChildTab(tab, parent, child) {
   // 独立页面（如月度分析面板，现已作为一级菜单）使用 src 直接嵌入，无需 postMessage。
   frame.src = withVer((child.src || parent.src).replace(/^\//, ''));
   const post = () => { if (!child.mod) return; try { frame.contentWindow.postMessage({ type: 'app:setMod', mod: child.mod }, '*'); } catch (e) {} };
-  frame.addEventListener('load', () => { post(); setTimeout(post, 300); });
+  frame.addEventListener('load', () => { pushEmbeddedState(frame); post(); setTimeout(post, 300); });
   page.appendChild(frame);
   $('#content').appendChild(page);
 }
@@ -209,6 +233,7 @@ function createTabPage(tab, mod) {
   frame.title = mod.name;
   frame.setAttribute('loading', 'lazy');
   frame.src = withVer(mod.src.replace(/^\//, '')); // 去掉前导斜杠，兼容 GitHub Pages 子路径；http(s) 下追加版本号防缓存
+  frame.addEventListener('load', () => pushEmbeddedState(frame));
   page.appendChild(frame);
   $('#content').appendChild(page);
 }
