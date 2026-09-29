@@ -366,10 +366,17 @@
           <select id="projMonth"><option value="">全部时间</option></select>
         </div>
         <div class="grp">
+          <span style="font-size:12.5px;color:var(--ink-soft);">筛选：</span>
+          <select id="projFManager" title="按管家名称筛选"><option value="">管家：全部</option></select>
+          <select id="projFDoctor" title="按医生名称筛选"><option value="">医生：全部</option></select>
+          <select id="projFProject" title="按项目名称筛选"><option value="">项目：全部</option></select>
+        </div>
+        <div class="grp">
           <label class="fbtn">导入项目分类映射
             <input type="file" id="fileProjMap" accept=".xlsx,.xls,.csv" />
           </label>
           <button type="button" class="btn" id="projClearMap">清除映射</button>
+          <button type="button" class="btn" id="projExportMap">导出项目分类映射</button>
         </div>
         <button class="btn" id="projExport" disabled>导出 Excel</button>
       </div>
@@ -1256,6 +1263,9 @@
   let _consCache = { cols:[], rows:[] };
   let projDim = 'manager';
   let projMonth = '';
+  let projFManager = '';   // 筛选：管家名称（'' = 全部）
+  let projFDoctor = '';    // 筛选：医生名称（'' = 全部）
+  let projFProject = '';   // 筛选：项目（重点类别）名称（'' = 全部）
   let _projCache = { cols:[], rows:[] };
   let projMap = new Map();          // normName(品项名称) -> {cat, target}
   const PROJ_MAP_KEY = 'med_proj_map';
@@ -1436,6 +1446,15 @@
     }
     return null;
   }
+  // 通用：填充筛选下拉（保留当前选中值；值失效则重置为全部）
+  function fillProjFilter(id, vals, cur, allLabel){
+    const sel = document.getElementById(id); if(!sel) return cur;
+    const arr = [...vals].sort();
+    if(cur && !arr.includes(cur)) cur = '';
+    sel.innerHTML = ['<option value="">'+esc(allLabel)+'</option>'].concat(
+      arr.map(v=>'<option value="'+esc(v)+'"'+(v===cur?' selected':'')+'>'+esc(v)+'</option>')).join('');
+    return cur;
+  }
   function renderProjects(){
     const order = App.lastOrder||[];
     const vab = App.vab||[];
@@ -1456,10 +1475,20 @@
         months.map(m=>'<option value="'+esc(m)+'"'+(m===month?' selected':'')+'>'+esc(m)+'</option>')).join('');
     }
 
-    // 分母：该维度下 VAB 会员户主（去重）
+    // 筛选下拉：管家 / 医生（VAB 清单 + 收退款明细两处来源去重）、项目（内置 12 类）
+    const mgrSet = new Set(), docSet = new Set();
+    vab.forEach(r=>{ if(r['健康管家']) mgrSet.add(r['健康管家']); if(r['主诊医生']) docSet.add(r['主诊医生']); });
+    order.forEach(r=>{ if(r.VAB管家) mgrSet.add(r.VAB管家); if(r.VAB医生) docSet.add(r.VAB医生); });
+    projFManager = fillProjFilter('projFManager', mgrSet, projFManager, '管家：全部');
+    projFDoctor  = fillProjFilter('projFDoctor',  docSet, projFDoctor,  '医生：全部');
+    projFProject = fillProjFilter('projFProject', new Set(PROJ_DEFS.map(d=>d.cat)), projFProject, '项目：全部');
+
+    // 分母：该维度下 VAB 会员户主（去重；应用管家 / 医生筛选）
     const { resolveHouse, vabByHouse } = buildHouseResolver();
     const dimHouse = new Map();   // 维度值 -> Set(户主)
     vab.forEach(r=>{
+      if(projFManager && r['健康管家'] !== projFManager) return;
+      if(projFDoctor && r['主诊医生'] !== projFDoctor) return;
       const k = r[dimField]; if(!k) return;
       if(!dimHouse.has(k)) dimHouse.set(k, new Set());
       if(r.户主) dimHouse.get(k).add(r.户主);
@@ -1484,6 +1513,10 @@
       const vrow = vabByHouse.get(h);
       const k = vrow ? vrow[dimField] : (dim==='manager'? r.VAB管家 : r.VAB医生);
       if(!k) return;
+      const _mgr = vrow ? (vrow['健康管家']||'') : (r.VAB管家||'');
+      const _doc = vrow ? (vrow['主诊医生']||'') : (r.VAB医生||'');
+      if(projFManager && _mgr !== projFManager) return;
+      if(projFDoctor && _doc !== projFDoctor) return;
       if(!covHouse.has(def.cat)) covHouse.set(def.cat, new Map());
       const m1 = covHouse.get(def.cat);
       if(!m1.has(k)) m1.set(k, new Set());
@@ -1525,6 +1558,9 @@
       });
     });
 
+    // 项目名称筛选：行级过滤（每行即一个重点类别）
+    const viewRows = projFProject ? rows.filter(r=>r.类别===projFProject) : rows;
+
     const cols = [
       {k:'维度', t:dimLabel},
       {k:'类别', t:'重点项目'},
@@ -1541,7 +1577,7 @@
     const tbody = document.querySelector('#projTable tbody');
     if(thead) thead.innerHTML = '<tr>'+cols.map(c=>'<th>'+esc(c.t)+'</th>').join('')+'</tr>';
     if(tbody){
-      tbody.innerHTML = rows.length ? rows.map((r,i)=>'<tr class="row-click" data-idx="'+i+'" title="点击查看执行项目明细">'+cols.map(c=>{
+      tbody.innerHTML = viewRows.length ? viewRows.map((r,i)=>'<tr class="row-click" data-idx="'+i+'" title="点击查看执行项目明细">'+cols.map(c=>{
       let v = r[c.k];
       if(c.fmt==='pct') v = (Number(v)||0).toFixed(1)+'%';
       else if(c.fmt==='money') v = money(r[c.k]);
@@ -1567,10 +1603,12 @@
     const empty = document.getElementById('projEmpty');
     if(empty) empty.style.display = hasData ? 'none' : 'block';
     const exp = document.getElementById('projExport');
-    if(exp) exp.disabled = !rows.length;
+    if(exp) exp.disabled = !viewRows.length;
     const note = document.getElementById('projNote');
     if(note) note.textContent = hasData
-      ? ('共 '+rows.length+' 行（'+dimLabel+'维度'+(month ? ' · 基准月 '+month+'，按各类别考核周期倒推' : ' · 全部时间')+'）；未归入重点类别的明细 '+uncatRows+' 行；点击行可查看该类别的执行项目明细')
+      ? ('共 '+viewRows.length+' 行（'+dimLabel+'维度'+(month ? ' · 基准月 '+month+'，按各类别考核周期倒推' : ' · 全部时间')
+        + (projFManager ? ' · 管家：'+projFManager : '') + (projFDoctor ? ' · 医生：'+projFDoctor : '') + (projFProject ? ' · 项目：'+projFProject : '')
+        + '）；未归入重点类别的明细 '+uncatRows+' 行；点击行可查看该类别的执行项目明细')
       : '';
     const warn = document.getElementById('projWarn');
     if(warn){
@@ -1578,7 +1616,7 @@
       if(projMap.size){ warn.classList.add('show'); warn.textContent='已启用「导入项目分类映射」覆盖（'+projMap.size+' 条单品映射），未映射单品仍按内置关键词归类。'; }
       else { warn.classList.add('show'); warn.textContent='内置 12 类重点项目口径已启用：季度倒推3个月 / 半年倒推6个月 / 年度倒推12个月；单品归类按备注关键词匹配（首个命中生效），可用「导入项目分类映射」按项目名覆盖。'; }
     }
-    _projCache = { cols, rows };
+    _projCache = { cols, rows: viewRows };
   }
 
   function exportProjectsXlsx(){
@@ -1594,6 +1632,21 @@
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, '重点项目达成情况统计');
     XLSX.writeFile(wb, '医管考核_重点项目达成_'+Date.now()+'.xlsx');
+  }
+
+  /* ---------- 重点项目：导出项目分类映射（自定义映射 + 内置 12 类关键词口径） ---------- */
+  function exportProjMapXlsx(){
+    const aoa = [['项目名称/关键词','归属类别','普及率目标','考核周期','来源']];
+    projMap.forEach((v,k)=>{
+      const d = PROJ_DEFS.find(x=>x.cat===v.cat);
+      const tg = (v.target!=null) ? v.target : (d ? d.target : '');
+      aoa.push([k, v.cat||'', tg===''? '' : (tg+'%'), d?d.cycle:'', '自定义映射']);
+    });
+    PROJ_DEFS.forEach(d=> d.keys.forEach(k=> aoa.push([k, d.cat, d.target+'%', d.cycle, '内置关键词'])));
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, '项目分类映射');
+    XLSX.writeFile(wb, '医管考核_项目分类映射_'+Date.now()+'.xlsx');
   }
 
   /* ---------- 重点项目：点击行查看执行项目明细 ---------- */
@@ -1910,10 +1963,14 @@
   document.getElementById('consMonth').addEventListener('change', e=>{ consMonth = e.target.value; renderConsumption(); });
   document.getElementById('consExport').addEventListener('click', ()=>exportConsumptionXlsx());
 
-  /* 重点项目达成情况统计：维度 / 月份 / 映射导入 / 清除 / 导出 */
+  /* 重点项目达成情况统计：维度 / 月份 / 筛选（管家·医生·项目）/ 映射导入 / 清除 / 导出 */
   document.getElementById('projDim').addEventListener('change', e=>{ projDim = e.target.value; renderProjects(); });
   document.getElementById('projMonth').addEventListener('change', e=>{ projMonth = e.target.value; renderProjects(); });
+  document.getElementById('projFManager').addEventListener('change', e=>{ projFManager = e.target.value; renderProjects(); });
+  document.getElementById('projFDoctor').addEventListener('change', e=>{ projFDoctor = e.target.value; renderProjects(); });
+  document.getElementById('projFProject').addEventListener('change', e=>{ projFProject = e.target.value; renderProjects(); });
   document.getElementById('projExport').addEventListener('click', ()=>exportProjectsXlsx());
+  document.getElementById('projExportMap').addEventListener('click', ()=>exportProjMapXlsx());
   document.getElementById('projClearMap').addEventListener('click', ()=>{ projMap = new Map(); persistProjMap(); renderProjects(); });
   bindFile('fileProjMap', (rows)=>{
     const m = loadProjMap(rows);

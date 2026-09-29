@@ -11,7 +11,7 @@ const state = { modules: [], tabs: [], current: null };
 
 // 发布版本号：每次重新发布时更新（日期+序号），用于 iframe 缓存穿透，确保线上改动即时可见。
 // file:// 双击打开时不加查询串（带查询串的 iframe 在 file:// 下可能无法加载）。
-const SITE_VER = '20260929a';
+const SITE_VER = '20260929b';
 function withVer(src) {
   if (location.protocol === 'file:') return src;
   return src + (src.indexOf('?') >= 0 ? '&' : '?') + 'v=' + SITE_VER;
