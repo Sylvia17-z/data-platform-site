@@ -173,6 +173,7 @@
           <button type="button" class="btn" id="vabExport">批量导出</button>
           <button type="button" class="btn" id="vabTemplate">下载导入模板</button>
           <button type="button" class="btn" id="vabBatchDel" disabled>批量删除</button>
+          <button type="button" class="btn" id="vabClearAll" style="color:#c0392b;">清空数据</button>
         </div>
         <div class="grp">
           <span style="font-size:12.5px;color:var(--ink-soft);">导入方式：</span>
@@ -1813,6 +1814,22 @@
     if(App.lastOrder) scheduleRender('order');
     if(App.lastCharge) scheduleRender('charge');
   }
+  // 清空数据：一键移除全部 VAB 会员（双重确认防误触，并刷新到店率/累计消费/重点项目统计）
+  function clearAllVab(){
+    const n = App.vab.length;
+    if(!n){ alert('当前没有 VAB 会员数据。'); return; }
+    if(!confirm('确认清空全部 VAB 会员数据？共 '+n+' 条记录。\n清空后到店率 / 累计消费 / 重点项目将失去匹配基准，且不可恢复！')) return;
+    if(!confirm('再次确认：真的要清空全部 '+n+' 条 VAB 记录吗？此操作不可恢复！')) return;
+    App.vab = [];
+    vabSelSet.clear();
+    rebuildVabIndex();
+    App.vabRev++;                 // 数据变化 -> 失效筛选/排序缓存
+    persistVab();                 // 同步清空本地持久化
+    renderVab();
+    refreshStats();               // VAB 变化 -> 重算统计表
+    if(App.lastOrder) scheduleRender('order');
+    if(App.lastCharge) scheduleRender('charge');
+  }
   function downloadVabTemplate(){
     const aoa = [COLS.vab.map(c=>c.t)];
     const ws = XLSX.utils.aoa_to_sheet(aoa);
@@ -2001,6 +2018,7 @@
   document.getElementById('vabTemplate').addEventListener('click', downloadVabTemplate);
   document.getElementById('vabAdd').addEventListener('click', ()=>openVabModal(null,'edit'));
   document.getElementById('vabBatchDel').addEventListener('click', batchDeleteVab);
+  document.getElementById('vabClearAll').addEventListener('click', clearAllVab);
 
   /* 统计表：命中客户明细弹窗 关闭 */
   document.getElementById('statsDetailClose').addEventListener('click', closeStatsDetail);
