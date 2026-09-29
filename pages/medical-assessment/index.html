@@ -229,7 +229,7 @@
           <select id="orderMonth"><option value="">全部月份</option></select>
         </div>
         <div class="grp">
-          <input type="text" id="orderSearch" class="inp" placeholder="搜索会员号 / 姓名 / 管家 / 品项…" />
+          <input type="text" id="orderSearch" class="inp" placeholder="搜索会员号 / 姓名 / 管家 / 品项 / 重点项目…" />
         </div>
         <button class="btn" id="orderExport" disabled>导出 Excel</button>
         <button class="btn" id="orderClear">清空明细</button>
@@ -273,7 +273,7 @@
           <select id="chargeMonth"><option value="">全部月份</option></select>
         </div>
         <div class="grp">
-          <input type="text" id="chargeSearch" class="inp" placeholder="搜索会员号 / 姓名 / 管家 / 项目…" />
+          <input type="text" id="chargeSearch" class="inp" placeholder="搜索会员号 / 姓名 / 管家 / 项目 / 重点项目…" />
         </div>
         <button class="btn" id="chargeExport" disabled>导出 Excel</button>
         <button class="btn" id="chargeClear">清空明细</button>
@@ -601,12 +601,12 @@
       {k:'月份',t:'月份'},{k:'会员号',t:'会员号'},{k:'客户姓名',t:'客户姓名'},{k:'户主',t:'户主'},
       {k:'VAB管家',t:'VAB管家'},{k:'VAB医生',t:'VAB医生'},{k:'是否参与考核',t:'是否参与考核'},
       {k:'现款支付金额',t:'现款支付金额'},{k:'退款金额',t:'退款金额'},
-      {k:'品项',t:'品项(分类/名称)'},{k:'匹配',t:'匹配状态'},
+      {k:'品项',t:'品项(分类/名称)'},{k:'重点项目',t:'重点项目(品项根项目对照)'},{k:'匹配',t:'匹配状态'},
     ],
     charge: [
       {k:'月份',t:'月份'},{k:'会员号',t:'会员号(姓名匹配)'},{k:'客户姓名',t:'客户姓名'},{k:'户主',t:'户主'},
       {k:'VAB管家',t:'VAB管家'},{k:'VAB医生',t:'VAB医生'},{k:'是否参与考核',t:'是否参与考核'},
-      {k:'药品项目名称',t:'药品/项目名称'},{k:'匹配',t:'匹配状态'},
+      {k:'药品项目名称',t:'药品/项目名称'},{k:'重点项目',t:'重点项目(药品/项目对照)'},{k:'匹配',t:'匹配状态'},
     ],
   };
 
@@ -1054,6 +1054,7 @@
         VAB管家: v? v.健康管家:'', VAB医生: v? v.主诊医生:'',
         是否参与考核: v? v.是否参与考核:'', 品项: item,
         品项一级分类: c1, 品项名称: iname,
+        重点项目: classifyProjectName(iname, [iname, item, c1].filter(Boolean).join(' | ')),
         现款支付金额: pay, 退款金额: refund,
         匹配: v? '匹配':'未匹配',
       };
@@ -1076,7 +1077,8 @@
       return {
         月份: month, 会员号: v? v.会员号:'', 客户姓名: name, 户主: v? v.户主:'',
         VAB管家: v? v.健康管家:'', VAB医生: v? v.主诊医生:'',
-        是否参与考核: v? v.是否参与考核:'', 药品项目名称: item, 金额: amount,
+        是否参与考核: v? v.是否参与考核:'', 药品项目名称: item,
+        重点项目: classifyProjectName(item, item), 金额: amount,
         匹配: v? '匹配':'未匹配',
       };
     });
@@ -1445,6 +1447,20 @@
       if(d.keys.some(k=>full.indexOf(k)>=0)) return d;
     }
     return null;
+  }
+  // 通用：按「项目名称」归类到重点项目类别（用于明细表「重点项目」对照列展示）。
+  // primaryName：projMap 精确映射键（品项名称 / 药品项目名称）；fullText：内置关键词模糊匹配全文。
+  // 逻辑与 resolveProjDef 一致：① 上传映射（项目名精确）覆盖 ② 内置关键词匹配（首个命中）；未命中返回 ''。
+  function classifyProjectName(primaryName, fullText){
+    const nm = normName(primaryName||'');
+    if(projMap.has(nm)){
+      const cat = projMap.get(nm).cat;
+      const d = PROJ_DEFS.find(x=>x.cat===cat);
+      if(d) return d.cat;          // 仅当属于内置 12 类才直接返回，否则继续关键词匹配（与 resolveProjDef 一致）
+    }
+    const ft = (fullText||primaryName||'');
+    for(const d of PROJ_DEFS){ if(d.keys.some(k=> ft.indexOf(k)>=0 || nm.indexOf(k)>=0)) return d.cat; }
+    return '';
   }
   // 通用：填充筛选下拉（保留当前选中值；值失效则重置为全部）
   function fillProjFilter(id, vals, cur, allLabel){
