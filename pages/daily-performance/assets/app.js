@@ -103,31 +103,109 @@ function restoreTargets(){ try{ const raw = localStorage.getItem(TARGETS_STORAGE
 function persistManual(){ try{ localStorage.setItem(MANUAL_STORAGE_KEY, JSON.stringify(state.manual)); }catch(e){} }
 function restoreManual(){ try{ const raw = localStorage.getItem(MANUAL_STORAGE_KEY); if(raw){ const m = JSON.parse(raw); state.manual.month = m.month || {}; state.manual.daily = m.daily || {}; } }catch(e){} }
 
-// 历史导入订单本地持久化（localStorage：刷新网页后自动恢复；月累计/每日数据均由订单重算得到）
+// 历史导入订单本地持久化（localStorage + IndexedDB 双层：刷新网页后自动恢复；月累计/每日数据均由订单重算得到）
 // 存储订单原始行（含 _uid 稳定主键）+ 截止日期；不存派生结果，刷新后由 recompute() 重新生成，保证一致。
+// 双写策略：localStorage 同步（最快恢复路径）+ IndexedDB 异步（配额大、防 localStorage 静默失败）；
+// 并在 beforeunload 时兜底刷写，确保「不主动点击清除」时数据始终保留在页面上（即使某些代码路径未显式 persistOrders）。
 const ORDERS_STORAGE_KEY = 'dailyPerformance_orders';
+const ORDERS_IDB_NAME = 'dailyPerformance';
+const ORDERS_IDB_STORE = 'kv';
 // 列宽持久化键：必须在 restoreColWidths()（脚本加载时顶层调用）之前声明，否则与订单 TDZ 同理，
 // const 在初始化前被访问会抛 ReferenceError，被恢复函数的 catch 静默吞掉 → 拖拽列宽刷新后不保留。
 const COLW_STORAGE_KEY = 'dailyPerformance_colw';
-function persistOrders(){
-  try{ localStorage.setItem(ORDERS_STORAGE_KEY, JSON.stringify({ orders: state.orders, cutoff: state.cutoffDate || null })); }
-  catch(e){ /* 配额超限等：静默降级，下次导入/删除再尝试保存 */ }
+
+// ---------- IndexedDB 辅助（容错：环境不支持或失败则降级到 localStorage） ----------
+function openOrdersIDB(){
+  return new Promise((resolve, reject) => {
+    if(typeof indexedDB === 'undefined'){ reject(new Error('no-idb')); return; }
+    let req;
+    try{ req = indexedDB.open(ORDERS_IDB_NAME, 1); }
+    catch(e){ reject(e); return; }
+    req.onupgradeneeded = () => { try{ if(!req.result.objectStoreNames.contains(ORDERS_IDB_STORE)) req.result.createObjectStore(ORDERS_IDB_STORE); }catch(_){} };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error || new Error('idb-open-fail'));
+  });
 }
-function restoreOrders(){
+function idbSet(key, value){
+  return openOrdersIDB().then(db => new Promise((resolve, reject) => {
+    try{
+      const tx = db.transaction(ORDERS_IDB_STORE, 'readwrite');
+      tx.objectStore(ORDERS_IDB_STORE).put(value, key);
+      tx.oncomplete = () => resolve(true);
+      tx.onerror = () => reject(tx.error || new Error('idb-put-fail'));
+    }catch(e){ reject(e); }
+  }));
+}
+function idbGet(key){
+  return openOrdersIDB().then(db => new Promise((resolve, reject) => {
+    try{
+      const tx = db.transaction(ORDERS_IDB_STORE, 'readonly');
+      const r = tx.objectStore(ORDERS_IDB_STORE).get(key);
+      r.onsuccess = () => resolve(r.result);
+      r.onerror = () => reject(r.error || new Error('idb-get-fail'));
+    }catch(e){ reject(e); }
+  }));
+}
+function idbDel(key){
+  return openOrdersIDB().then(db => new Promise(resolve => {
+    try{
+      const tx = db.transaction(ORDERS_IDB_STORE, 'readwrite');
+      tx.objectStore(ORDERS_IDB_STORE).delete(key);
+      tx.oncomplete = () => resolve(true);
+      tx.onerror = () => resolve(false);
+    }catch(e){ resolve(false); }
+  }));
+}
+
+// 把存储原始字符串还原到 state.orders（JSON 不保留 Date，需把 payTime 还原为 Date）
+function applyOrdersRaw(raw){
+  if(!raw || typeof raw !== 'string') return false;
   try{
-    const raw = localStorage.getItem(ORDERS_STORAGE_KEY);
-    if(!raw) return;
     const obj = JSON.parse(raw);
     if(obj && Array.isArray(obj.orders)){
-      // JSON 不保留 Date：恢复时把 payTime 字符串还原为 Date（fmtDate/mergeOrdersByDate 均依赖 Date）
       state.orders = obj.orders.map(r => {
         if(r && typeof r.payTime === 'string') r.payTime = new Date(r.payTime);
         if(r && !r._uid) r._uid = nextUid();
         return r;
       });
       if(obj.cutoff) state.cutoffDate = obj.cutoff;
+      return true;
     }
   }catch(e){}
+  return false;
+}
+
+function persistOrders(){
+  const payload = JSON.stringify({ orders: state.orders, cutoff: state.cutoffDate || null, ts: Date.now() });
+  let lsOk = false;
+  // 1) localStorage 同步（最快恢复路径，刷新/卸载前都会执行，最可靠）
+  try{ localStorage.setItem(ORDERS_STORAGE_KEY, payload); lsOk = true; }
+  catch(e){ /* 配额超限/隐私模式：降级到 IndexedDB */ }
+  // 2) IndexedDB 异步兜底（更大配额，防 localStorage 静默失败）
+  idbSet(ORDERS_STORAGE_KEY, payload).catch(()=>{});
+  showOrdersSaved(lsOk);
+}
+function restoreOrders(){
+  // 同步优先：localStorage（顶层调用不阻塞页面解析）
+  let raw = null;
+  try{ raw = localStorage.getItem(ORDERS_STORAGE_KEY); }catch(e){ raw = null; }
+  if(raw) applyOrdersRaw(raw);
+  // 异步回退：IndexedDB（localStorage 为空或不可用时兜底恢复）
+  idbGet(ORDERS_STORAGE_KEY).then(saved => {
+    if(saved && typeof saved === 'string' && !raw){
+      if(applyOrdersRaw(saved) && typeof _postRestore === 'function') _postRestore();
+    }
+  }).catch(()=>{});
+}
+// IDB 异步恢复成功后由 initApp 注入的回调：重新渲染并触发重算
+let _postRestore = null;
+// 保存状态可见化（依赖 HTML 中的 #save-status 元素）
+function showOrdersSaved(ok){
+  const el = $('save-status');
+  if(!el) return;
+  if(state.orders.length === 0){ el.textContent = ''; el.className = 'file-meta'; return; }
+  el.textContent = ok ? '· 已本地保存' : '· 已本地保存(IDB)';
+  el.className = 'file-meta';
 }
 function clearManualOverrides(){
   state.manual = { month:{}, daily:{} };
@@ -421,6 +499,8 @@ function clearAllData(){
     localStorage.removeItem(TARGETS_STORAGE_KEY);
     localStorage.removeItem(COLW_STORAGE_KEY);
   }catch(e){}
+  // 同步清除 IndexedDB 持久化层，避免刷新后从 IDB 重新恢复已被清除的订单
+  idbDel(ORDERS_STORAGE_KEY).catch(()=>{});
   state.orders = [];
   state.manual = { month:{}, daily:{} };
   state.targets = Object.assign({}, DEFAULT_TARGETS);
@@ -582,6 +662,9 @@ function calculate(orders, vabSet, cutoff){
   // --- 3. 电商组（接受 一级渠道=电商组 / 客户转介绍 / 企业团检） ---
   const r3 = orders.filter(r => r.channelClass==='营销部' && ['电商组','客户转介绍','企业团检'].includes(r.channelL1));
 
+  // --- 3c. 电商组补充（2026-09-29 需求）：营销部 + 品牌组 + 二级渠道=线上400 → 归入电商组 ---
+  const r3c = orders.filter(r => r.channelClass==='营销部' && r.channelL1==='品牌组' && (r.channelL2||'').includes('线上400'));
+
   // --- 4. 短视频组 ---
   const r4 = orders.filter(r => r.channelClass==='营销部' && r.channelL1==='短视频组');
 
@@ -645,7 +728,7 @@ function calculate(orders, vabSet, cutoff){
   // 注：原"活动组-自拓活动"板块已整体下线（不展示、不计算），其金额并入"其他"
   const sumBrandOther = sum(r1);
   const sumActSupport = sum(r2);
-  const sumEcom = sum(r3) + sum(r3b);
+  const sumEcom = sum(r3) + sum(r3b) + sum(r3c);
   const sumShort = sum(r4);
   const sumNature = sum(r5) + sum(r5b);
   const sumCommerce = sum(r6) + sum(r6b);
@@ -654,7 +737,7 @@ function calculate(orders, vabSet, cutoff){
   return {
     rows: {
       '品牌组-其他': r1, '活动组-活动支持': r2,
-      '电商组': [...r3, ...r3b], '短视频组': r4,
+      '电商组': [...r3, ...r3b, ...r3c], '短视频组': r4,
       '品牌组-自然到店': [...r5, ...r5b],
       '商务部': [...r6, ...r6b], '其他': orders.filter(()=>true),
       '合计': rAll, '新增业绩': r9, '基础业绩': orders, '管家部': r11,
@@ -1967,14 +2050,10 @@ function recompute(){
   refreshDebug();
 }
 
-// 刷新调试条（含管家部诊断），在初始化与每次重算后调用
+// 刷新调试条：调试横幅已按需求下线（2026-09-29），此处仅确保横幅保持隐藏，不再展示任何调试信息
 function refreshDebug(){
   const dbg = $('debug-banner');
-  if(dbg){
-    const t = new Date().toLocaleTimeString('zh-CN');
-    dbg.textContent = `⚙ v20260910-77 | ${t} | 订单 ${state.orders.length} 条 | VAB ${vabUniqueCount()} 人 | cutoff ${state.cutoffDate||'(未设)'} | results ${state.results?'已计算':'未计算'} | ${stewardDiag()}${manualOverrideDiag()}`;
-    dbg.style.display = '';
-  }
+  if(dbg){ dbg.style.display = 'none'; }
 }
 
 // 9. 示例数据已移除：本应用不再注入任何示例/演示数据，仅使用用户上传的真实订单与 VAB 会员表。
@@ -2401,13 +2480,7 @@ function initApp(){
   $('targets-body').style.display = 'none';
   $('targets-arrow').textContent = '▼ 展开';
 
-  // 调试条：显示当前状态（确认页面是新版本、加载成功）
-  const dbg = $('debug-banner');
-  if(dbg){
-    const t = new Date().toLocaleTimeString('zh-CN');
-    dbg.textContent = `⚙ v20260910-77 | ${t} | 订单 ${state.orders.length} 条 | VAB ${vabUniqueCount()} 人 | cutoff ${state.cutoffDate||'(未设)'} | results ${state.results?'已计算':'未计算'}`;
-    dbg.style.display = '';
-  }
+  // 调试横幅已下线（2026-09-29），不再展示；#debug-banner 默认隐藏
   if(vabUniqueCount() > 0){
     $('vab-meta').textContent = `✔ 本地VAB（${vabUniqueCount()} 人）`;
     $('vab-meta').className = 'file-meta';
@@ -2439,7 +2512,21 @@ function initApp(){
   // 不再自动注入示例数据：打开即为空，仅显示用户上传的真实数据（VAB 已从本机恢复）
   refreshVabStatus(); // 还原后统一刷新 VAB 状态（已保存默认 vs 未上传）
 
-  // 历史订单已在脚本加载时从本地恢复（restoreOrders）；若有效则恢复截止日期、自动重算月累计/每日数据
+  // 历史订单已在脚本加载时从本地恢复（restoreOrders）；若有效则恢复截止日期、自动重算月累计/每日数据。
+  // 该渲染/重算逻辑抽成 runRestoredRecompute，供 initApp 与 IndexedDB 异步恢复回调（_postRestore）共用。
+  _postRestore = runRestoredRecompute;
+  runRestoredRecompute();
+
+  // 卸载前兜底刷写：确保「不主动点击清除全部数据」时，任何代码路径产生的订单变更都已落盘。
+  // beforeunload 内的 localStorage.setItem 为同步写，刷新/关页/切换平台页签销毁 iframe 前都能可靠落盘。
+  window.addEventListener('beforeunload', persistOrders);
+
+  // 调试条已按需求下线（2026-09-29），仅保持横幅隐藏
+  refreshDebug();
+}
+
+// 历史订单恢复后的渲染与重算（localStorage 同步恢复 / IndexedDB 异步恢复共用）
+function runRestoredRecompute(){
   if(state.orders.length > 0){
     if(state.cutoffDate) $('cutoff-date').value = state.cutoffDate;
     // 防止新导入订单的 _uid 与已恢复订单冲突：把序列号抬到已恢复最大值之上
@@ -2448,15 +2535,13 @@ function initApp(){
     // 关键性能修复：先即时渲染空表骨架（首帧），再在浏览器空闲时做重计算，
     // 避免点击菜单后因“解析+重算+整表重渲染”全阻塞主线程而长时间白屏/卡死
     renderReport();
+    showOrdersSaved(true);
     const runRecompute = () => { recompute(); showToast(`已从本地恢复 ${state.orders.length} 条历史订单，月累计/每日数据已自动刷新`, 'ok'); };
     if(window.requestIdleCallback) window.requestIdleCallback(runRecompute, { timeout: 400 });
     else setTimeout(runRecompute, 30);
   } else {
     renderReport();
   }
-
-  // 调试条（末尾位置，记录最终状态）
-  refreshDebug();
 }
 
 // 管家部诊断：展示「开单健康管家」字段的取值分布与计入/排除状态，便于定位 管家部=0 原因
