@@ -1057,8 +1057,7 @@ function renderStoreReport(dateList, dailyResults){
   const dispValues = recomputeDerived(monthCalc, {});
   const cutoff = state.cutoffDate ? new Date(state.cutoffDate) : new Date();
   const monthStr = (cutoff.getMonth()+1) + '月' + cutoff.getDate() + '日';
-  const totalCols = 1 + 1 + dateList.length + 1; // 门店类别 + 月累计 + 每日 + 展开
-  const storeTitleCols = 1 + 1 + dateList.length; // 门店类别 + 月累计 + 每日（标题不合并「展开」列）
+  const storeTitleCols = 1 + 1 + dateList.length; // 门店类别 + 月累计 + 每日（批量/展开已移至面板标题栏按钮）
 
   const thead = `
     <tr><th colspan="${storeTitleCols}" class="title-cell">门店业绩完成情况（高新店 / 经开店，截止${monthStr}）</th></tr>
@@ -1069,7 +1068,6 @@ function renderStoreReport(dateList, dailyResults){
         const dt = new Date(d);
         return `<th class="sub-head daily-col" data-date="${d}" data-idx="${i}" style="cursor:pointer;position:relative;" title="点击收起该列">${dt.getMonth()+1}月${dt.getDate()}日<span class="copy-col" data-date="${d}" data-idx="${i}" title="复制该日期整列数据">复制</span></th>`;
       }).join('')}
-      <th class="sub-head" id="store-expand" style="width:46px;cursor:pointer;" title="展开所有日期列">+展开</th>
     </tr>
   `;
 
@@ -1095,12 +1093,11 @@ function renderStoreReport(dateList, dailyResults){
   storeTable.querySelector('thead').innerHTML = thead;
   storeBody.innerHTML = html;
 
-  // 列宽：前2列按比例，每日列固定 65px，展开列 36px
+  // 列宽：前2列按比例，每日列固定 65px（批量/展开为面板按钮，不再占表尾列）
   storeTable.querySelectorAll('colgroup').forEach(c=>c.remove());
   const colgroup = document.createElement('colgroup');
   ['16%','20%'].forEach(w=>{ const c=document.createElement('col'); c.style.width=w; colgroup.appendChild(c); });
   for(let i=0;i<dateList.length;i++){ const c=document.createElement('col'); c.style.width=DAILY_COL_PX+'px'; colgroup.appendChild(c); }
-  const ce=document.createElement('col'); ce.style.width='36px'; colgroup.appendChild(ce);
   storeTable.insertBefore(colgroup, storeTable.firstChild);
 
   bindStoreColumnToggle(storeTable);
@@ -1109,39 +1106,84 @@ function renderStoreReport(dateList, dailyResults){
   bindManualEdit(storeTable);
 }
 
-// 门店表每日列：单列点击收起 + "+展开"恢复（不引入批量模式，避免与 ③ 全局 batchMode 冲突）
+// 门店表每日列：单列点击收起；批量模式多选（与 ③ 业绩报表一致），「+展开」为面板按钮
 function updateStoreTitleColspan(tableEl){
-  // 标题跨整个表头可见区域：门店类别 + 月累计 + 可见每日列 + 展开。
+  // 标题跨整个表头可见区域：门店类别 + 月累计 + 可见每日列。
   const visibleDaily = tableEl.querySelectorAll('th.daily-col:not(.col-hidden)').length;
   const titleTh = tableEl.querySelector('thead tr:first-child th');
-  if(titleTh) titleTh.colSpan = 3 + visibleDaily;
+  if(titleTh) titleTh.colSpan = 2 + visibleDaily;
 }
 
 function bindStoreColumnToggle(tableEl){
-  const expandBtn = tableEl.querySelector('#store-expand');
   tableEl.querySelectorAll('th.daily-col').forEach(th=>{
     th.addEventListener('click', ()=>{
+      if(storeBatchMode){
+        // 批量模式：切换选中（黄色高亮），点面板「✕ 完成隐藏」一次性隐藏
+        th.classList.toggle('selected');
+        return;
+      }
       const idx = th.dataset.idx;
       const hide = !th.classList.contains('col-hidden');
       tableEl.querySelectorAll(`[data-idx="${idx}"]`).forEach(el=>el.classList.toggle('col-hidden', hide));
       updateStoreTitleColspan(tableEl);
     });
   });
-  // 复制整列（停止冒泡，避免触发收起）
+  // 复制整列（停止冒泡，避免触发收起/批量选中）
   tableEl.querySelectorAll('th.daily-col .copy-col').forEach(btn=>{
     btn.addEventListener('click', e=>{
       e.stopPropagation();
       copyDailyColumn(btn.dataset.date, +btn.dataset.idx, true);
     });
   });
-  if(expandBtn){
+  // 初始同步一次
+  updateStoreTitleColspan(tableEl);
+}
+
+// 门店表批量模式（与 ③ 业绩报表「☑ 批量 / +展开」同一交互）：
+// 「☑ 批量」→ 黄色多选日期列 → 「✕ 完成隐藏」一次性隐藏；「+展开」恢复全部隐藏列
+let storeBatchMode = false;
+function bindStoreBatchExpandButtons(tableEl){
+  const expandBtn = document.querySelector('#store-expand-all');
+  const batchBtn = document.querySelector('#store-batch-toggle');
+  const dailyThsNow = ()=> [...tableEl.querySelectorAll('th.daily-col')];
+  const exitBatch = ()=>{
+    storeBatchMode = false;
+    tableEl.classList.remove('batch-mode');
+    if(batchBtn) batchBtn.textContent = '☑ 批量';
+    dailyThsNow().forEach(th=>th.classList.remove('selected'));
+  };
+  if(batchBtn && !batchBtn.dataset.bound){
+    batchBtn.dataset.bound = '1';
+    batchBtn.addEventListener('click', ()=>{
+      const dailyThs = dailyThsNow();
+      if(storeBatchMode){
+        // 完成：隐藏所有选中列
+        const selected = dailyThs.filter(th=>th.classList.contains('selected'));
+        selected.forEach(th=>{
+          const idx = th.dataset.idx;
+          tableEl.querySelectorAll(`[data-idx="${idx}"]`).forEach(el=>{
+            el.classList.add('col-hidden');
+          });
+        });
+        if(selected.length > 0) showToast(`已隐藏 ${selected.length} 个日期列`, 'ok');
+        exitBatch();
+        updateStoreTitleColspan(tableEl);
+      } else {
+        // 进入批量模式
+        storeBatchMode = true;
+        tableEl.classList.add('batch-mode');
+        batchBtn.textContent = '✕ 完成隐藏';
+      }
+    });
+  }
+  if(expandBtn && !expandBtn.dataset.bound){
+    expandBtn.dataset.bound = '1';
     expandBtn.addEventListener('click', ()=>{
       tableEl.querySelectorAll('.col-hidden').forEach(el=>el.classList.remove('col-hidden'));
+      if(storeBatchMode) exitBatch();
       updateStoreTitleColspan(tableEl);
     });
   }
-  // 初始同步一次
-  updateStoreTitleColspan(tableEl);
 }
 
 // ===== 按日期复制整列数据 =====
@@ -1410,6 +1452,7 @@ let detailTab = 'all';
 let detailMonth = ''; // 月度筛选：''=全部，'YYYY-MM'
 let detailDate = '';  // 日期筛选：''=全部，'YYYY-MM-DD'
 let detailSort = { key:'', dir:1 }; // 列排序：''=未排序；dir 1=升序 -1=降序（再次点击同列切换）
+let detailFilters = {}; // 字段筛选：key -> 值（''=全部）；name/memberNo 为模糊包含；vab 为 hit/miss
 
 // 明细表排序取值：日期按时间戳、金额按数值、VAB 按 0/1，其余按中文字符串比较
 function detailSortVal(r, key){
@@ -1474,6 +1517,16 @@ function filterOrdersByTab(key){
   // 月度 / 日期 筛选叠加（与标签取交集）
   if(detailMonth) list = list.filter(r => r.payTime && fmtMonth(r.payTime) === detailMonth);
   if(detailDate)  list = list.filter(r => r.payTime && fmtDate(r.payTime) === detailDate);
+  // 字段筛选叠加（展示的全部字段）：姓名/会员号模糊包含，其余精确匹配；收款时间用月度/日期承担，VAB 按命中状态
+  const f = detailFilters || {};
+  if(f.name){ const q=String(f.name).toLowerCase(); list=list.filter(r=>String(r.name||'').toLowerCase().includes(q)); }
+  if(f.memberNo){ const q=String(f.memberNo).toLowerCase(); list=list.filter(r=>String(r.memberNo||'').toLowerCase().includes(q)); }
+  ['channelClass','channelL1','channelL2','channelL3','consultant','cashier'].forEach(k=>{
+    if(f[k]) list=list.filter(r=>String(r[k]||'').trim()===f[k]);
+  });
+  if(f.cashPay) list=list.filter(r=>fmt(r.cashPay)===f.cashPay);
+  if(f.vab==='hit') list=list.filter(r=>isVabMember(r.memberNo));
+  else if(f.vab==='miss') list=list.filter(r=>!isVabMember(r.memberNo));
   return list;
 }
 
@@ -1581,6 +1634,20 @@ function renderImportDetails(){
     .concat(months.map(m=>`<option value="${m}" ${m===detailMonth?'selected':''}>${m}</option>`)).join('');
   const dateOpts = ['<option value="">全部日期</option>']
     .concat(dates.map(d=>`<option value="${d}" ${d===detailDate?'selected':''}>${d}</option>`)).join('');
+  // 字段筛选下拉选项（取自全部订单，与页签无关，保证跨页签稳定）
+  const distinct = key => [...new Set(orders.map(r=>String(r[key]||'').trim()).filter(Boolean))]
+    .sort((a,b)=>a.localeCompare(b,'zh-CN'));
+  const cashVals = [...new Set(orders.map(r=>fmt(r.cashPay)))]
+    .sort((a,b)=>(Number(String(a).replace(/,/g,''))||0)-(Number(String(b).replace(/,/g,''))||0));
+  const fText = (key,label) => `<label class="detail-filter">${label}`
+    + `<input type="text" class="detail-select" data-dfilter-text="${key}" value="${esc(detailFilters[key]||'')}" `
+    + `placeholder="含…" style="min-width:88px;"></label>`;
+  const fSel = (key,label,arr) => `<label class="detail-filter">${label}`
+    + `<select class="detail-select" data-dfilter="${key}">`
+    + ['<option value="">'+label+'：全部</option>']
+        .concat(arr.map(v=>`<option value="${esc(v)}" ${String(detailFilters[key]||'')===v?'selected':''}>${esc(v)}</option>`)).join('')
+    + '</select></label>';
+  const anyDetailFilter = !!(detailMonth||detailDate||Object.values(detailFilters||{}).some(Boolean));
   const filterBar = `
     <div class="detail-filters">
       <label class="detail-filter">月度
@@ -1589,7 +1656,23 @@ function renderImportDetails(){
       <label class="detail-filter">日期
         <select id="detail-date-filter" class="detail-select">${dateOpts}</select>
       </label>
-      ${(detailMonth||detailDate)?'<button type="button" id="detail-filter-reset" class="detail-reset" title="清除月度/日期筛选">清除筛选</button>':''}
+      ${fText('name','姓名')}
+      ${fText('memberNo','会员号')}
+      ${fSel('channelClass','渠道分类',distinct('channelClass'))}
+      ${fSel('channelL1','一级渠道',distinct('channelL1'))}
+      ${fSel('channelL2','二级渠道',distinct('channelL2'))}
+      ${fSel('channelL3','三级渠道',distinct('channelL3'))}
+      ${fSel('consultant','咨询师',distinct('consultant'))}
+      ${fSel('cashier','收款员工',distinct('cashier'))}
+      ${fSel('cashPay','现款支付',cashVals)}
+      <label class="detail-filter">VAB
+        <select class="detail-select" data-dfilter="vab">
+          <option value="">VAB：全部</option>
+          <option value="hit" ${detailFilters.vab==='hit'?'selected':''}>✔ 命中</option>
+          <option value="miss" ${detailFilters.vab==='miss'?'selected':''}>— 未命中</option>
+        </select>
+      </label>
+      ${anyDetailFilter?'<button type="button" id="detail-filter-reset" class="detail-reset" title="清除全部筛选">清除筛选</button>':''}
     </div>`;
   const tabs = DETAIL_TABS.map(t=>`<button class="detail-tab ${t.key===detailTab?'active':''}" data-tab="${t.key}">${t.label}</button>`).join('');
   // 表头：# 与 操作 不排序，其余列点击排序（当前排序列显示 ▲升序 / ▼降序）
@@ -1602,7 +1685,9 @@ function renderImportDetails(){
     }))
     .concat(['<th>操作</th>']).join('');
   const tabLabel = DETAIL_TABS.find(t=>t.key===detailTab).label;
-  const filterNote = (detailMonth?('月度 '+detailMonth+' · '):'')+(detailDate?('日期 '+detailDate+' · '):'');
+  const activeFieldCount = Object.values(detailFilters||{}).filter(Boolean).length;
+  const filterNote = (detailMonth?('月度 '+detailMonth+' · '):'')+(detailDate?('日期 '+detailDate+' · '):'')
+    +(activeFieldCount?('字段筛选 '+activeFieldCount+' 项 · '):'');
   // 手机端排序条（桌面端隐藏，由表格表头排序代替）
   const mobileSort = `
     <div class="detail-mobile-bar">
@@ -1640,10 +1725,11 @@ function renderImportDetails(){
     </div>
     ${content}
     ${renderPager(detailPage, pageCount)}`;
-  // 事件委托（绑定一次）：标签切换 + 删除某条数据（删除后全表同步更新）+ 月度/日期筛选
+  // 事件委托（绑定一次）：标签切换 + 删除某条数据（删除后全表同步更新）+ 月度/日期/字段筛选
   if(!el.dataset.bound){
     el.addEventListener('click', onImportDetailsClick);
     el.addEventListener('change', onImportDetailsChange);
+    el.addEventListener('input', onImportDetailsInput);
     el.dataset.bound = '1';
   }
 }
@@ -1668,16 +1754,21 @@ function onImportDetailsClick(e){
     return;
   }
   const reset = e.target.closest && e.target.closest('#detail-filter-reset');
-  if(reset){ detailMonth = ''; detailDate = ''; detailPage = 1; renderImportDetails(); }
+  if(reset){
+    detailMonth = ''; detailDate = ''; detailFilters = {}; detailPage = 1;
+    renderImportDetails();
+  }
 }
 
-// 导入明细筛选：月度 / 日期 / 每页条数 / 手机端排序 下拉变更
+// 导入明细筛选：月度 / 日期 / 每页条数 / 手机端排序 / 字段下拉 下拉变更
 function onImportDetailsChange(e){
   if(!e || !e.target) return;
   const m = e.target.closest && e.target.closest('#detail-month-filter');
   if(m){ detailMonth = m.value || ''; detailPage = 1; renderImportDetails(); return; }
   const d = e.target.closest && e.target.closest('#detail-date-filter');
   if(d){ detailDate = d.value || ''; detailPage = 1; renderImportDetails(); return; }
+  const fs = e.target.closest && e.target.closest('select[data-dfilter]');
+  if(fs){ detailFilters[fs.dataset.dfilter] = fs.value || ''; detailPage = 1; renderImportDetails(); return; }
   const ps = e.target.closest && e.target.closest('#detail-pagesize-filter');
   if(ps){ detailPageSize = parseInt(ps.value, 10) || 20; detailPage = 1; renderImportDetails(); return; }
   const ms = e.target.closest && e.target.closest('#detail-mobile-sort');
@@ -1687,6 +1778,23 @@ function onImportDetailsChange(e){
     detailPage = 1;
     renderImportDetails();
   }
+}
+
+// 字段文本筛选（姓名/会员号模糊包含）：防抖 300ms 后重渲染，并恢复焦点与光标到行尾
+let _dfilterTimer = null;
+function onImportDetailsInput(e){
+  const ft = e.target.closest && e.target.closest('input[data-dfilter-text]');
+  if(!ft) return;
+  const key = ft.dataset.dfilterText;
+  const val = ft.value.trim();
+  clearTimeout(_dfilterTimer);
+  _dfilterTimer = setTimeout(()=>{
+    detailFilters[key] = val;
+    detailPage = 1;
+    renderImportDetails();
+    const inp = document.querySelector('input[data-dfilter-text="'+key+'"]');
+    if(inp){ inp.focus(); try{ inp.setSelectionRange(inp.value.length, inp.value.length); }catch(err){} }
+  }, 300);
 }
 
 // 删除一条订单并同步刷新所有统计表
@@ -2092,7 +2200,7 @@ function buildExportClone(tableEl){
       while (occupied[r][c]) c++;
       const cs = th.colSpan || 1;
       const rs = th.rowSpan || 1;
-      if (th.classList.contains('col-hidden') || th.id === 'batch-toggle' || th.id === 'expand-all' || th.id === 'store-expand') {
+      if (th.classList.contains('col-hidden') || th.id === 'batch-toggle' || th.id === 'expand-all') {
         for (let i = 0; i < cs; i++) hiddenIdx.add(c + i);
       }
       for (let i = 0; i < rs; i++) {
@@ -2324,8 +2432,9 @@ function initApp(){
   $('export-xlsx').addEventListener('click', exportXlsx);
   $('export-store-png').addEventListener('click', exportStorePng);
   $('export-store-xlsx').addEventListener('click', exportStoreXlsx);
-  // 「批量 / 展开」报表独立按钮（已移出表头）：仅绑定一次
+  // 「批量 / 展开」报表独立按钮（已移出表头）：仅绑定一次；④ 门店业绩同款
   bindBatchExpandButtons($('report-table'));
+  bindStoreBatchExpandButtons($('store-table'));
 
   // 不再自动注入示例数据：打开即为空，仅显示用户上传的真实数据（VAB 已从本机恢复）
   refreshVabStatus(); // 还原后统一刷新 VAB 状态（已保存默认 vs 未上传）
