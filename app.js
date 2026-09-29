@@ -9,6 +9,14 @@
 
 const state = { modules: [], tabs: [], current: null };
 
+// 发布版本号：每次重新发布时更新（日期+序号），用于 iframe 缓存穿透，确保线上改动即时可见。
+// file:// 双击打开时不加查询串（带查询串的 iframe 在 file:// 下可能无法加载）。
+const SITE_VER = '20260929a';
+function withVer(src) {
+  if (location.protocol === 'file:') return src;
+  return src + (src.indexOf('?') >= 0 ? '&' : '?') + 'v=' + SITE_VER;
+}
+
 // 模块注册表（与 server.js 的 MODULES 保持一致；内嵌以便纯静态部署，无需 /api/modules）
 const MODULES = [
   {
@@ -172,7 +180,7 @@ function createChildTab(tab, parent, child) {
   // 注意：不要给 iframe src 加 ?mod= 查询串——在 file:// 双击打开时，带查询串的 iframe 可能无法加载。
   // 改用 postMessage 把子功能（a/b）发给子应用，兼容 file:// 与 http/https 两种打开方式。
   // 独立页面（如月度分析面板，现已作为一级菜单）使用 src 直接嵌入，无需 postMessage。
-  frame.src = (child.src || parent.src).replace(/^\//, '');
+  frame.src = withVer((child.src || parent.src).replace(/^\//, ''));
   const post = () => { if (!child.mod) return; try { frame.contentWindow.postMessage({ type: 'app:setMod', mod: child.mod }, '*'); } catch (e) {} };
   frame.addEventListener('load', () => { post(); setTimeout(post, 300); });
   page.appendChild(frame);
@@ -200,7 +208,7 @@ function createTabPage(tab, mod) {
   frame.className = 'embed-frame';
   frame.title = mod.name;
   frame.setAttribute('loading', 'lazy');
-  frame.src = mod.src.replace(/^\//, ''); // 去掉前导斜杠，兼容 GitHub Pages 子路径
+  frame.src = withVer(mod.src.replace(/^\//, '')); // 去掉前导斜杠，兼容 GitHub Pages 子路径；http(s) 下追加版本号防缓存
   page.appendChild(frame);
   $('#content').appendChild(page);
 }
