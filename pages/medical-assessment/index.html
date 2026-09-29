@@ -825,8 +825,32 @@
     if(!Array.isArray(arr) || !arr.length) return false;
     if(mod==='order'){ App.lastOrder = arr; App.orderRev++; }
     else { App.lastCharge = arr; App.chargeRev++; }
+    backfillProjectCol(mod);     // 兼容旧版持久化数据（无「重点项目」字段）按需回填
     renderBusiness(mod, arr);
     return true;
+  }
+  // 兼容旧版持久化数据：早期导入并缓存到本地的明细行可能缺少「重点项目」字段，
+  // 恢复时按需回填（仅对该字段为空/缺失的行），使「重点项目」对照列始终有值；命中则回写持久化。
+  function backfillProjectCol(mod){
+    const arr = mod==='order' ? App.lastOrder : App.lastCharge;
+    if(!Array.isArray(arr) || !arr.length) return false;
+    let changed = false;
+    for(const r of arr){
+      if(r.重点项目 === undefined || r.重点项目 === null || r.重点项目 === ''){
+        if(mod==='order'){
+          const iname = r.品项名称 || '';
+          const item = r.品项 || '';
+          const c1 = r.品项一级分类 || '';
+          r.重点项目 = classifyProjectName(iname, [iname, item, c1].filter(Boolean).join(' | '));
+        } else {
+          const item = r.药品项目名称 || '';
+          r.重点项目 = classifyProjectName(item, item);
+        }
+        changed = true;
+      }
+    }
+    if(changed){ if(mod==='order') persistOrder(); else persistCharge(); }
+    return changed;
   }
   // 页面加载时恢复业务表（不主动清空的情况下免重复导入）：localStorage 未命中则回退 IndexedDB
   function loadOrderFromStorage(){
@@ -2100,9 +2124,9 @@
   /* ---------- 启动（置于所有声明之后，避免 let/const 暂时性死区） ---------- */
   (function initMod(){
     loadVabFromStorage();         // 先恢复 VAB（业务表匹配依赖它）
-    loadOrderFromStorage();       // 恢复收退款明细（刷新免重导）
-    loadChargeFromStorage();      // 恢复收费明细（刷新免重导）
-    loadProjMapFromStorage();     // 恢复项目分类映射（重点项目达成情况统计）
+    loadProjMapFromStorage();     // 再恢复项目分类映射（重点项目归类依赖它，须在业务表恢复前就绪）
+    loadOrderFromStorage();       // 恢复收退款明细（刷新免重导，内部按需回填重点项目）
+    loadChargeFromStorage();      // 恢复收费明细（刷新免重导，内部按需回填重点项目）
     const p = new URLSearchParams(location.search).get('mod');
     setMod(p || 'vab');
     refreshStats();               // 基于已恢复的数据生成统计表
