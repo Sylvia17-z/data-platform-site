@@ -990,43 +990,66 @@ function calculate(orders, vabSet, cutoff){
   const L1  = r => (r.channelL1||'').trim();
   const L2  = r => (r.channelL2||'').trim();
 
+  // --- 0. 部门类别归属覆盖（⑥明细「报表归属」手动指定优先）---
+  // 在明细表把某条明细的报表归属改为指定部门后，该行不再走渠道自动规则，直接计入指定部门；
+  // 「其他」覆盖 = 从所有具体部门规则中剥离，落入残差「其他」；未指定（自动）的行走原有规则。
+  const DEPT_KEYS = ['品牌组-其他','活动组-活动支持','电商组','短视频组','品牌组-自然到店','商务部','其他'];
+  const hasOv = r => DEPT_KEYS.includes(String(r.deptOverride||'').trim());
+  const auto  = orders.filter(r => !hasOv(r));
+  const ov    = k => orders.filter(r => String(r.deptOverride||'').trim() === k);
+
   // --- 1. 品牌组-其他 ---
   // （括号明确分组：两个分支均要求 营销部+品牌组，避免 && / || 优先级歧义）
-  const r1 = orders.filter(r =>
-    (CC(r) === '营销部' &&
-     L1(r) === '品牌组' &&
-     ['微信小程序','微信公众号','客服手机','前台座机'].includes(L2(r))) ||
-    (CC(r) === '营销部' && L1(r) === '品牌组' && L2(r).includes('阿里') && L2(r).includes('高德'))
-  );
+  const r1 = [
+    ...auto.filter(r =>
+      (CC(r) === '营销部' &&
+       L1(r) === '品牌组' &&
+       ['微信小程序','微信公众号','客服手机','前台座机'].includes(L2(r))) ||
+      (CC(r) === '营销部' && L1(r) === '品牌组' && L2(r).includes('阿里') && L2(r).includes('高德'))
+    ),
+    ...ov('品牌组-其他'),
+  ];
 
   // --- 2. 活动组-活动支持 ---
-  const r2 = orders.filter(r => CC(r)==='营销部' && L1(r)==='活动组' && L2(r)==='活动支持');
+  const r2 = [
+    ...auto.filter(r => CC(r)==='营销部' && L1(r)==='活动组' && L2(r)==='活动支持'),
+    ...ov('活动组-活动支持'),
+  ];
 
   // --- 3. 电商组（接受 一级渠道=电商组 / 客户转介绍 / 企业团检） ---
-  const r3 = orders.filter(r => CC(r)==='营销部' && ['电商组','客户转介绍','企业团检'].includes(L1(r)));
+  const r3 = [
+    ...auto.filter(r => CC(r)==='营销部' && ['电商组','客户转介绍','企业团检'].includes(L1(r))),
+    ...ov('电商组'),
+  ];
 
   // --- 3c. 电商组补充（2026-09-29 需求）：营销部 + 品牌组 + 二级渠道=线上400 → 归入电商组 ---
-  const r3c = orders.filter(r => CC(r)==='营销部' && L1(r)==='品牌组' && L2(r).includes('线上400'));
+  const r3c = auto.filter(r => CC(r)==='营销部' && L1(r)==='品牌组' && L2(r).includes('线上400'));
 
   // --- 4. 短视频组 ---
-  const r4 = orders.filter(r => CC(r)==='营销部' && L1(r)==='短视频组');
+  const r4 = [
+    ...auto.filter(r => CC(r)==='营销部' && L1(r)==='短视频组'),
+    ...ov('短视频组'),
+  ];
 
   // --- 5. 品牌组-自然到店（包含自然到店关键字） ---
-  const r5 = orders.filter(r => CC(r)==='营销部' && L1(r)==='品牌组' && L2(r).includes('自然到店'));
+  const r5 = [
+    ...auto.filter(r => CC(r)==='营销部' && L1(r)==='品牌组' && L2(r).includes('自然到店')),
+    ...ov('品牌组-自然到店'),
+  ];
 
   // --- 6. 商务部（口径：客户来源渠道分类/一级渠道/二级渠道 任一为「商务部」或「市场部」；
   //      市场部数据并入商务部统一核算，故不再单独落入"其他"） ---
   //      注：渠道分类=推荐 的订单改由下方 r6b 单独处理，避免与 chanHas 商务部/市场部 重复计入，
   //      故此处先把推荐类排除，r6b 再并入商务部，二者互不重叠。
-  const r6 = orders.filter(r => (chanHas(r, '商务部') || chanHas(r, '市场部')) && (r.channelClass||'').trim() !== '推荐');
+  const r6 = auto.filter(r => (chanHas(r, '商务部') || chanHas(r, '市场部')) && (r.channelClass||'').trim() !== '推荐');
 
   // --- 6b. 推荐渠道补充（新增逻辑，不动 r1~r6 原有规则）---
   // 渠道分类=推荐 且 一级分类包含「营销部」→ 计入营销部业绩：
   //   二级含「自然到店」→ 品牌组-自然到店(r5b)，否则 → 电商组(r3b)
   // 渠道分类=推荐 且 一级分类包含「商务部」→ 计入商务部业绩(r6b)
-  const r3b = orders.filter(r => isRecToYingxiao(r) && !(r.channelL2||'').includes('自然到店'));
-  const r5b = orders.filter(r => isRecToYingxiao(r) && (r.channelL2||'').includes('自然到店'));
-  const r6b = orders.filter(r => isRecToShangwu(r));
+  const r3b = auto.filter(r => isRecToYingxiao(r) && !(r.channelL2||'').includes('自然到店'));
+  const r5b = auto.filter(r => isRecToYingxiao(r) && (r.channelL2||'').includes('自然到店'));
+  const r6b = auto.filter(r => isRecToShangwu(r));
 
   // --- 7. 合计（全部行） ---
   const rAll = orders;
@@ -1893,6 +1916,38 @@ function isRecToShangwu(r){
   return (r.channelClass||'').trim() === '推荐' && (r.channelL1||'').includes('商务部');
 }
 
+// ===== 报表归属（部门类别）：明细表可手动指定，未指定按渠道规则自动归属 =====
+// 与 calculate 的 r1~r6b 规则镜像（仅用于展示/排序/筛选，金额计算仍以 calculate 为准）
+const DEPT_OPTIONS = ['品牌组-其他','活动组-活动支持','电商组','短视频组','品牌组-自然到店','商务部','其他'];
+function autoDeptOf(r){
+  const cc=(r.channelClass||'').trim(), l1=(r.channelL1||'').trim(), l2=(r.channelL2||'').trim();
+  if(cc==='营销部' && l1==='品牌组' && (['微信小程序','微信公众号','客服手机','前台座机'].includes(l2) || (l2.includes('阿里') && l2.includes('高德')))) return '品牌组-其他';
+  if(cc==='营销部' && l1==='活动组' && l2==='活动支持') return '活动组-活动支持';
+  if(cc==='营销部' && ['电商组','客户转介绍','企业团检'].includes(l1)) return '电商组';
+  if(cc==='营销部' && l1==='品牌组' && l2.includes('线上400')) return '电商组';
+  if(cc==='营销部' && l1==='短视频组') return '短视频组';
+  if(cc==='营销部' && l1==='品牌组' && l2.includes('自然到店')) return '品牌组-自然到店';
+  if(isRecToYingxiao(r)) return l2.includes('自然到店') ? '品牌组-自然到店' : '电商组';
+  if((chanHas(r,'商务部') || chanHas(r,'市场部')) && cc!=='推荐') return '商务部';
+  if(isRecToShangwu(r)) return '商务部';
+  return '其他';
+}
+function effectiveDept(r){
+  const o = String(r.deptOverride||'').trim();
+  return DEPT_OPTIONS.includes(o) ? o : autoDeptOf(r);
+}
+// 归属下拉单元格（ov=手动覆盖值；自动选项显示当前自动归属结果）
+function deptSelectHTML(r){
+  const ov = String(r.deptOverride||'').trim();
+  const autoDept = autoDeptOf(r);
+  const style = ov ? 'color:#1a4f8b;font-weight:600;' : '';
+  return `<select class="detail-select dept-sel" data-uid="${esc(r._uid)}" style="${style}"
+    title="修改该明细在业绩报表中归属的部门类别（自动=按渠道规则）">
+    <option value="" ${ov?'':'selected'}>自动（${esc(autoDept)}）</option>
+    ${DEPT_OPTIONS.map(k=>`<option value="${k}" ${ov===k?'selected':''}>${k}</option>`).join('')}
+  </select>`;
+}
+
 const DETAIL_TABS = [
   {key:'all',           label:'全部数据'},
   {key:'today',         label:'当日数据'},
@@ -1920,6 +1975,7 @@ function detailSortVal(r, key){
     case 'payTime': return r.payTime ? r.payTime.getTime() : 0;
     case 'cashPay': return Number(r.cashPay)||0;
     case 'assetDeduct': return Number(r.assetDeduct)||0;
+    case 'dept': return effectiveDept(r);
     case 'vab':     return isVabMember(r.memberNo) ? 1 : 0;
     default:        return String(r[key]||'');
   }
@@ -1928,7 +1984,7 @@ function detailSortVal(r, key){
 const DETAIL_SORT_COLS = [
   ['name','姓名'], ['memberNo','会员号'], ['channelClass','渠道分类'], ['channelL1','一级渠道'],
   ['channelL2','二级渠道'], ['visitType','到访类型'], ['consultant','咨询师'], ['cashier','收款员工'],
-  ['payTime','收款时间'], ['cashPay','现款支付'], ['assetDeduct','资产抵扣金额'], ['vab','VAB'],
+  ['payTime','收款时间'], ['cashPay','现款支付'], ['assetDeduct','资产抵扣金额'], ['dept','报表归属'], ['vab','VAB'],
 ];
 // 对筛选后的列表就地排序（无排序状态时保持导入顺序）
 function applyDetailSort(list){
@@ -1993,6 +2049,7 @@ function filterOrdersByTab(key){
   });
   if(f.cashPay) list=list.filter(r=>fmt(r.cashPay)===f.cashPay);
   if(f.assetDeduct) list=list.filter(r=>fmt(r.assetDeduct)===f.assetDeduct);
+  if(f.dept) list=list.filter(r=>effectiveDept(r)===f.dept);
   if(f.vab==='hit') list=list.filter(r=>isVabMember(r.memberNo));
   else if(f.vab==='miss') list=list.filter(r=>!isVabMember(r.memberNo));
   return list;
@@ -2024,6 +2081,7 @@ function detailRowCells(r, i, start){
     <td>${r.payTime?fmtDate(r.payTime):''}</td>
     <td style="text-align:right;">${fmt(r.cashPay)}</td>
     <td style="text-align:right;">${fmt(r.assetDeduct)}</td>
+    <td style="min-width:150px;">${deptSelectHTML(r)}</td>
     <td style="text-align:center;${vab?'color:#1a73e8;font-weight:600;':''}">${vab?'✔':'—'}</td>
     <td style="text-align:center;"><button class="detail-del" type="button" data-uid="${esc(r._uid)}" title="删除该条数据">×</button></td>
   </tr>`;
@@ -2050,7 +2108,9 @@ function detailCardHTML(r){
       ${row('收款时间', r.payTime?esc(fmtDate(r.payTime)):'')}
       ${row('现款支付', esc(fmt(r.cashPay)), 'amt')}
       ${row('资产抵扣金额', esc(fmt(r.assetDeduct)), 'amt')}
+      ${row('报表归属', esc(effectiveDept(r)) + (String(r.deptOverride||'').trim()?'（手动）':''))}
     </div>
+    <div class="dc-rows" style="margin-top:6px;">${deptSelectHTML(r)}</div>
   </div>`;
 }
 
@@ -2142,6 +2202,7 @@ function renderImportDetails(){
       ${fSel('cashier','收款员工',distinct('cashier'))}
       ${fSel('cashPay','现款支付',cashVals)}
       ${fSel('assetDeduct','资产抵扣金额',assetVals)}
+      ${fSel('dept','报表归属',DEPT_OPTIONS)}
       <label class="detail-filter">VAB
         <select class="detail-select" data-dfilter="vab">
           <option value="">VAB：全部</option>
@@ -2187,6 +2248,7 @@ function renderImportDetails(){
             <td colspan="10" style="text-align:right;">合计（${list.length} 行 · 命中VAB ${vabCount} 行）</td>
             <td style="text-align:right;">${fmt(total)}</td>
             <td style="text-align:right;">${fmt(totalAsset)}</td>
+            <td></td>
             <td style="text-align:center;">${vabCount}</td>
             <td></td>
           </tr></tfoot>
@@ -2239,9 +2301,22 @@ function onImportDetailsClick(e){
   }
 }
 
-// 导入明细筛选：月度 / 日期 / 每页条数 / 手机端排序 / 字段下拉 下拉变更
+// 导入明细筛选：月度 / 日期 / 每页条数 / 手机端排序 / 字段下拉 / 报表归属 下拉变更
 function onImportDetailsChange(e){
   if(!e || !e.target) return;
+  const ds = e.target.closest && e.target.closest('select.dept-sel');
+  if(ds){
+    const row = state.orders.find(r => String(r._uid) === String(ds.dataset.uid));
+    if(row){
+      const v = String(ds.value||'').trim();
+      if(DEPT_OPTIONS.includes(v)) row.deptOverride = v;
+      else delete row.deptOverride; // 恢复自动归属
+      persistOrders(); // 归属覆盖随订单持久化（localStorage/IndexedDB/云端）
+      recompute(); // 重算 ③主表 / ④门店表 / ⑥明细，报表归属立即生效
+      showToast(v ? `该明细报表归属已改为「${v}」，各统计表已重新计算` : '已恢复自动归属，各统计表已重新计算', 'ok');
+    }
+    return;
+  }
   const m = e.target.closest && e.target.closest('#detail-month-filter');
   if(m){ detailMonth = m.value || ''; detailPage = 1; renderImportDetails(); return; }
   const d = e.target.closest && e.target.closest('#detail-date-filter');
