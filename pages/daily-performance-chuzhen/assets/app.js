@@ -2240,7 +2240,7 @@ function renderImportDetails(){
   // 内容区：手机端卡片式 / 桌面端表格
   const content = isMobile
     ? `<div class="detail-cards">${pageItems.map(r=>detailCardHTML(r)).join('')}</div>`
-    : `<div class="table-wrap" style="border:1px solid var(--c-border);border-radius:8px;">
+    : `<div class="table-wrap" style="max-height:none;overflow:visible;border:1px solid var(--c-border);border-radius:8px;">
         <table class="data">
           <thead><tr>${sortThs}</tr></thead>
           <tbody>${pageItems.map((r,i)=>detailRowCells(r,i,start)).join('')}</tbody>
@@ -2564,7 +2564,7 @@ function renderMktFirstClients(){
   const tableHTML = clients.length === 0
     ? '<div class="file-meta" style="padding:12px 0;">无匹配客户（可调整或清除筛选）</div>'
     : `
-    <div class="table-wrap" style="border:1px solid var(--c-border);border-radius:8px;">
+    <div class="table-wrap" style="max-height:none;overflow:visible;border:1px solid var(--c-border);border-radius:8px;">
       <table class="data">
         <thead><tr><th>#</th><th>客户姓名</th><th>客户会员号</th><th>来源渠道</th><th>初诊日期</th><th>当月消费笔数</th><th>当月现款合计</th></tr></thead>
         <tbody>${clients.map((c,i)=>{
