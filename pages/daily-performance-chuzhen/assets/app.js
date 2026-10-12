@@ -2412,6 +2412,12 @@ function mktFirstClientKey(r){
 function isMktChuzhenOrder(r){
   return (chanHas(r,'营销部') || isRecToYingxiao(r)) && (r.visitType||'').trim() === '初诊';
 }
+// ⑤ 筛选状态：姓名/会员号模糊包含，来源渠道/初诊日期精确
+let mktFilters = { name:'', memberNo:'', channel:'', date:'' };
+let _mktFilterTimer = null;
+function mktChannelText(r){
+  return [r.channelClass, r.channelL1, r.channelL2].map(v=>String(v||'').trim()).filter(Boolean).join('-');
+}
 function renderMktFirstClients(){
   const el = $('mkt-first-clients');
   if(!el) return;
@@ -2435,17 +2441,54 @@ function renderMktFirstClients(){
     el.innerHTML = '<div class="file-meta" style="padding:12px 0;">当月暂无「营销部 + 初诊」客户（'+month+'）</div>';
     return;
   }
-  const clients = [...groups.entries()].map(([key, rows])=>{
+  // 来源渠道 = 渠道分类-一级渠道-二级渠道 拼接（空段跳过）
+  const allClients = [...groups.entries()].map(([key, rows])=>{
     // 初诊日期 = 该客户当月最早一笔初诊消费日期
     let first = null;
     rows.forEach(r=>{ if(r.payTime && (!first || r.payTime < first.payTime)) first = r; });
     const r0 = rows[0];
     return { key, name: r0.name || '—',
       memberNo: String(r0.memberNo||'').trim() || '—',
-      channel: String(r0.channelL1||'').trim() || String(r0.channelClass||'').trim() || '—',
+      channel: mktChannelText(r0) || '—',
       firstDate: first && first.payTime ? fmtDate(first.payTime) : '—' };
-  }).sort((a,b)=> String(a.firstDate).localeCompare(String(b.firstDate)) || String(a.name).localeCompare(String(b.name),'zh-CN'));
-  el.innerHTML = `
+  });
+  // 筛选（选项取自全部客户，与当前筛选无关，保证跨筛选稳定）
+  const f = mktFilters || {};
+  const channelOpts = [...new Set(allClients.map(c=>c.channel))].sort((a,b)=>a.localeCompare(b,'zh-CN'));
+  const dateOpts = [...new Set(allClients.map(c=>c.firstDate))].sort();
+  let clients = allClients;
+  if(f.name){ const q=String(f.name).toLowerCase(); clients=clients.filter(c=>String(c.name).toLowerCase().includes(q)); }
+  if(f.memberNo){ const q=String(f.memberNo).toLowerCase(); clients=clients.filter(c=>String(c.memberNo).toLowerCase().includes(q)); }
+  if(f.channel) clients=clients.filter(c=>c.channel===f.channel);
+  if(f.date) clients=clients.filter(c=>c.firstDate===f.date);
+  const anyF = !!(f.name||f.memberNo||f.channel||f.date);
+  const filterBar = `
+    <div class="detail-filters" style="margin:0 0 8px;">
+      <label class="detail-filter">姓名
+        <input type="text" class="detail-select" data-mkt-filter="name" value="${esc(f.name||'')}" placeholder="含…" style="min-width:88px;">
+      </label>
+      <label class="detail-filter">会员号
+        <input type="text" class="detail-select" data-mkt-filter="memberNo" value="${esc(f.memberNo||'')}" placeholder="含…" style="min-width:88px;">
+      </label>
+      <label class="detail-filter">来源渠道
+        <select class="detail-select" data-mkt-filter="channel">
+          <option value="">全部</option>
+          ${channelOpts.map(v=>`<option value="${esc(v)}" ${f.channel===v?'selected':''}>${esc(v)}</option>`).join('')}
+        </select>
+      </label>
+      <label class="detail-filter">初诊日期
+        <select class="detail-select" data-mkt-filter="date">
+          <option value="">全部</option>
+          ${dateOpts.map(v=>`<option value="${esc(v)}" ${f.date===v?'selected':''}>${esc(v)}</option>`).join('')}
+        </select>
+      </label>
+      ${anyF?'<button type="button" id="mkt-filter-reset" class="detail-reset" title="清除全部筛选">清除筛选</button>':''}
+      <span style="color:var(--c-muted);font-size:12px;">${clients.length}/${allClients.length} 位</span>
+    </div>`;
+  clients.sort((a,b)=> String(a.firstDate).localeCompare(String(b.firstDate)) || String(a.name).localeCompare(String(b.name),'zh-CN'));
+  const tableHTML = clients.length === 0
+    ? '<div class="file-meta" style="padding:12px 0;">无匹配客户（可调整或清除筛选）</div>'
+    : `
     <div class="table-wrap" style="max-height:420px;overflow:auto;border:1px solid var(--c-border);border-radius:8px;">
       <table class="data">
         <thead><tr><th>#</th><th>客户姓名</th><th>客户会员号</th><th>来源渠道</th><th>初诊日期</th><th>当月消费笔数</th><th>当月现款合计</th></tr></thead>
@@ -2466,11 +2509,38 @@ function renderMktFirstClients(){
         </tbody>
       </table>
     </div>
-    <div style="padding:6px 0 0;color:var(--c-muted);font-size:12px;">共 ${clients.length} 位初诊客户（${month}）· 点击数据行查看该客户当月消费明细</div>`;
+    <div style="padding:6px 0 0;color:var(--c-muted);font-size:12px;">共 ${clients.length} 位初诊客户（${month}）· 来源渠道=渠道分类-一级渠道-二级渠道 · 点击数据行查看该客户当月消费明细</div>`;
+  el.innerHTML = filterBar + tableHTML;
   if(!el.dataset.bound){
     el.addEventListener('click', onMktFirstClick);
+    el.addEventListener('click', onMktFirstFilterClick);
+    el.addEventListener('change', onMktFirstFilterChange);
+    el.addEventListener('input', onMktFirstFilterInput);
     el.dataset.bound = '1';
   }
+}
+
+// ⑤ 筛选交互：下拉/重置（click 上的重置按钮）+ 文本防抖（保持焦点）
+function onMktFirstFilterClick(e){
+  const rst = e.target.closest && e.target.closest('#mkt-filter-reset');
+  if(rst){ mktFilters = { name:'', memberNo:'', channel:'', date:'' }; renderMktFirstClients(); }
+}
+function onMktFirstFilterChange(e){
+  const sel = e.target.closest && e.target.closest('select[data-mkt-filter]');
+  if(sel){ mktFilters[sel.dataset.mktFilter] = sel.value || ''; renderMktFirstClients(); }
+}
+function onMktFirstFilterInput(e){
+  const inp = e.target.closest && e.target.closest('input[data-mkt-filter]');
+  if(!inp) return;
+  const key = inp.dataset.mktFilter;
+  const val = inp.value.trim();
+  clearTimeout(_mktFilterTimer);
+  _mktFilterTimer = setTimeout(()=>{
+    mktFilters[key] = val;
+    renderMktFirstClients();
+    const inp2 = document.querySelector('#mkt-first-clients input[data-mkt-filter="'+key+'"]');
+    if(inp2){ inp2.focus(); try{ inp2.setSelectionRange(inp2.value.length, inp2.value.length); }catch(err){} }
+  }, 300);
 }
 
 // ⑤ 行点击 → 弹窗展示该客户当月消费明细（该客户当月全部订单，不限营销部初诊）
