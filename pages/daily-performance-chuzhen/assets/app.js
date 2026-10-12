@@ -971,8 +971,20 @@ function inDateRange(d, cutoff){
   return true;
 }
 
+// 当月「营销部初诊客户」键集合（会员号优先，无会员号按姓名）——营销部各类别业绩仅计入这些客户的消费
+function buildMktFirstKeys(list){
+  const s = new Set();
+  (list||[]).forEach(r => {
+    if(isMktChuzhenOrder(r)){
+      const k = mktFirstClientKey(r);
+      if(k && k !== 'name:') s.add(k);
+    }
+  });
+  return s;
+}
+
 // 4. 业绩计算引擎 - 实现全部15条规则
-function calculate(orders, vabSet, cutoff){
+function calculate(orders, vabSet, cutoff, mktFirstKeysPre){
   // 月累计口径 = 截止日所在"本月"累计（当月1日 ~ 截止日），不含历史月份数据
   // 否则混入示例/往期数据会让本月月累计被撑大（与"月目标"语义不匹配）
   const cy = cutoff.getFullYear(), cm = cutoff.getMonth();
@@ -998,10 +1010,19 @@ function calculate(orders, vabSet, cutoff){
   const auto  = orders.filter(r => !hasOv(r));
   const ov    = k => orders.filter(r => String(r.deptOverride||'').trim() === k);
 
+  // 营销部各类别口径（2026-10-12 需求）：仅「当月营销部初诊客户」的消费计入
+  // 品牌组-其他/活动组-活动支持/电商组/短视频组/品牌组-自然到店（与⑤清单口径一致）；
+  // 非初诊客户的营销部订单落入残差「其他」；商务部口径不变；手动归属覆盖优先于本门槛。
+  // 注意：集合按整月口径构建（calculateDay 会传入全月订单预构建的集合），避免按日计算时
+  // 初诊订单不在当天导致该客户后续消费漏计。
+  const mktFirstKeys = (mktFirstKeysPre instanceof Set) ? mktFirstKeysPre : buildMktFirstKeys(orders);
+  const isMktFirst = r => mktFirstKeys.has(mktFirstClientKey(r));
+  const autoYx = auto.filter(isMktFirst);
+
   // --- 1. 品牌组-其他 ---
   // （括号明确分组：两个分支均要求 营销部+品牌组，避免 && / || 优先级歧义）
   const r1 = [
-    ...auto.filter(r =>
+    ...autoYx.filter(r =>
       (CC(r) === '营销部' &&
        L1(r) === '品牌组' &&
        ['微信小程序','微信公众号','客服手机','前台座机'].includes(L2(r))) ||
@@ -1012,43 +1033,43 @@ function calculate(orders, vabSet, cutoff){
 
   // --- 2. 活动组-活动支持 ---
   const r2 = [
-    ...auto.filter(r => CC(r)==='营销部' && L1(r)==='活动组' && L2(r)==='活动支持'),
+    ...autoYx.filter(r => CC(r)==='营销部' && L1(r)==='活动组' && L2(r)==='活动支持'),
     ...ov('活动组-活动支持'),
   ];
 
   // --- 3. 电商组（接受 一级渠道=电商组 / 客户转介绍 / 企业团检） ---
   const r3 = [
-    ...auto.filter(r => CC(r)==='营销部' && ['电商组','客户转介绍','企业团检'].includes(L1(r))),
+    ...autoYx.filter(r => CC(r)==='营销部' && ['电商组','客户转介绍','企业团检'].includes(L1(r))),
     ...ov('电商组'),
   ];
 
   // --- 3c. 电商组补充（2026-09-29 需求）：营销部 + 品牌组 + 二级渠道=线上400 → 归入电商组 ---
-  const r3c = auto.filter(r => CC(r)==='营销部' && L1(r)==='品牌组' && L2(r).includes('线上400'));
+  const r3c = autoYx.filter(r => CC(r)==='营销部' && L1(r)==='品牌组' && L2(r).includes('线上400'));
 
   // --- 4. 短视频组 ---
   const r4 = [
-    ...auto.filter(r => CC(r)==='营销部' && L1(r)==='短视频组'),
+    ...autoYx.filter(r => CC(r)==='营销部' && L1(r)==='短视频组'),
     ...ov('短视频组'),
   ];
 
   // --- 5. 品牌组-自然到店（包含自然到店关键字） ---
   const r5 = [
-    ...auto.filter(r => CC(r)==='营销部' && L1(r)==='品牌组' && L2(r).includes('自然到店')),
+    ...autoYx.filter(r => CC(r)==='营销部' && L1(r)==='品牌组' && L2(r).includes('自然到店')),
     ...ov('品牌组-自然到店'),
   ];
 
   // --- 6. 商务部（口径：客户来源渠道分类/一级渠道/二级渠道 任一为「商务部」或「市场部」；
-  //      市场部数据并入商务部统一核算，故不再单独落入"其他"） ---
+  //      市场部数据并入商务部统一核算，故不再单独落入"其他"；不适用初诊客户门槛） ---
   //      注：渠道分类=推荐 的订单改由下方 r6b 单独处理，避免与 chanHas 商务部/市场部 重复计入，
   //      故此处先把推荐类排除，r6b 再并入商务部，二者互不重叠。
   const r6 = auto.filter(r => (chanHas(r, '商务部') || chanHas(r, '市场部')) && (r.channelClass||'').trim() !== '推荐');
 
   // --- 6b. 推荐渠道补充（新增逻辑，不动 r1~r6 原有规则）---
-  // 渠道分类=推荐 且 一级分类包含「营销部」→ 计入营销部业绩：
+  // 渠道分类=推荐 且 一级分类包含「营销部」→ 计入营销部业绩（同样受初诊客户门槛约束）：
   //   二级含「自然到店」→ 品牌组-自然到店(r5b)，否则 → 电商组(r3b)
   // 渠道分类=推荐 且 一级分类包含「商务部」→ 计入商务部业绩(r6b)
-  const r3b = auto.filter(r => isRecToYingxiao(r) && !(r.channelL2||'').includes('自然到店'));
-  const r5b = auto.filter(r => isRecToYingxiao(r) && (r.channelL2||'').includes('自然到店'));
+  const r3b = autoYx.filter(r => isRecToYingxiao(r) && !(r.channelL2||'').includes('自然到店'));
+  const r5b = autoYx.filter(r => isRecToYingxiao(r) && (r.channelL2||'').includes('自然到店'));
   const r6b = auto.filter(r => isRecToShangwu(r));
 
   // --- 7. 合计（全部行） ---
@@ -1919,15 +1940,28 @@ function isRecToShangwu(r){
 // ===== 报表归属（部门类别）：明细表可手动指定，未指定按渠道规则自动归属 =====
 // 与 calculate 的 r1~r6b 规则镜像（仅用于展示/排序/筛选，金额计算仍以 calculate 为准）
 const DEPT_OPTIONS = ['品牌组-其他','活动组-活动支持','电商组','短视频组','品牌组-自然到店','商务部','其他'];
+// 「当月营销部初诊客户」键集合（带缓存，按 截止月+订单数+时间戳 失效）——与 calculate 口径一致
+let _mktKeysCache = { sig:'', set:null };
+function mktFirstKeysCached(){
+  const month = state.cutoffDate ? String(state.cutoffDate).slice(0,7) : '';
+  const sig = month + '|' + (state.orders||[]).length + '|' + (state.ordersTs||0);
+  if(_mktKeysCache.sig !== sig){
+    const monthOrders = (state.orders||[]).filter(r => r.payTime && fmtDate(r.payTime).slice(0,7) === month);
+    _mktKeysCache = { sig, set: buildMktFirstKeys(monthOrders) };
+  }
+  return _mktKeysCache.set;
+}
 function autoDeptOf(r){
   const cc=(r.channelClass||'').trim(), l1=(r.channelL1||'').trim(), l2=(r.channelL2||'').trim();
-  if(cc==='营销部' && l1==='品牌组' && (['微信小程序','微信公众号','客服手机','前台座机'].includes(l2) || (l2.includes('阿里') && l2.includes('高德')))) return '品牌组-其他';
-  if(cc==='营销部' && l1==='活动组' && l2==='活动支持') return '活动组-活动支持';
-  if(cc==='营销部' && ['电商组','客户转介绍','企业团检'].includes(l1)) return '电商组';
-  if(cc==='营销部' && l1==='品牌组' && l2.includes('线上400')) return '电商组';
-  if(cc==='营销部' && l1==='短视频组') return '短视频组';
-  if(cc==='营销部' && l1==='品牌组' && l2.includes('自然到店')) return '品牌组-自然到店';
-  if(isRecToYingxiao(r)) return l2.includes('自然到店') ? '品牌组-自然到店' : '电商组';
+  // 营销部各类别门槛：仅「当月营销部初诊客户」的消费计入（与 calculate 一致），否则落「其他」
+  const yxGate = mktFirstKeysCached().has(mktFirstClientKey(r));
+  if(cc==='营销部' && l1==='品牌组' && (['微信小程序','微信公众号','客服手机','前台座机'].includes(l2) || (l2.includes('阿里') && l2.includes('高德')))) return yxGate ? '品牌组-其他' : '其他';
+  if(cc==='营销部' && l1==='活动组' && l2==='活动支持') return yxGate ? '活动组-活动支持' : '其他';
+  if(cc==='营销部' && ['电商组','客户转介绍','企业团检'].includes(l1)) return yxGate ? '电商组' : '其他';
+  if(cc==='营销部' && l1==='品牌组' && l2.includes('线上400')) return yxGate ? '电商组' : '其他';
+  if(cc==='营销部' && l1==='短视频组') return yxGate ? '短视频组' : '其他';
+  if(cc==='营销部' && l1==='品牌组' && l2.includes('自然到店')) return yxGate ? '品牌组-自然到店' : '其他';
+  if(isRecToYingxiao(r)) return yxGate ? (l2.includes('自然到店') ? '品牌组-自然到店' : '电商组') : '其他';
   if((chanHas(r,'商务部') || chanHas(r,'市场部')) && cc!=='推荐') return '商务部';
   if(isRecToShangwu(r)) return '商务部';
   return '其他';
@@ -2696,7 +2730,11 @@ function generateDateRange(cutoff){
 function calculateDay(orders, vabSet, dateStr){
   const dayOrders = orders.filter(r=>r.payTime && fmtDate(r.payTime) === dateStr);
   if(dayOrders.length === 0) return null; // 无数据
-  return calculate(dayOrders, vabSet, new Date(dateStr));
+  // 「营销部初诊客户」集合按整月口径预构建（用全量订单中当月数据），
+  // 避免按日计算时初诊订单不在当天、该客户当天后续消费被误挡在营销部各类别之外
+  const c = new Date(dateStr);
+  const monthOrders = (orders||[]).filter(r => r.payTime && r.payTime.getFullYear()===c.getFullYear() && r.payTime.getMonth()===c.getMonth());
+  return calculate(dayOrders, vabSet, c, buildMktFirstKeys(monthOrders));
 }
 
 // 8. 重新计算
