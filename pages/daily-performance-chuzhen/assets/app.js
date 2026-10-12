@@ -2058,6 +2058,9 @@ function applyDetailSort(list){
 function filterOrdersByTab(key){
   const orders = state.orders || [];
   const latest = latestOrderDate();
+  // 近30天窗口（截止日起往前30天，含两端，可跨月）：供「营销部·初诊 / 营销部·类型空白」页签使用
+  const mw = mktWindow();
+  const inMktWin = r => !!r.payTime && fmtDate(r.payTime) >= mw.start && fmtDate(r.payTime) <= mw.end;
   let list;
   if(key === 'all') list = orders.slice();
   else if(key === 'today') list = orders.slice(); // 当日口径由日期筛选（默认当日）承担
@@ -2079,9 +2082,11 @@ function filterOrdersByTab(key){
   }
   else if(key === 'yingxiao') list = orders.filter(r => chanHas(r,'营销部') || isRecToYingxiao(r));
   // 营销部·初诊 / 营销部·类型空白：营销部口径与「营销部」页签一致（含推荐→营销部落位），
-  // 再按到访类型二分：初诊 / 空白（未填写）
-  else if(key === 'yx_chuzhen') list = orders.filter(r => (chanHas(r,'营销部') || isRecToYingxiao(r)) && (r.visitType||'').trim() === '初诊');
-  else if(key === 'yx_blank')   list = orders.filter(r => (chanHas(r,'营销部') || isRecToYingxiao(r)) && !(r.visitType||'').trim());
+  // 再按到访类型二分：初诊 / 空白（未填写）。
+  // 2026-10-12 口径更新：限定「近30天」窗口（截止日起往前30天，含两端，可跨月）——
+  // 与 ⑤ 清单 / ③ 报表的「30天内初诊客户」口径一致；超窗口的历史行不参与营销部业绩，不再混入本页签。
+  else if(key === 'yx_chuzhen') list = orders.filter(r => (chanHas(r,'营销部') || isRecToYingxiao(r)) && (r.visitType||'').trim() === '初诊' && inMktWin(r));
+  else if(key === 'yx_blank')   list = orders.filter(r => (chanHas(r,'营销部') || isRecToYingxiao(r)) && !(r.visitType||'').trim() && inMktWin(r));
   // 推荐页签：渠道分类=推荐 的订单（用于核对新归类逻辑落位：一级含营销部→营销部，含商务部→商务部，未匹配→其他）
   else if(key === 'recommend') list = orders.filter(r => (r.channelClass||'').trim() === '推荐');
   // 员工消费：渠道分类=公司所有 且 客户渠道标记为"员工本人及家属"。
@@ -2291,6 +2296,10 @@ function renderImportDetails(){
   const activeFieldCount = Object.values(detailFilters||{}).filter(Boolean).length;
   const filterNote = (detailMonth?('月度 '+detailMonth+' · '):'')+dateNote
     +(activeFieldCount?('字段筛选 '+activeFieldCount+' 项 · '):'');
+  // 营销部两类页签的口径说明（近30天窗口，与 ③ 报表 / ⑤ 清单一致）
+  const mw = mktWindow();
+  const mktTabNote = (detailTab === 'yx_chuzhen' || detailTab === 'yx_blank')
+    ? ('口径：近30天（' + mw.start + ' ~ ' + mw.end + '）· ') : '';
   // 手机端排序条（桌面端隐藏，由表格表头排序代替）
   const mobileSort = `
     <div class="detail-mobile-bar">
@@ -2326,7 +2335,7 @@ function renderImportDetails(){
     <div class="detail-tabs">${tabs}</div>
     ${mobileSort}
     <div style="padding:6px 0 10px;color:var(--c-muted);font-size:12px;">
-      当前标签「${tabLabel}」· ${filterNote}共 ${list.length} 行 · 现款支付合计 ¥${fmt(total)} · 资产抵扣合计 ¥${fmt(totalAsset)} · 命中VAB ${vabCount} 行${rangeNote}
+      当前标签「${tabLabel}」· ${mktTabNote}${filterNote}共 ${list.length} 行 · 现款支付合计 ¥${fmt(total)} · 资产抵扣合计 ¥${fmt(totalAsset)} · 命中VAB ${vabCount} 行${rangeNote}
     </div>
     ${content}
     ${renderPager(detailPage, pageCount)}
@@ -2560,7 +2569,13 @@ function latestOrderDate(){
 
 // ===== ⑤ 营销部初诊客户（近30天）=====
 // 口径：来源渠道=营销部（与「营销部」页签一致，含推荐→营销部落位）且 到访类型=初诊；
-// 当月 = 截止日期所在月；按客户去重（会员号优先，无会员号按姓名）。
+// 近30天 = 截止日起往前30天（含两端，可跨月）；按客户去重（会员号优先，无会员号按姓名）。
+// 近30天窗口（截止日起往前30天，含两端，可跨月）：⑤清单 / ③报表门槛 / ⑥营销部页签 统一口径
+function mktWindow(){
+  const cutoff = state.cutoffDate ? new Date(state.cutoffDate) : new Date();
+  if(isNaN(cutoff.getTime())) return { start:'', end:'' };
+  return { start: fmtDate(new Date(cutoff.getTime() - 30*86400000)), end: fmtDate(cutoff) };
+}
 function mktFirstClientKey(r){
   return String(r.memberNo||'').trim() || ('name:'+String(r.name||'').trim());
 }
@@ -2579,7 +2594,7 @@ function renderMktFirstClients(){
   const el = $('mkt-first-clients');
   if(!el) return;
   if(!state.results || !state.orders.length){
-    el.innerHTML = '<div class="file-meta" style="padding:12px 0;">导入订单数据后显示当月营销部初诊客户</div>';
+    el.innerHTML = '<div class="file-meta" style="padding:12px 0;">导入订单数据后显示近30天营销部初诊客户</div>';
     return;
   }
   const cutoff = state.cutoffDate ? new Date(state.cutoffDate) : new Date();
