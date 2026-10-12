@@ -971,10 +971,17 @@ function inDateRange(d, cutoff){
   return true;
 }
 
-// 当月「营销部初诊客户」键集合（会员号优先，无会员号按姓名）——营销部各类别业绩仅计入这些客户的消费
-function buildMktFirstKeys(list){
+// 「营销部初诊客户」键集合（会员号优先，无会员号按姓名）——营销部各类别业绩仅计入这些客户的消费。
+// 窗口：截止日起往前 30 天（含两端，可跨月）——初诊订单落在此窗口内即认定为初诊客户（2026-10-12 需求）。
+function buildMktFirstKeys(list, cutoff){
   const s = new Set();
+  if(!cutoff || isNaN(cutoff.getTime())) return s;
+  const end = fmtDate(cutoff);
+  const start = fmtDate(new Date(cutoff.getTime() - 30*86400000));
   (list||[]).forEach(r => {
+    if(!r.payTime) return;
+    const d = fmtDate(r.payTime);
+    if(d < start || d > end) return;
     if(isMktChuzhenOrder(r)){
       const k = mktFirstClientKey(r);
       if(k && k !== 'name:') s.add(k);
@@ -985,6 +992,8 @@ function buildMktFirstKeys(list){
 
 // 4. 业绩计算引擎 - 实现全部15条规则
 function calculate(orders, vabSet, cutoff, mktFirstKeysPre){
+  // 「营销部初诊客户」集合：必须在月度过滤之前用全量订单构建（初诊可落在上月、仍在30天窗口内）
+  const mktFirstKeys = (mktFirstKeysPre instanceof Set) ? mktFirstKeysPre : buildMktFirstKeys(orders, cutoff);
   // 月累计口径 = 截止日所在"本月"累计（当月1日 ~ 截止日），不含历史月份数据
   // 否则混入示例/往期数据会让本月月累计被撑大（与"月目标"语义不匹配）
   const cy = cutoff.getFullYear(), cm = cutoff.getMonth();
@@ -1010,12 +1019,10 @@ function calculate(orders, vabSet, cutoff, mktFirstKeysPre){
   const auto  = orders.filter(r => !hasOv(r));
   const ov    = k => orders.filter(r => String(r.deptOverride||'').trim() === k);
 
-  // 营销部各类别口径（2026-10-12 需求）：仅「当月营销部初诊客户」的消费计入
-  // 品牌组-其他/活动组-活动支持/电商组/短视频组/品牌组-自然到店（与⑤清单口径一致）；
+  // 营销部各类别口径（2026-10-12 需求）：仅「30 天内营销部初诊客户」的消费计入
+  // 品牌组-其他/活动组-活动支持/电商组/短视频组/品牌组-自然到店（含推荐→营销部落位）；
   // 非初诊客户的营销部订单落入残差「其他」；商务部口径不变；手动归属覆盖优先于本门槛。
-  // 注意：集合按整月口径构建（calculateDay 会传入全月订单预构建的集合），避免按日计算时
-  // 初诊订单不在当天导致该客户后续消费漏计。
-  const mktFirstKeys = (mktFirstKeysPre instanceof Set) ? mktFirstKeysPre : buildMktFirstKeys(orders);
+  // 注意：集合已在函数开头用全量订单按 30 天窗口构建（初诊可跨月），此处直接使用。
   const isMktFirst = r => mktFirstKeys.has(mktFirstClientKey(r));
   const autoYx = auto.filter(isMktFirst);
 
@@ -1940,20 +1947,20 @@ function isRecToShangwu(r){
 // ===== 报表归属（部门类别）：明细表可手动指定，未指定按渠道规则自动归属 =====
 // 与 calculate 的 r1~r6b 规则镜像（仅用于展示/排序/筛选，金额计算仍以 calculate 为准）
 const DEPT_OPTIONS = ['品牌组-其他','活动组-活动支持','电商组','短视频组','品牌组-自然到店','商务部','其他'];
-// 「当月营销部初诊客户」键集合（带缓存，按 截止月+订单数+时间戳 失效）——与 calculate 口径一致
+// 「30天内营销部初诊客户」键集合（带缓存，按 截止月+订单数+时间戳 失效）——与 calculate 口径一致
 let _mktKeysCache = { sig:'', set:null };
 function mktFirstKeysCached(){
   const month = state.cutoffDate ? String(state.cutoffDate).slice(0,7) : '';
   const sig = month + '|' + (state.orders||[]).length + '|' + (state.ordersTs||0);
   if(_mktKeysCache.sig !== sig){
-    const monthOrders = (state.orders||[]).filter(r => r.payTime && fmtDate(r.payTime).slice(0,7) === month);
-    _mktKeysCache = { sig, set: buildMktFirstKeys(monthOrders) };
+    const cutoff = state.cutoffDate ? new Date(state.cutoffDate) : null;
+    _mktKeysCache = { sig, set: buildMktFirstKeys(state.orders, cutoff) };
   }
   return _mktKeysCache.set;
 }
 function autoDeptOf(r){
   const cc=(r.channelClass||'').trim(), l1=(r.channelL1||'').trim(), l2=(r.channelL2||'').trim();
-  // 营销部各类别门槛：仅「当月营销部初诊客户」的消费计入（与 calculate 一致），否则落「其他」
+  // 营销部各类别门槛：仅「30天内营销部初诊客户」的消费计入（与 calculate 一致），否则落「其他」
   const yxGate = mktFirstKeysCached().has(mktFirstClientKey(r));
   if(cc==='营销部' && l1==='品牌组' && (['微信小程序','微信公众号','客服手机','前台座机'].includes(l2) || (l2.includes('阿里') && l2.includes('高德')))) return yxGate ? '品牌组-其他' : '其他';
   if(cc==='营销部' && l1==='活动组' && l2==='活动支持') return yxGate ? '活动组-活动支持' : '其他';
@@ -2763,11 +2770,10 @@ function generateDateRange(cutoff){
 function calculateDay(orders, vabSet, dateStr){
   const dayOrders = orders.filter(r=>r.payTime && fmtDate(r.payTime) === dateStr);
   if(dayOrders.length === 0) return null; // 无数据
-  // 「营销部初诊客户」集合按整月口径预构建（用全量订单中当月数据），
-  // 避免按日计算时初诊订单不在当天、该客户当天后续消费被误挡在营销部各类别之外
+  // 「30天内营销部初诊客户」集合：用全量订单 + 当日为截止构建（buildMktFirstKeys 内部做窗口过滤），
+  // 避免按日计算时初诊订单不在当天/当月导致该客户后续消费被误挡在营销部各类别之外
   const c = new Date(dateStr);
-  const monthOrders = (orders||[]).filter(r => r.payTime && r.payTime.getFullYear()===c.getFullYear() && r.payTime.getMonth()===c.getMonth());
-  return calculate(dayOrders, vabSet, c, buildMktFirstKeys(monthOrders));
+  return calculate(dayOrders, vabSet, c, buildMktFirstKeys(orders, c));
 }
 
 // 8. 重新计算
