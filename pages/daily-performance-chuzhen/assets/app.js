@@ -1360,7 +1360,11 @@ function renderReportInner(){
   }
   const dailyResults = dateList.map(d => {
     const g = byDate.get(d);
-    return (g && g.length) ? calculate(g, state.vabSet, new Date(d)) : null;
+    // 必须把「30天内营销部初诊客户」集合用【全量订单】按当日为截止预构建后传入：
+    // 否则 calculate 会退化为用「当天订单」构建集合，等于要求初诊订单与消费同日，
+    // 导致「上月/前几日初诊、当日消费」的客户业绩被挡在营销部各类别之外（落入「其他」）。
+    // 修复案例：宋鑫丹 9-18 初诊、10-9 消费 785（营销部-电商组）应计入 10-9 电商组。
+    return (g && g.length) ? calculate(g, state.vabSet, new Date(d), buildMktFirstKeys(state.orders, new Date(d))) : null;
   });
   // 缓存：供"按日期复制整列"复用，避免重复计算
   state.dateList = dateList;
