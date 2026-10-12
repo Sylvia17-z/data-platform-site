@@ -906,6 +906,7 @@ function normalizeOrder(r){
     channelL2: s(pickField(r, ['客户来源二级渠道','二级渠道'])),
     channelL3: s(pickField(r, ['客户来源三级渠道','三级渠道','渠道L3','客户来源三级','三级来源'])),
     cashPay: Number(pickField(r, ['现款支付'])) || 0,
+    assetDeduct: Number(pickField(r, ['收款金额-资产抵扣','资产抵扣'])) || 0,
     visitType: s(pickField(r, ['到访类型'])),
     payTime: parseDateLoose(pickField(r, ['收款时间'])),
     receiptNo: s(pickField(r, ['收款单号'])),
@@ -1329,7 +1330,7 @@ function renderReportInner(){
   // 标题行只跨主数据列（部门类别3+月目标+月累计+每日），不合并「批量」「展开」两列
   const titleCols = 3 + 1 + 1 + dateList.length;
   const thead = `
-    <tr><th colspan="${titleCols}" class="title-cell">各部门业绩完成情况跟踪日报表·初诊版(截止${monthStr})</th></tr>
+    <tr><th colspan="${titleCols}" class="title-cell">各部门业绩完成情况跟踪日报表(截止${monthStr})</th></tr>
     <tr>
       <th colspan="3" class="sub-head">部门类别</th>
       <th class="sub-head">月目标<br>(单位：万元)</th>
@@ -1517,7 +1518,7 @@ function renderStoreReport(dateList, dailyResults){
   const storeTitleCols = 1 + 1 + dateList.length; // 门店类别 + 月累计 + 每日（批量/展开已移至面板标题栏按钮）
 
   const thead = `
-    <tr><th colspan="${storeTitleCols}" class="title-cell">门店业绩完成情况·初诊版（高新店 / 经开店，截止${monthStr}）</th></tr>
+    <tr><th colspan="${storeTitleCols}" class="title-cell">门店业绩完成情况（高新店 / 经开店，截止${monthStr}）</th></tr>
     <tr>
       <th class="sub-head">门店类别</th>
       <th class="sub-head">月累计(单位：元)</th>
@@ -1901,13 +1902,15 @@ const DETAIL_TABS = [
   {key:'newperf',       label:'新增业绩'},
   {key:'bigspend',      label:'消费≥2万'},
   {key:'yingxiao',      label:'营销部'},
+  {key:'yx_chuzhen',    label:'营销部·初诊'},
+  {key:'yx_blank',      label:'营销部·类型空白'},
   {key:'recommend',     label:'推荐'},
   {key:'staff',         label:'员工消费'},
   {key:'steward',       label:'管家部'},
 ];
 let detailTab = 'all';
 let detailMonth = ''; // 月度筛选：''=全部，'YYYY-MM'
-let detailDate = '';  // 日期筛选：''=全部，'YYYY-MM-DD'
+let detailDate = '__latest__';  // 日期筛选三态：'__latest__'=默认显示当日（最新日期）；''=全部日期；'YYYY-MM-DD'=指定日期
 let detailSort = { key:'', dir:1 }; // 列排序：''=未排序；dir 1=升序 -1=降序（再次点击同列切换）
 let detailFilters = {}; // 字段筛选：key -> 值（''=全部）；name/memberNo 为模糊包含；vab 为 hit/miss
 
@@ -1916,6 +1919,7 @@ function detailSortVal(r, key){
   switch(key){
     case 'payTime': return r.payTime ? r.payTime.getTime() : 0;
     case 'cashPay': return Number(r.cashPay)||0;
+    case 'assetDeduct': return Number(r.assetDeduct)||0;
     case 'vab':     return isVabMember(r.memberNo) ? 1 : 0;
     default:        return String(r[key]||'');
   }
@@ -1923,8 +1927,8 @@ function detailSortVal(r, key){
 // 可排序列定义（# 与 操作 列不排序）
 const DETAIL_SORT_COLS = [
   ['name','姓名'], ['memberNo','会员号'], ['channelClass','渠道分类'], ['channelL1','一级渠道'],
-  ['channelL2','二级渠道'], ['consultant','咨询师'], ['cashier','收款员工'],
-  ['payTime','收款时间'], ['cashPay','现款支付'], ['vab','VAB'],
+  ['channelL2','二级渠道'], ['visitType','到访类型'], ['consultant','咨询师'], ['cashier','收款员工'],
+  ['payTime','收款时间'], ['cashPay','现款支付'], ['assetDeduct','资产抵扣金额'], ['vab','VAB'],
 ];
 // 对筛选后的列表就地排序（无排序状态时保持导入顺序）
 function applyDetailSort(list){
@@ -1937,18 +1941,19 @@ function applyDetailSort(list){
   });
 }
 
-// 按标签筛选导入订单；"当日"=数据中的最新日期（latestOrderDate）；月度/日期筛选叠加取交集
+// 按标签筛选导入订单。
+// 日期口径说明：所有页签不再内置"当日"过滤，统一由下方日期筛选承担 ——
+// detailDate 默认 '__latest__'（=数据中最新日期，即"当日"），可通过日期下拉切换到其他日期或"全部日期"。
 function filterOrdersByTab(key){
   const orders = state.orders || [];
   const latest = latestOrderDate();
-  const isToday = r => fmtDate(r.payTime) === latest;
   let list;
   if(key === 'all') list = orders.slice();
-  else if(key === 'today') list = orders.filter(r => isToday(r));
-  else if(key === 'today_gaoxin')  list = orders.filter(r => isToday(r) && isGaoXinCashier(r));
-  else if(key === 'today_beijiao') list = orders.filter(r => isToday(r) && !isGaoXinCashier(r));
-  else if(key === 'shangwu') list = orders.filter(r => isToday(r) && (chanHas(r,'商务部') || chanHas(r,'市场部') || isRecToShangwu(r)));
-  else if(key === 'newperf')  list = orders.filter(r => isToday(r) && isVabMember(r.memberNo));
+  else if(key === 'today') list = orders.slice(); // 当日口径由日期筛选（默认当日）承担
+  else if(key === 'today_gaoxin')  list = orders.filter(r => isGaoXinCashier(r));
+  else if(key === 'today_beijiao') list = orders.filter(r => !isGaoXinCashier(r));
+  else if(key === 'shangwu') list = orders.filter(r => chanHas(r,'商务部') || chanHas(r,'市场部') || isRecToShangwu(r));
+  else if(key === 'newperf')  list = orders.filter(r => isVabMember(r.memberNo));
   else if(key === 'bigspend'){
     // 按日 + 单会员号 聚合现款，≥20000 的(日,会员)组整组显示（单会员号现款消费≥两万）
     const sumMap = new Map();
@@ -1961,27 +1966,33 @@ function filterOrdersByTab(key){
     const hit = new Set([...sumMap.entries()].filter(([k,v])=>v>=20000).map(([k])=>k));
     list = orders.filter(r=>{ const m=String(r.memberNo||'').trim(); return m && hit.has(fmtDate(r.payTime)+'|'+m); });
   }
-  else if(key === 'yingxiao') list = orders.filter(r => isToday(r) && (chanHas(r,'营销部') || isRecToYingxiao(r)));
-  // 推荐页签：渠道分类=推荐 的订单（当日口径，与商务部/营销部页签一致），
-  // 用于核对新归类逻辑落位（一级含营销部→营销部，含商务部→商务部，未匹配→其他）
-  else if(key === 'recommend') list = orders.filter(r => isToday(r) && (r.channelClass||'').trim() === '推荐');
+  else if(key === 'yingxiao') list = orders.filter(r => chanHas(r,'营销部') || isRecToYingxiao(r));
+  // 营销部·初诊 / 营销部·类型空白：营销部口径与「营销部」页签一致（含推荐→营销部落位），
+  // 再按到访类型二分：初诊 / 空白（未填写）
+  else if(key === 'yx_chuzhen') list = orders.filter(r => (chanHas(r,'营销部') || isRecToYingxiao(r)) && (r.visitType||'').trim() === '初诊');
+  else if(key === 'yx_blank')   list = orders.filter(r => (chanHas(r,'营销部') || isRecToYingxiao(r)) && !(r.visitType||'').trim());
+  // 推荐页签：渠道分类=推荐 的订单（用于核对新归类逻辑落位：一级含营销部→营销部，含商务部→商务部，未匹配→其他）
+  else if(key === 'recommend') list = orders.filter(r => (r.channelClass||'').trim() === '推荐');
   // 员工消费：渠道分类=公司所有 且 客户渠道标记为"员工本人及家属"。
   // 实测真实导出表里该标记落在【二级渠道】(L2)，旧导出可能在【三级渠道】(L3)，故 L2/L3 任一命中即可；
   // 原代码只查 L3 导致整组 0 行。按全月统计（不限当日），与「管家部」全月审计口径一致。
   else if(key === 'staff')    list = orders.filter(r => chanHas(r,'公司所有') && ((r.channelL2||'').includes('员工本人及家属') || (r.channelL3||'').includes('员工本人及家属')));
   else if(key === 'steward')  list = orders.filter(r => isSteward(r)); // 管家部：开单咨询师口径 + 渠道兜底（全月审计，不限于当日）
   else list = orders.slice();
-  // 月度 / 日期 筛选叠加（与标签取交集）
+  // 月度 / 日期 筛选叠加（与标签取交集）。'__latest__'=默认当日（最新日期），''=全部日期
   if(detailMonth) list = list.filter(r => r.payTime && fmtMonth(r.payTime) === detailMonth);
-  if(detailDate)  list = list.filter(r => r.payTime && fmtDate(r.payTime) === detailDate);
+  let effDate = detailDate;
+  if(effDate === '__latest__') effDate = latest;
+  if(effDate) list = list.filter(r => r.payTime && fmtDate(r.payTime) === effDate);
   // 字段筛选叠加（展示的全部字段）：姓名/会员号模糊包含，其余精确匹配；收款时间用月度/日期承担，VAB 按命中状态
   const f = detailFilters || {};
   if(f.name){ const q=String(f.name).toLowerCase(); list=list.filter(r=>String(r.name||'').toLowerCase().includes(q)); }
   if(f.memberNo){ const q=String(f.memberNo).toLowerCase(); list=list.filter(r=>String(r.memberNo||'').toLowerCase().includes(q)); }
-  ['channelClass','channelL1','channelL2','consultant','cashier'].forEach(k=>{
+  ['channelClass','channelL1','channelL2','visitType','consultant','cashier'].forEach(k=>{
     if(f[k]) list=list.filter(r=>String(r[k]||'').trim()===f[k]);
   });
   if(f.cashPay) list=list.filter(r=>fmt(r.cashPay)===f.cashPay);
+  if(f.assetDeduct) list=list.filter(r=>fmt(r.assetDeduct)===f.assetDeduct);
   if(f.vab==='hit') list=list.filter(r=>isVabMember(r.memberNo));
   else if(f.vab==='miss') list=list.filter(r=>!isVabMember(r.memberNo));
   return list;
@@ -2007,10 +2018,12 @@ function detailRowCells(r, i, start){
     <td>${esc(r.channelClass)}</td>
     <td>${esc(r.channelL1)}</td>
     <td>${esc(r.channelL2)}</td>
+    <td>${esc(r.visitType)}</td>
     <td>${esc(r.consultant)}</td>
     <td>${esc(r.cashier)}</td>
-    <td>${r.payTime?r.payTime.toLocaleString('zh-CN'):''}</td>
+    <td>${r.payTime?fmtDate(r.payTime):''}</td>
     <td style="text-align:right;">${fmt(r.cashPay)}</td>
+    <td style="text-align:right;">${fmt(r.assetDeduct)}</td>
     <td style="text-align:center;${vab?'color:#1a73e8;font-weight:600;':''}">${vab?'✔':'—'}</td>
     <td style="text-align:center;"><button class="detail-del" type="button" data-uid="${esc(r._uid)}" title="删除该条数据">×</button></td>
   </tr>`;
@@ -2031,10 +2044,12 @@ function detailCardHTML(r){
       ${row('渠道分类', esc(r.channelClass))}
       ${row('一级渠道', esc(r.channelL1))}
       ${row('二级渠道', esc(r.channelL2))}
+      ${row('到访类型', esc(r.visitType))}
       ${row('咨询师', esc(r.consultant))}
       ${row('收款员工', esc(r.cashier))}
-      ${row('收款时间', r.payTime?esc(r.payTime.toLocaleString('zh-CN')):'')}
+      ${row('收款时间', r.payTime?esc(fmtDate(r.payTime)):'')}
       ${row('现款支付', esc(fmt(r.cashPay)), 'amt')}
+      ${row('资产抵扣金额', esc(fmt(r.assetDeduct)), 'amt')}
     </div>
   </div>`;
 }
@@ -2075,6 +2090,7 @@ function renderImportDetails(){
   const list = applyDetailSort(listRaw);
   const vabCount = list.filter(r=>isVabMember(r.memberNo)).length;
   const total = list.reduce((a,b)=>a+(Number(b.cashPay)||0),0);
+  const totalAsset = list.reduce((a,b)=>a+(Number(b.assetDeduct)||0),0);
   // 分页计算（排序后的完整列表分页展示；合计/行数统计仍基于完整 list）
   const pageCount = Math.max(1, Math.ceil(list.length / detailPageSize));
   if(detailPage > pageCount) detailPage = pageCount;
@@ -2083,16 +2099,20 @@ function renderImportDetails(){
   const pageItems = list.slice(start, start + detailPageSize);
   const isMobile = isMobileView();
   // 月度 / 日期 筛选下拉（选项来自当前导入订单中实际出现的月份/日期，按时间升序）
+  const latest = latestOrderDate();
   const months = [...new Set(orders.map(r=>r.payTime?fmtMonth(r.payTime):null).filter(Boolean))].sort();
   const dates  = [...new Set(orders.map(r=>r.payTime?fmtDate(r.payTime):null).filter(Boolean))].sort();
   const monthOpts = ['<option value="">全部月份</option>']
     .concat(months.map(m=>`<option value="${m}" ${m===detailMonth?'selected':''}>${m}</option>`)).join('');
-  const dateOpts = ['<option value="">全部日期</option>']
+  const dateOpts = ['<option value="__latest__" '+('__latest__'===detailDate?'selected':'')+'>当日（'+latest+'）</option>',
+    '<option value="" '+(''===detailDate?'selected':'')+'>全部日期</option>']
     .concat(dates.map(d=>`<option value="${d}" ${d===detailDate?'selected':''}>${d}</option>`)).join('');
   // 字段筛选下拉选项（取自全部订单，与页签无关，保证跨页签稳定）
   const distinct = key => [...new Set(orders.map(r=>String(r[key]||'').trim()).filter(Boolean))]
     .sort((a,b)=>a.localeCompare(b,'zh-CN'));
   const cashVals = [...new Set(orders.map(r=>fmt(r.cashPay)))]
+    .sort((a,b)=>(Number(String(a).replace(/,/g,''))||0)-(Number(String(b).replace(/,/g,''))||0));
+  const assetVals = [...new Set(orders.map(r=>fmt(r.assetDeduct)))]
     .sort((a,b)=>(Number(String(a).replace(/,/g,''))||0)-(Number(String(b).replace(/,/g,''))||0));
   const fText = (key,label) => `<label class="detail-filter">${label}`
     + `<input type="text" class="detail-select" data-dfilter-text="${key}" value="${esc(detailFilters[key]||'')}" `
@@ -2102,7 +2122,8 @@ function renderImportDetails(){
     + ['<option value="">'+label+'：全部</option>']
         .concat(arr.map(v=>`<option value="${esc(v)}" ${String(detailFilters[key]||'')===v?'selected':''}>${esc(v)}</option>`)).join('')
     + '</select></label>';
-  const anyDetailFilter = !!(detailMonth||detailDate||Object.values(detailFilters||{}).some(Boolean));
+  const effDateOn = !!detailDate && detailDate !== '__latest__';
+  const anyDetailFilter = !!(detailMonth||effDateOn||Object.values(detailFilters||{}).some(Boolean));
   const filterBar = `
     <div class="detail-filters">
       <label class="detail-filter">月度
@@ -2116,9 +2137,11 @@ function renderImportDetails(){
       ${fSel('channelClass','渠道分类',distinct('channelClass'))}
       ${fSel('channelL1','一级渠道',distinct('channelL1'))}
       ${fSel('channelL2','二级渠道',distinct('channelL2'))}
+      ${fSel('visitType','到访类型',distinct('visitType'))}
       ${fSel('consultant','咨询师',distinct('consultant'))}
       ${fSel('cashier','收款员工',distinct('cashier'))}
       ${fSel('cashPay','现款支付',cashVals)}
+      ${fSel('assetDeduct','资产抵扣金额',assetVals)}
       <label class="detail-filter">VAB
         <select class="detail-select" data-dfilter="vab">
           <option value="">VAB：全部</option>
@@ -2139,8 +2162,9 @@ function renderImportDetails(){
     }))
     .concat(['<th>操作</th>']).join('');
   const tabLabel = DETAIL_TABS.find(t=>t.key===detailTab).label;
+  const dateNote = detailDate === '__latest__' ? ('当日 '+latest+' · ') : (detailDate ? ('日期 '+detailDate+' · ') : '');
   const activeFieldCount = Object.values(detailFilters||{}).filter(Boolean).length;
-  const filterNote = (detailMonth?('月度 '+detailMonth+' · '):'')+(detailDate?('日期 '+detailDate+' · '):'')
+  const filterNote = (detailMonth?('月度 '+detailMonth+' · '):'')+dateNote
     +(activeFieldCount?('字段筛选 '+activeFieldCount+' 项 · '):'');
   // 手机端排序条（桌面端隐藏，由表格表头排序代替）
   const mobileSort = `
@@ -2160,8 +2184,9 @@ function renderImportDetails(){
           <thead><tr>${sortThs}</tr></thead>
           <tbody>${pageItems.map((r,i)=>detailRowCells(r,i,start)).join('')}</tbody>
           <tfoot><tr style="font-weight:700;background:var(--c-blue-tint);color:var(--c-head);">
-            <td colspan="9" style="text-align:right;">合计（${list.length} 行 · 命中VAB ${vabCount} 行）</td>
+            <td colspan="10" style="text-align:right;">合计（${list.length} 行 · 命中VAB ${vabCount} 行）</td>
             <td style="text-align:right;">${fmt(total)}</td>
+            <td style="text-align:right;">${fmt(totalAsset)}</td>
             <td style="text-align:center;">${vabCount}</td>
             <td></td>
           </tr></tfoot>
@@ -2175,7 +2200,7 @@ function renderImportDetails(){
     <div class="detail-tabs">${tabs}</div>
     ${mobileSort}
     <div style="padding:6px 0 10px;color:var(--c-muted);font-size:12px;">
-      当前标签「${tabLabel}」· ${filterNote}共 ${list.length} 行 · 现款支付合计 ¥${fmt(total)} · 命中VAB ${vabCount} 行${rangeNote}
+      当前标签「${tabLabel}」· ${filterNote}共 ${list.length} 行 · 现款支付合计 ¥${fmt(total)} · 资产抵扣合计 ¥${fmt(totalAsset)} · 命中VAB ${vabCount} 行${rangeNote}
     </div>
     ${content}
     ${renderPager(detailPage, pageCount)}`;
@@ -2209,7 +2234,7 @@ function onImportDetailsClick(e){
   }
   const reset = e.target.closest && e.target.closest('#detail-filter-reset');
   if(reset){
-    detailMonth = ''; detailDate = ''; detailFilters = {}; detailPage = 1;
+    detailMonth = ''; detailDate = '__latest__'; detailFilters = {}; detailPage = 1;
     renderImportDetails();
   }
 }
@@ -2268,6 +2293,7 @@ function deleteOrder(uid){
     state.results = null;
     renderReport();
     renderImportDetails();
+    renderMktFirstClients();
     persistOrders(); // 删空后同步持久化（空数组），刷新不再出现旧数据
     clearOrdersInCloud(); // 本地已空 → 同步清空云端，避免重新登录后旧数据回灌
     showToast('已删除全部数据，手动调整已清空，各统计表已同步更新', 'ok');
@@ -2377,6 +2403,133 @@ function latestOrderDate(){
   }, null) || todayIso();
 }
 
+// ===== ⑤ 营销部初诊客户（当月）=====
+// 口径：来源渠道=营销部（与「营销部」页签一致，含推荐→营销部落位）且 到访类型=初诊；
+// 当月 = 截止日期所在月；按客户去重（会员号优先，无会员号按姓名）。
+function mktFirstClientKey(r){
+  return String(r.memberNo||'').trim() || ('name:'+String(r.name||'').trim());
+}
+function isMktChuzhenOrder(r){
+  return (chanHas(r,'营销部') || isRecToYingxiao(r)) && (r.visitType||'').trim() === '初诊';
+}
+function renderMktFirstClients(){
+  const el = $('mkt-first-clients');
+  if(!el) return;
+  if(!state.results || !state.orders.length){
+    el.innerHTML = '<div class="file-meta" style="padding:12px 0;">导入订单数据后显示当月营销部初诊客户</div>';
+    return;
+  }
+  const cutoff = state.cutoffDate ? new Date(state.cutoffDate) : new Date();
+  const month = cutoff.getFullYear()+'-'+String(cutoff.getMonth()+1).padStart(2,'0');
+  const inMonth = r => r.payTime && fmtDate(r.payTime).slice(0,7) === month;
+  // 按客户分组（仅营销部初诊订单用于定位客户；消费明细在弹窗内按客户全量口径重新取）
+  const groups = new Map();
+  state.orders.forEach(r=>{
+    if(!inMonth(r) || !isMktChuzhenOrder(r)) return;
+    const key = mktFirstClientKey(r);
+    if(!key || key === 'name:') return;
+    if(!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(r);
+  });
+  if(groups.size === 0){
+    el.innerHTML = '<div class="file-meta" style="padding:12px 0;">当月暂无「营销部 + 初诊」客户（'+month+'）</div>';
+    return;
+  }
+  const clients = [...groups.entries()].map(([key, rows])=>{
+    // 初诊日期 = 该客户当月最早一笔初诊消费日期
+    let first = null;
+    rows.forEach(r=>{ if(r.payTime && (!first || r.payTime < first.payTime)) first = r; });
+    const r0 = rows[0];
+    return { key, name: r0.name || '—',
+      memberNo: String(r0.memberNo||'').trim() || '—',
+      channel: String(r0.channelL1||'').trim() || String(r0.channelClass||'').trim() || '—',
+      firstDate: first && first.payTime ? fmtDate(first.payTime) : '—' };
+  }).sort((a,b)=> String(a.firstDate).localeCompare(String(b.firstDate)) || String(a.name).localeCompare(String(b.name),'zh-CN'));
+  el.innerHTML = `
+    <div class="table-wrap" style="max-height:420px;overflow:auto;border:1px solid var(--c-border);border-radius:8px;">
+      <table class="data">
+        <thead><tr><th>#</th><th>客户姓名</th><th>客户会员号</th><th>来源渠道</th><th>初诊日期</th><th>当月消费笔数</th><th>当月现款合计</th></tr></thead>
+        <tbody>${clients.map((c,i)=>{
+          const rows = state.orders.filter(r=>inMonth(r) && mktFirstClientKey(r)===c.key);
+          const cnt = rows.length;
+          const sum = rows.reduce((a,b)=>a+(Number(b.cashPay)||0),0);
+          return `<tr class="mkt-first-row" data-key="${esc(c.key)}" style="cursor:pointer;" title="点击查看该客户当月消费明细">
+            <td style="text-align:center;color:var(--c-muted);">${i+1}</td>
+            <td>${esc(c.name)}</td>
+            <td>${esc(c.memberNo)}</td>
+            <td>${esc(c.channel)}</td>
+            <td style="text-align:center;">${esc(c.firstDate)}</td>
+            <td style="text-align:center;">${cnt}</td>
+            <td style="text-align:right;">${fmt(sum)}</td>
+          </tr>`;
+        }).join('')}
+        </tbody>
+      </table>
+    </div>
+    <div style="padding:6px 0 0;color:var(--c-muted);font-size:12px;">共 ${clients.length} 位初诊客户（${month}）· 点击数据行查看该客户当月消费明细</div>`;
+  if(!el.dataset.bound){
+    el.addEventListener('click', onMktFirstClick);
+    el.dataset.bound = '1';
+  }
+}
+
+// ⑤ 行点击 → 弹窗展示该客户当月消费明细（该客户当月全部订单，不限营销部初诊）
+function onMktFirstClick(e){
+  const tr = e.target.closest && e.target.closest('tr.mkt-first-row');
+  if(!tr) return;
+  const key = tr.dataset.key;
+  const cutoff = state.cutoffDate ? new Date(state.cutoffDate) : new Date();
+  const month = cutoff.getFullYear()+'-'+String(cutoff.getMonth()+1).padStart(2,'0');
+  const inMonth = r => r.payTime && fmtDate(r.payTime).slice(0,7) === month;
+  const rows = state.orders.filter(r=>inMonth(r) && mktFirstClientKey(r)===key);
+  if(!rows.length){ showToast('未找到该客户当月数据', 'warn'); return; }
+  showClientMonthModal(rows[0], rows, month);
+}
+
+// 客户当月消费明细弹窗（复用 .modal-mask/.modal-box 体系）
+function showClientMonthModal(r0, rows, month){
+  const mask = document.createElement('div');
+  mask.className = 'modal-mask';
+  mask.style.zIndex = '1100';
+  const sorted = rows.slice().sort((a,b)=>(a.payTime&&b.payTime)?(a.payTime-b.payTime):0);
+  const total = sorted.reduce((a,b)=>a+(Number(b.cashPay)||0),0);
+  const totalAsset = sorted.reduce((a,b)=>a+(Number(b.assetDeduct)||0),0);
+  mask.innerHTML = `
+    <div class="modal-box" role="dialog" aria-modal="true" style="width:min(820px,96vw);">
+      <div class="modal-title">📋 ${esc(r0.name||'—')}（会员号 ${esc(String(r0.memberNo||'').trim()||'无')}）· ${month} 消费明细 · 共 ${sorted.length} 笔</div>
+      <div class="table-wrap" style="max-height:54vh;overflow:auto;border:1px solid var(--c-border);border-radius:8px;">
+        <table class="data">
+          <thead><tr><th>#</th><th>收款时间</th><th>到访类型</th><th>渠道分类</th><th>一级渠道</th><th>开单咨询师</th><th>收款员工</th><th>现款支付</th><th>资产抵扣金额</th></tr></thead>
+          <tbody>${sorted.map((r,i)=>`
+            <tr>
+              <td style="text-align:center;color:var(--c-muted);">${i+1}</td>
+              <td>${r.payTime?fmtDate(r.payTime):''}</td>
+              <td>${esc(r.visitType)}</td>
+              <td>${esc(r.channelClass)}</td>
+              <td>${esc(r.channelL1)}</td>
+              <td>${esc(r.consultant)}</td>
+              <td>${esc(r.cashier)}</td>
+              <td style="text-align:right;">${fmt(r.cashPay)}</td>
+              <td style="text-align:right;">${fmt(r.assetDeduct)}</td>
+            </tr>`).join('')}
+          </tbody>
+          <tfoot><tr style="font-weight:700;background:var(--c-blue-tint);color:var(--c-head);">
+            <td colspan="7" style="text-align:right;">合计</td>
+            <td style="text-align:right;">${fmt(total)}</td>
+            <td style="text-align:right;">${fmt(totalAsset)}</td>
+          </tr></tfoot>
+        </table>
+      </div>
+      <div class="row" style="justify-content:flex-end;margin-top:12px;">
+        <button class="btn" id="client-modal-close">关闭</button>
+      </div>
+    </div>`;
+  const close = ()=> mask.remove();
+  mask.addEventListener('click', e=>{ if(e.target === mask) close(); });
+  mask.querySelector('#client-modal-close').addEventListener('click', close);
+  document.body.appendChild(mask);
+}
+
 // 生成当月 1 日到 cutoff 的所有日期（YYYY-MM-DD 数组）
 function generateDateRange(cutoff){
   if(!cutoff) return [];
@@ -2432,6 +2585,7 @@ function recompute(){
   updateOrdersMeta();
   state.results = calculate(state.orders, state.vabSet, new Date(state.cutoffDate));
   renderReport();
+  renderMktFirstClients();
   refreshDebug();
 }
 
@@ -2471,7 +2625,7 @@ function buildReportGrid(){
   const merges = [];
   // 标题行
   rows.push(Array.from({length:nCols}, () => null));
-  rows[0][0] = cell('各部门业绩完成情况跟踪日报表·初诊版(截止'+monthStr+')', 's', 'title');
+  rows[0][0] = cell('各部门业绩完成情况跟踪日报表(截止'+monthStr+')', 's', 'title');
   merges.push({r:0, c:0, r2:0, c2:nCols-1});
   // 表头行
   rows.push(Array.from({length:nCols}, () => null));
@@ -2549,7 +2703,7 @@ function buildStoreGrid(){
   const rows = [];
   const merges = [];
   rows.push(Array.from({length:nCols}, () => null));
-  rows[0][0] = cell('门店业绩完成情况·初诊版（高新店 / 经开店，截止'+monthStr+'）', 's', 'title');
+  rows[0][0] = cell('门店业绩完成情况（高新店 / 经开店，截止'+monthStr+'）', 's', 'title');
   merges.push({r:0, c:0, r2:0, c2:nCols-1});
   rows.push(Array.from({length:nCols}, () => null));
   rows[1][0] = cell('门店类别', 's', 'subhead');
