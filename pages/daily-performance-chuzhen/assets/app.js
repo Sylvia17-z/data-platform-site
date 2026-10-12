@@ -2126,7 +2126,7 @@ function detailRowCells(r, i, start){
     <td>${esc(r.channelClass)}</td>
     <td>${esc(r.channelL1)}</td>
     <td>${esc(r.channelL2)}</td>
-    <td>${esc(r.visitType)}</td>
+    <td><input type="text" class="detail-select vt-input" data-uid="${esc(r._uid)}" list="vt-options" value="${esc(r.visitType||'')}" placeholder="（空白）" title="点击可手动修改到访类型（如：初诊/复诊），修改后各统计表联动重算" style="min-width:0;width:78px;"></td>
     <td>${esc(r.consultant)}</td>
     <td>${esc(r.cashier)}</td>
     <td>${r.payTime?fmtDate(r.payTime):''}</td>
@@ -2161,7 +2161,12 @@ function detailCardHTML(r){
       ${row('资产抵扣金额', esc(fmt(r.assetDeduct)), 'amt')}
       ${row('报表归属', esc(effectiveDept(r)) + (String(r.deptOverride||'').trim()?'（手动）':''))}
     </div>
-    <div class="dc-rows" style="margin-top:6px;">${deptSelectHTML(r)}</div>
+    <div class="dc-rows" style="margin-top:6px;">
+      <label style="display:inline-flex;align-items:center;gap:6px;">到访类型
+        <input type="text" class="detail-select vt-input" data-uid="${esc(r._uid)}" list="vt-options" value="${esc(r.visitType||'')}" placeholder="（空白）" style="min-width:0;width:96px;">
+      </label>
+      ${deptSelectHTML(r)}
+    </div>
   </div>`;
 }
 
@@ -2221,6 +2226,10 @@ function renderImportDetails(){
   // 字段筛选下拉选项（取自全部订单，与页签无关，保证跨页签稳定）
   const distinct = key => [...new Set(orders.map(r=>String(r[key]||'').trim()).filter(Boolean))]
     .sort((a,b)=>a.localeCompare(b,'zh-CN'));
+  // 到访类型候选（datalist）：数据中已出现的值 + 常用「初诊/复诊」兜底，允许自由输入
+  const vtVals = [...new Set(distinct('visitType').concat(
+    ['初诊','复诊'].filter(v=>!distinct('visitType').includes(v))))].sort((a,b)=>a.localeCompare(b,'zh-CN'));
+  const vtOptions = vtVals.map(v=>`<option value="${esc(v)}"></option>`).join('');
   const cashVals = [...new Set(orders.map(r=>fmt(r.cashPay)))]
     .sort((a,b)=>(Number(String(a).replace(/,/g,''))||0)-(Number(String(b).replace(/,/g,''))||0));
   const assetVals = [...new Set(orders.map(r=>fmt(r.assetDeduct)))]
@@ -2316,7 +2325,8 @@ function renderImportDetails(){
       当前标签「${tabLabel}」· ${filterNote}共 ${list.length} 行 · 现款支付合计 ¥${fmt(total)} · 资产抵扣合计 ¥${fmt(totalAsset)} · 命中VAB ${vabCount} 行${rangeNote}
     </div>
     ${content}
-    ${renderPager(detailPage, pageCount)}`;
+    ${renderPager(detailPage, pageCount)}
+    <datalist id="vt-options">${vtOptions}</datalist>`;
   // 事件委托（绑定一次）：标签切换 + 删除某条数据（删除后全表同步更新）+ 月度/日期/字段筛选
   if(!el.dataset.bound){
     el.addEventListener('click', onImportDetailsClick);
@@ -2365,6 +2375,21 @@ function onImportDetailsChange(e){
       persistOrders(); // 归属覆盖随订单持久化（localStorage/IndexedDB/云端）
       recompute(); // 重算 ③主表 / ④门店表 / ⑥明细，报表归属立即生效
       showToast(v ? `该明细报表归属已改为「${v}」，各统计表已重新计算` : '已恢复自动归属，各统计表已重新计算', 'ok');
+    }
+    return;
+  }
+  const vt = e.target.closest && e.target.closest('input.vt-input');
+  if(vt){
+    const row = state.orders.find(r => String(r._uid) === String(vt.dataset.uid));
+    if(row){
+      const v = String(vt.value||'').trim();
+      const old = String(row.visitType||'').trim();
+      if(v !== old){
+        row.visitType = v;
+        persistOrders(); // 到访类型随订单持久化（localStorage/IndexedDB/云端）
+        recompute(); // 到访类型影响：营销部初诊门槛 / ⑤清单 / 营销部·初诊与类型空白页签，全联动重算
+        showToast(v ? `该明细到访类型已改为「${v}」，各统计表已重新计算` : '已清空该明细到访类型，各统计表已重新计算', 'ok');
+      }
     }
     return;
   }
@@ -2538,8 +2563,8 @@ function mktFirstClientKey(r){
 function isMktChuzhenOrder(r){
   return (chanHas(r,'营销部') || isRecToYingxiao(r)) && (r.visitType||'').trim() === '初诊';
 }
-// ⑤ 筛选状态：姓名/会员号模糊包含，来源渠道/初诊日期精确
-let mktFilters = { name:'', memberNo:'', channel:'', date:'' };
+// ⑤ 筛选状态：姓名/会员号模糊包含，来源渠道/初诊日期/消费笔数精确
+let mktFilters = { name:'', memberNo:'', channel:'', date:'', cnt:'' };
 let _mktFilterTimer = null;
 let mktPage = 1;      // ⑤清单分页：当前页（1 基）
 let mktPageSize = 10; // ⑤清单分页：每页条数
@@ -2581,7 +2606,8 @@ function renderMktFirstClients(){
     return { key, name: r0.name || '—',
       memberNo: String(r0.memberNo||'').trim() || '—',
       channel: mktChannelText(r0) || '—',
-      firstDate: first && first.payTime ? fmtDate(first.payTime) : '—' };
+      firstDate: first && first.payTime ? fmtDate(first.payTime) : '—',
+      cnt: state.orders.filter(r=>inWin(r) && mktFirstClientKey(r)===key).length };
   });
   // 筛选（选项取自全部客户，与当前筛选无关，保证跨筛选稳定）
   const f = mktFilters || {};
@@ -2592,7 +2618,9 @@ function renderMktFirstClients(){
   if(f.memberNo){ const q=String(f.memberNo).toLowerCase(); clients=clients.filter(c=>String(c.memberNo).toLowerCase().includes(q)); }
   if(f.channel) clients=clients.filter(c=>c.channel===f.channel);
   if(f.date) clients=clients.filter(c=>c.firstDate===f.date);
-  const anyF = !!(f.name||f.memberNo||f.channel||f.date);
+  if(f.cnt) clients=clients.filter(c=>String(c.cnt)===String(f.cnt));
+  const anyF = !!(f.name||f.memberNo||f.channel||f.date||f.cnt);
+  const cntOpts = [...new Set(allClients.map(c=>c.cnt))].sort((a,b)=>a-b);
   const filterBar = `
     <div class="detail-filters" style="margin:0 0 8px;">
       <label class="detail-filter">姓名
@@ -2611,6 +2639,12 @@ function renderMktFirstClients(){
         <select class="detail-select" data-mkt-filter="date">
           <option value="">全部</option>
           ${dateOpts.map(v=>`<option value="${esc(v)}" ${f.date===v?'selected':''}>${esc(v)}</option>`).join('')}
+        </select>
+      </label>
+      <label class="detail-filter">消费笔数
+        <select class="detail-select" data-mkt-filter="cnt">
+          <option value="">全部</option>
+          ${cntOpts.map(v=>`<option value="${v}" ${String(f.cnt||'')===String(v)?'selected':''}>${v} 笔</option>`).join('')}
         </select>
       </label>
       ${anyF?'<button type="button" id="mkt-filter-reset" class="detail-reset" title="清除全部筛选">清除筛选</button>':''}
@@ -2682,7 +2716,7 @@ function onMktFirstFilterClick(e){
   const pg = e.target.closest && e.target.closest('[data-mpage]');
   if(pg){ mktPage = parseInt(pg.dataset.mpage, 10) || 1; renderMktFirstClients(); return; }
   const rst = e.target.closest && e.target.closest('#mkt-filter-reset');
-  if(rst){ mktFilters = { name:'', memberNo:'', channel:'', date:'' }; mktPage = 1; renderMktFirstClients(); }
+  if(rst){ mktFilters = { name:'', memberNo:'', channel:'', date:'', cnt:'' }; mktPage = 1; renderMktFirstClients(); }
 }
 function onMktFirstFilterChange(e){
   const ps = e.target.closest && e.target.closest('#mkt-pagesize');
