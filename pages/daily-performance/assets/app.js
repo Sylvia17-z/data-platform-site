@@ -311,7 +311,7 @@ function monthOfOrders(orders){
 
 async function syncFromCloud(){
   const cloud = getCloud();
-  if(!cloud){ setCloudStatus('云端未就绪（本地模式）', 'warn'); return; }
+  if(!cloud){ setCloudStatus('云端组件加载中…（多源回退）请稍候', 'warn'); return; }
   let session = null;
   try{ const r = await cloud.auth.getSession(); session = r.data; if(r.error) session = null; }catch(e){ session = null; }
   if(!session){
@@ -438,7 +438,8 @@ function hideLoginOverlay(){ const el = $('login-overlay'); if(el) el.style.disp
 async function handleSendCode(){
   const email = ($('login-email') || {}).value || '';
   if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)){ showToast('请输入有效的邮箱', 'err'); return; }
-  const cloud = getCloud(); if(!cloud) return;
+  const cloud = getCloud();
+  if(!cloud){ showToast('云端组件尚未加载完成（网络不佳时会自动切换备用源），请稍候几秒后重试或刷新页面', 'err', 6000); return; }
   const sent = await cloud.auth.sendOtp({ email });
   if(sent.error){ showToast('验证码发送失败：' + (sent.error.message || ''), 'err'); return; }
   _pendingOtp = { email, verificationId: sent.data && sent.data.verificationId, isExistingUser: sent.data && sent.data.isExistingUser };
@@ -448,7 +449,8 @@ async function handleSendCode(){
 async function handleVerify(){
   const code = ($('login-code') || {}).value || '';
   if(!_pendingOtp){ showToast('请先获取验证码', 'err'); return; }
-  const cloud = getCloud(); if(!cloud) return;
+  const cloud = getCloud();
+  if(!cloud){ showToast('云端组件尚未加载完成，请稍候几秒后重试或刷新页面', 'err', 6000); return; }
   const pwd = ($('login-pwd') || {}).value || '';
   const params = {
     email: _pendingOtp.email,
@@ -470,7 +472,8 @@ async function handlePasswordLogin(){
   const email = ($('login-email') || {}).value || '';
   const pwd = ($('login-pwd') || {}).value || '';
   if(!email || !pwd){ showToast('请输入邮箱与密码', 'err'); return; }
-  const cloud = getCloud(); if(!cloud) return;
+  const cloud = getCloud();
+  if(!cloud){ showToast('云端组件尚未加载完成，请稍候几秒后重试或刷新页面', 'err', 6000); return; }
   const { error } = await cloud.auth.signInWithPassword({ email, password: pwd });
   if(error){ showToast('登录失败：' + (error.message || '账号或密码错误'), 'err'); return; }
   await syncFromCloud();
@@ -2925,6 +2928,9 @@ function initApp(){
   const csEl = $('cloud-status'); if(csEl) csEl.addEventListener('click', () => { if(!_cloudUser) showLoginOverlay(); });
   // 首次进入：已登录则拉取云端订单；未登录则把状态条变为登录入口（不强制弹窗打断）
   syncFromCloud();
+  // SDK 多源回退晚于首帧加载完成时：加载成功→重试云端同步刷新状态条；全部失败→明确提示
+  document.addEventListener('cloud-sdk-ready', () => { if(!_cloudUser) syncFromCloud(); });
+  document.addEventListener('cloud-sdk-failed', () => { if(!_cloudUser) setCloudStatus('云端组件加载失败 · 请检查网络后刷新重试（数据仍保存在本机）', 'err'); });
 }
 
 // 历史订单恢复后的渲染与重算（localStorage 同步恢复 / IndexedDB 异步恢复共用）

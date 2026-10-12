@@ -503,8 +503,29 @@
   window.CLOUD_ENDPOINT = 'https://haibei-medical.app.workbuddy.host';
   window.CLOUD_PK = 'wbpk_KQXIeDHLXWDHN7WQp3zqUQ_Y5IlM6hJd7n10U8UN5bYmSGUYeevVOwl';
 </script>
-<!-- 云服务 SDK（CDN，纯 HTML 无构建步骤）：必须在 app.js 前加载，使 window.WorkBuddyCloud 可用 -->
-<script src="https://cdn.jsdelivr.net/npm/@tencent-ai/workbuddy-cloud-sdk@dev/lib/index.global.js"></script>
+<!-- 云服务 SDK（多源回退：jsdelivr → unpkg → npmmirror，规避单一 CDN 不可达导致无法登录；getCloud 惰性取用，晚加载亦生效） -->
+<script>
+(function(){
+  var urls = [
+    'https://cdn.jsdelivr.net/npm/@tencent-ai/workbuddy-cloud-sdk@dev/lib/index.global.js',
+    'https://unpkg.com/@tencent-ai/workbuddy-cloud-sdk@dev/lib/index.global.js',
+    'https://registry.npmmirror.com/@tencent-ai/workbuddy-cloud-sdk/latest/files/lib/index.global.js'
+  ];
+  var i = 0;
+  function tryNext(){
+    if(i >= urls.length){ window.__CLOUD_SDK_FAILED = true; document.dispatchEvent(new Event('cloud-sdk-failed')); return; }
+    var s = document.createElement('script');
+    s.src = urls[i++];
+    s.onload = function(){
+      if(window.WorkBuddyCloud){ window.__CLOUD_SDK_LOADED = true; document.dispatchEvent(new Event('cloud-sdk-ready')); }
+      else tryNext();
+    };
+    s.onerror = function(){ tryNext(); };
+    document.head.appendChild(s);
+  }
+  tryNext();
+})();
+</script>
 
 <!-- 云端登录浮层：未登录时点击状态条打开；登录后订单落地云端，刷新 / 换设备不丢 -->
 <div id="login-overlay" class="modal-mask" style="display:none;">
