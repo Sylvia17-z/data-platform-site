@@ -2547,19 +2547,22 @@ function renderMktFirstClients(){
     return;
   }
   const cutoff = state.cutoffDate ? new Date(state.cutoffDate) : new Date();
-  const month = cutoff.getFullYear()+'-'+String(cutoff.getMonth()+1).padStart(2,'0');
-  const inMonth = r => r.payTime && fmtDate(r.payTime).slice(0,7) === month;
+  // 近30天滚动窗口（与业绩归属口径一致）：截止日起往前30天，含两端，可跨月
+  const winEnd = fmtDate(cutoff);
+  const winStart = fmtDate(new Date(cutoff.getTime() - 30*86400000));
+  const winLabel = '近30天（' + winStart + ' ~ ' + winEnd + '）';
+  const inWin = r => { if(!r.payTime) return false; const d = fmtDate(r.payTime); return d >= winStart && d <= winEnd; };
   // 按客户分组（仅营销部初诊订单用于定位客户；消费明细在弹窗内按客户全量口径重新取）
   const groups = new Map();
   state.orders.forEach(r=>{
-    if(!inMonth(r) || !isMktChuzhenOrder(r)) return;
+    if(!inWin(r) || !isMktChuzhenOrder(r)) return;
     const key = mktFirstClientKey(r);
     if(!key || key === 'name:') return;
     if(!groups.has(key)) groups.set(key, []);
     groups.get(key).push(r);
   });
   if(groups.size === 0){
-    el.innerHTML = '<div class="file-meta" style="padding:12px 0;">当月暂无「营销部 + 初诊」客户（'+month+'）</div>';
+    el.innerHTML = '<div class="file-meta" style="padding:12px 0;">近30天（'+winStart+' ~ '+winEnd+'）暂无「营销部 + 初诊」客户</div>';
     return;
   }
   // 来源渠道 = 渠道分类-一级渠道-二级渠道 拼接（空段跳过）
@@ -2637,12 +2640,12 @@ function renderMktFirstClients(){
     : `
     <div class="table-wrap" style="max-height:none;overflow:visible;border:1px solid var(--c-border);border-radius:8px;">
       <table class="data">
-        <thead><tr><th>#</th><th>客户姓名</th><th>客户会员号</th><th>来源渠道</th><th>初诊日期</th><th>当月消费笔数</th><th>当月现款合计</th></tr></thead>
+        <thead><tr><th>#</th><th>客户姓名</th><th>客户会员号</th><th>来源渠道</th><th>初诊日期</th><th>近30天消费笔数</th><th>近30天现款合计</th></tr></thead>
         <tbody>${pageItems.map((c,i)=>{
-          const rows = state.orders.filter(r=>inMonth(r) && mktFirstClientKey(r)===c.key);
+          const rows = state.orders.filter(r=>inWin(r) && mktFirstClientKey(r)===c.key);
           const cnt = rows.length;
           const sum = rows.reduce((a,b)=>a+(Number(b.cashPay)||0),0);
-          return `<tr class="mkt-first-row" data-key="${esc(c.key)}" style="cursor:pointer;" title="点击查看该客户当月消费明细">
+          return `<tr class="mkt-first-row" data-key="${esc(c.key)}" style="cursor:pointer;" title="点击查看该客户近30天消费明细">
             <td style="text-align:center;color:var(--c-muted);">${pStart+i+1}</td>
             <td>${esc(c.name)}</td>
             <td>${esc(c.memberNo)}</td>
@@ -2656,7 +2659,7 @@ function renderMktFirstClients(){
       </table>
     </div>
     ${pagerHTML}
-    <div style="padding:6px 0 0;color:var(--c-muted);font-size:12px;">共 ${clients.length} 位初诊客户（${month}）· 本页 ${pStart+1}-${pEnd} · 来源渠道=渠道分类-一级渠道-二级渠道 · 点击数据行查看该客户当月消费明细</div>`;
+    <div style="padding:6px 0 0;color:var(--c-muted);font-size:12px;">共 ${clients.length} 位初诊客户（${winLabel}）· 本页 ${pStart+1}-${pEnd} · 来源渠道=渠道分类-一级渠道-二级渠道 · 点击数据行查看该客户近30天消费明细</div>`;
   el.innerHTML = filterBar + tableHTML;
   if(!el.dataset.bound){
     el.addEventListener('click', onMktFirstClick);
@@ -2695,20 +2698,21 @@ function onMktFirstFilterInput(e){
   }, 300);
 }
 
-// ⑤ 行点击 → 弹窗展示该客户当月消费明细（该客户当月全部订单，不限营销部初诊）
+// ⑤ 行点击 → 弹窗展示该客户近30天消费明细（该客户窗口内全部订单，不限营销部初诊）
 function onMktFirstClick(e){
   const tr = e.target.closest && e.target.closest('tr.mkt-first-row');
   if(!tr) return;
   const key = tr.dataset.key;
   const cutoff = state.cutoffDate ? new Date(state.cutoffDate) : new Date();
-  const month = cutoff.getFullYear()+'-'+String(cutoff.getMonth()+1).padStart(2,'0');
-  const inMonth = r => r.payTime && fmtDate(r.payTime).slice(0,7) === month;
-  const rows = state.orders.filter(r=>inMonth(r) && mktFirstClientKey(r)===key);
-  if(!rows.length){ showToast('未找到该客户当月数据', 'warn'); return; }
-  showClientMonthModal(rows[0], rows, month);
+  const winEnd = fmtDate(cutoff);
+  const winStart = fmtDate(new Date(cutoff.getTime() - 30*86400000));
+  const inWin = r => { if(!r.payTime) return false; const d = fmtDate(r.payTime); return d >= winStart && d <= winEnd; };
+  const rows = state.orders.filter(r=>inWin(r) && mktFirstClientKey(r)===key);
+  if(!rows.length){ showToast('未找到该客户近30天数据', 'warn'); return; }
+  showClientMonthModal(rows[0], rows, '近30天 ' + winStart + ' ~ ' + winEnd);
 }
 
-// 客户当月消费明细弹窗（复用 .modal-mask/.modal-box 体系）
+// 客户近30天消费明细弹窗（复用 .modal-mask/.modal-box 体系）
 function showClientMonthModal(r0, rows, month){
   const mask = document.createElement('div');
   mask.className = 'modal-mask';
