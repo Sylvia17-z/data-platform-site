@@ -1976,8 +1976,8 @@ function deptSelectHTML(r){
   const autoDept = autoDeptOf(r);
   const style = ov ? 'color:#1a4f8b;font-weight:600;' : '';
   return `<select class="detail-select dept-sel" data-uid="${esc(r._uid)}" style="${style}"
-    title="修改该明细在业绩报表中归属的部门类别（自动=按渠道规则）">
-    <option value="" ${ov?'':'selected'}>自动（${esc(autoDept)}）</option>
+    title="修改该明细在业绩报表中归属的部门类别（自动=按渠道规则，${esc(autoDept)}）">
+    <option value="" ${ov?'':'selected'}>自动·${esc(autoDept)}</option>
     ${DEPT_OPTIONS.map(k=>`<option value="${k}" ${ov===k?'selected':''}>${k}</option>`).join('')}
   </select>`;
 }
@@ -2115,7 +2115,7 @@ function detailRowCells(r, i, start){
     <td>${r.payTime?fmtDate(r.payTime):''}</td>
     <td style="text-align:right;">${fmt(r.cashPay)}</td>
     <td style="text-align:right;">${fmt(r.assetDeduct)}</td>
-    <td style="min-width:150px;">${deptSelectHTML(r)}</td>
+    <td style="white-space:nowrap;">${deptSelectHTML(r)}</td>
     <td style="text-align:center;${vab?'color:#1a73e8;font-weight:600;':''}">${vab?'✔':'—'}</td>
     <td style="text-align:center;"><button class="detail-del" type="button" data-uid="${esc(r._uid)}" title="删除该条数据">×</button></td>
   </tr>`;
