@@ -791,6 +791,54 @@ function clearAllData(){
   showToast('已清除本机全部页面数据（订单/月目标/手动调整/列宽），VAB会员已保留', 'ok', 3600);
 }
 
+
+// 清除指定日期的业绩记录（按「收款时间」所在日整日清除；数据变化即清空手动调整并全量重算，与删除单条逻辑一致）
+function clearOrdersByDate(){
+  if(!state.orders.length){ showToast('当前没有任何业绩数据，无需清除', 'warn'); return; }
+  // 数据中实际存在的日期集合（降序），供用户核对输入
+  const dateSet = new Set();
+  state.orders.forEach(r => { if(r.payTime) dateSet.add(fmtDate(r.payTime)); });
+  const dates = Array.from(dateSet).sort().reverse();
+  const def = state.cutoffDate || dates[0] || '';
+  const input = window.prompt('请输入要清除业绩记录的日期（YYYY-MM-DD）：\n当前数据包含的日期：' + dates.slice(0, 10).join('、') + (dates.length > 10 ? ' 等 ' + dates.length + ' 天' : ''), def);
+  if(input === null) return; // 用户取消
+  const dateStr = String(input).trim();
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)){ showToast('日期格式应为 YYYY-MM-DD，未执行清除', 'warn'); return; }
+  if(!dateSet.has(dateStr)){ showToast('数据中不存在 ' + dateStr + ' 的业绩记录，未执行清除', 'warn'); return; }
+  const n = state.orders.filter(r => r.payTime && fmtDate(r.payTime) === dateStr).length;
+  if(!window.confirm('确定清除 ' + dateStr + ' 的业绩记录？\n共 ' + n + ' 条订单将被删除，该日在各统计表（月累计/每日列/门店业绩）中的数据将一并消失；\n手动调整将清空恢复自动计算。此操作不可撤销。')) return;
+  state.orders = state.orders.filter(r => !(r.payTime && fmtDate(r.payTime) === dateStr));
+  // 数据快照变化：清空所有手动调整（月累计/每日），避免残留单元格覆盖值导致"月累计刷新、当日不刷新"等不一致
+  if(Object.keys(state.manual.month).length || Object.keys(state.manual.daily).length){
+    state.manual = { month:{}, daily:{} };
+    persistManual();
+  }
+  if($('orders-meta')){
+    $('orders-meta').textContent = '\u2714 已清除 ' + dateStr + ' 的 ' + n + ' 条记录，剩余 ' + state.orders.length + ' 行';
+    $('orders-meta').className = 'file-meta';
+  }
+  if(state.orders.length === 0){
+    // 删空：彻底清空持久化层（localStorage + IndexedDB + 云端），重置为待导入状态
+    state.results = null;
+    try{ localStorage.removeItem(ORDERS_STORAGE_KEY); }catch(e){}
+    idbDel(ORDERS_STORAGE_KEY).catch(()=>{});
+    clearOrdersInCloud();
+    renderReport(); renderStoreReport([], []); renderImportDetails(); renderTargets();
+    if($('data-status')){ $('data-status').textContent = '待导入数据'; $('data-status').className = 'chip'; }
+    showToast('已清除 ' + dateStr + ' 全部记录（页面已无剩余数据），手动调整已清空', 'ok', 3600);
+    return;
+  }
+  // 若被清日期晚于剩余数据最大日，截止日期回退到剩余最大日，保证「当日列」仍有意义
+  const maxDate = state.orders.reduce((a,b)=>{ if(!b.payTime) return a; const s=fmtDate(b.payTime); return (!a || s>a) ? s : a; }, null);
+  if(state.cutoffDate && maxDate && state.cutoffDate > maxDate){
+    state.cutoffDate = maxDate;
+    if($('cutoff-date')) $('cutoff-date').value = maxDate;
+  }
+  recompute(); // 重算并渲染 ③主表 / ④门店表 / ⑥导入明细
+  persistOrders(); // 持久化剩余数据（本地 + 云端快照），刷新后保留
+  showToast('已清除 ' + dateStr + ' 的 ' + n + ' 条记录并清空手动调整，剩余 ' + state.orders.length + ' 条，各统计表已重新计算', 'ok', 3600);
+}
+
 // 工具
 const $ = (id) => document.getElementById(id);
 const fmt = (n, d=2) => (n==null||isNaN(n)) ? '0' : Number(n).toLocaleString('zh-CN',{minimumFractionDigits:d,maximumFractionDigits:d});
@@ -2837,6 +2885,7 @@ function initApp(){
   $('clear-manual').addEventListener('click', clearManualOverrides);
   $('clear-vab').addEventListener('click', clearVabList);
   $('clear-all').addEventListener('click', clearAllData);
+  $('clear-date').addEventListener('click', clearOrdersByDate);
   // VAB 新增会员弹窗
   $('vab-add-save').addEventListener('click', saveAddVabModal);
   $('vab-add-cancel').addEventListener('click', closeAddVabModal);
