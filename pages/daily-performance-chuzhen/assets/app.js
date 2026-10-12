@@ -387,10 +387,17 @@ async function saveOrdersToCloud(force){
       // 显式按 updated_at 倒序取最新一条并 upsert，避免 maybeSingle() 在存在多条历史残留记录时
       // 直接报错导致「云端保存失败」→ 云端长期停留在旧快照，刷新后把新数据倒退覆盖。
       const { data: rows, error: selErr } = await cloud.database.from('dp_orders')
-        .select('id, updated_at').order('updated_at', { ascending:false }).limit(1);
+        .select('id, updated_at, payload').order('updated_at', { ascending:false }).limit(1);
       if(selErr){ setCloudStatus('云端保存失败：' + (selErr.message || ''), 'err'); return; }
       const latest = Array.isArray(rows) && rows.length ? rows[0] : null;
       if(latest && latest.id != null){
+        // 跨设备保护：云端已有比本地更新的数据（如另一台设备刚写入）且非强制保存时，
+        // 不用过期本地数据覆盖云端，改为拉取云端保持一致
+        const cloudTsNow = Number(latest.payload && latest.payload.ts) || 0;
+        if(!force && cloudTsNow > (Number(state.ordersTs) || 0)){
+          setCloudStatus('云端数据更新（其他设备已保存），已跳过本次上传', 'warn');
+          return;
+        }
         const { error } = await cloud.database.from('dp_orders').update({ payload, updated_at: new Date().toISOString() }).eq('id', latest.id);
         if(error){ setCloudStatus('云端保存失败：' + (error.message || ''), 'err'); return; }
         // 清理可能存在的多余旧记录，保证下次读取只命中最新一条
