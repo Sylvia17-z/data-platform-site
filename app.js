@@ -12,7 +12,7 @@ const state = { modules: [], tabs: [], current: null };
 // 发布版本号：由 index.html 顶部的 <script>window.SITE_VER=... 注入，作为唯一权威来源，避免双文件版本漂移。
 // 此处保留兜底常量，仅在脱离 Shell 独立打开时生效。用于 iframe 缓存穿透，确保线上改动即时可见。
 // file:// 双击打开时不加查询串（带查询串的 iframe 在 file:// 下可能无法加载）。
-const SITE_VER = (typeof window !== 'undefined' && window.SITE_VER) || '20260929i';
+const SITE_VER = (typeof window !== 'undefined' && window.SITE_VER) || '20261012a';
 // 每次页面加载的唯一戳：拼到所有子页 iframe URL 之后，确保浏览器每次都重新拉取最新脚本，
 // 彻底规避「服务器无 Cache-Control 时浏览器启发式缓存旧脚本导致刷新丢数据」的问题。
 // file:// 双击打开时不加查询串。
@@ -48,6 +48,15 @@ const MODULES = [
     desc: '各部门业绩完成情况跟踪日报表（订单 / VAB / 月目标 / 导出）',
   },
   {
+    id: 'daily-performance-chuzhen',
+    name: '每日业绩日报表·初诊版',
+    icon: '📈',
+    group: '数据统计',
+    type: 'embed',
+    src: '/pages/daily-performance-chuzhen/index.html',
+    desc: '各部门业绩完成情况跟踪日报表·初诊版（订单 / VAB / 月目标 / 导出）',
+  },
+  {
     id: 'monthly-analysis',
     name: '月度分析面板',
     icon: '📆',
@@ -66,8 +75,8 @@ const MODULES = [
     desc: '医疗管理考核相关的数据统计（VAB 会员清单、收退款明细、收费明细、统计表）',
     children: [
       { id: 'ma-vab', name: 'VAB会员清单', icon: '📇', mod: 'vab' },
-      { id: 'ma-order', name: '收退款数据明细', icon: '💰', mod: 'order' },
-      { id: 'ma-charge', name: '收费明细数据明细', icon: '🧾', mod: 'charge' },
+      { id: 'ma-order', name: '领健数据', icon: '💰', mod: 'order' },
+      { id: 'ma-charge', name: 'ABC数据', icon: '🧾', mod: 'charge' },
       { id: 'ma-stats', name: '到店率统计', icon: '📊', mod: 'stats' },
       { id: 'ma-projects', name: '重点项目达成情况统计', icon: '🎯', mod: 'projects' },
       { id: 'ma-consumption', name: '累计消费统计', icon: '💳', mod: 'consumption' },

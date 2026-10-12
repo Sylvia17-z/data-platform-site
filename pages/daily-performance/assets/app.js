@@ -32,7 +32,7 @@ const L1_CHANNELS = ['品牌组','活动组','电商组','短视频组','商保�
 // 月目标默认值（万元）- 来自 sheet2 默认值
 const DEFAULT_TARGETS = {
   '品牌组-其他':0,'活动组-活动支持':0,
-  '电商组':77,'短视频组及自然到店':3,
+  '电商组及短视频组':77,'品牌组-自然到店':3,
   '公司支持':360,
   '商务部':125,
   '其他':170,        // 原 155 + 市场部 15（市场部已并入"其他"，不再单列）
@@ -41,20 +41,27 @@ const DEFAULT_TARGETS = {
 };
 // 无业绩目标的部门（高新店 / 经开店）：不在「② 月目标」面板列出，也不在报表中显示目标
 const NO_TARGET_KEYS = new Set(['高新','北郊']);
+// 门店归属判定（高新店 / 经开店），全局单一口径：
+//   高新店 = 收款员工为「南媛」或「系统管理员」
+//   经开店 = 收款员工既非「南媛」也非「系统管理员」（即经开店数据不含收款员工是系统管理员的数据）
+function isGaoXinCashier(r){
+  const c = (r.cashier||'').toString().trim();
+  return c === '南媛' || c === '系统管理员';
+}
 // ② 月目标面板分组（美化：按业务板块归类，便于核对）
 const TARGET_GROUPS = [
-  {title:'营销部板块', keys:['品牌组-其他','活动组-活动支持','电商组','短视频组及自然到店','公司支持']},
+  {title:'营销部板块', keys:['品牌组-其他','活动组-活动支持','电商组及短视频组','品牌组-自然到店','公司支持']},
   {title:'商务部 / 其他', keys:['商务部','其他']},
   {title:'汇总校验', keys:['合计','基础业绩','新增业绩','管家部']},
 ];
 
 // 管家部业绩口径（用户最终确认——纯按「开单咨询师」字段值判定，渠道不参与）：
-//   开单咨询师 不为空 且 ≠ 无/许顺华/空/营销部/吴雅琴/张帆/王勤红 → 计入管家部
+//   开单咨询师 不为空 且 ≠ 无/许顺华/空/营销部/吴雅琴/张帆 → 计入管家部（王勤红不在此排除名单，须计入管家部）
 // 注意：「营销部」判断的是【开单咨询师字段值】=营销部，而不是任何渠道字段（客户来源一级/二级渠道等均不参与管家部判定）。
 function normName(v){
   return String(v == null ? '' : v).trim().replace(/[ 　]+/g, ' ').toLowerCase();
 }
-const STEWARD_EXCLUDE = new Set(['无','许顺华','空','营销部','吴雅琴','张帆','王勤红'].map(normName));
+const STEWARD_EXCLUDE = new Set(['无','许顺华','空','营销部','吴雅琴','张帆'].map(normName));
 
 // 一条订单是否属于管家部：开单咨询师 非空 且 不在排除名单（大小写/全半角空格容错）
 function isSteward(r){
@@ -80,6 +87,7 @@ const state = {
   demoVab: false,    // 当前 VAB 是否为自动加载的示例
   targets: {...DEFAULT_TARGETS},
   cutoffDate: null,// 截止日期
+  ordersTs: 0,     // 订单快照写入时刻（epoch ms），用于本地/云端新旧裁决（防云端旧快照覆盖本地新数据）
   results: null,   // 最新计算结果
   colWidths: {},   // 用户拖拽调整的列宽（index -> width）
   manual: {        // 手动修改的数据（覆盖计算值）
@@ -101,7 +109,14 @@ const MANUAL_STORAGE_KEY = 'dailyPerformance_manual';
 function persistTargets(){ try{ localStorage.setItem(TARGETS_STORAGE_KEY, JSON.stringify(state.targets)); }catch(e){} }
 function restoreTargets(){ try{ const raw = localStorage.getItem(TARGETS_STORAGE_KEY); if(raw) state.targets = {...DEFAULT_TARGETS, ...JSON.parse(raw)}; }catch(e){} }
 function persistManual(){ try{ localStorage.setItem(MANUAL_STORAGE_KEY, JSON.stringify(state.manual)); }catch(e){} }
-function restoreManual(){ try{ const raw = localStorage.getItem(MANUAL_STORAGE_KEY); if(raw){ const m = JSON.parse(raw); state.manual.month = m.month || {}; state.manual.daily = m.daily || {}; } }catch(e){} }
+function restoreManual(){ try{ const raw = localStorage.getItem(MANUAL_STORAGE_KEY); if(raw){ const m = JSON.parse(raw); state.manual.month = m.month || {}; state.manual.daily = m.daily || {}; } }catch(e){ } }
+// 当前报表月份键（YYYY-MM）。手动月累计覆盖按月隔离存储：
+// 修复「上月手动调整的月累计残留到本月」——旧格式为扁平 {行名: 值}（无月份），新读取只认 {YYYY-MM: {行名: 值}}，
+// 旧扁平键自然失效（正是本次数据异常的根源：新增业绩月累计被上月覆盖值污染，导致 基础业绩=合计−新增 变为负数）。
+function curMonthKey(){
+  const c = state.cutoffDate ? new Date(state.cutoffDate) : new Date();
+  return c.getFullYear() + '-' + String(c.getMonth()+1).padStart(2,'0');
+}
 
 // 历史导入订单本地持久化（localStorage + IndexedDB 双层：刷新网页后自动恢复；月累计/每日数据均由订单重算得到）
 // 存储订单原始行（含 _uid 稳定主键）+ 截止日期；不存派生结果，刷新后由 recompute() 重新生成，保证一致。
@@ -169,14 +184,31 @@ function applyOrdersRaw(raw){
         return r;
       });
       if(obj.cutoff) state.cutoffDate = obj.cutoff;
+      if(obj.ts) state.ordersTs = Number(obj.ts) || 0;
       return true;
     }
   }catch(e){}
   return false;
 }
 
-function persistOrders(){
-  const payload = JSON.stringify({ orders: state.orders, cutoff: state.cutoffDate || null, ts: Date.now() });
+function persistOrders(force, syncNow){
+  // 空态守卫：内存 orders 为空、而已存储中存在非空数据时，绝不用空数据覆写真数据。
+  // 根因：beforeunload 与多处路径都会调用 persistOrders()，若此刻内存态为空/残缺
+  //（如刚加载未恢复、切走标签、渲染中断），无条件写回会把已存的真实订单清空，
+  // 导致「刷新后日业绩数据消失」。仅显式清空（clearAllData 传 force=true）才允许写空。
+  if(!force && (!Array.isArray(state.orders) || state.orders.length === 0)){
+    let storedHasData = false;
+    try{
+      const raw = localStorage.getItem(ORDERS_STORAGE_KEY);
+      if(raw){ const o = JSON.parse(raw); storedHasData = !!(o && Array.isArray(o.orders) && o.orders.length > 0); }
+    }catch(e){ /* 解析失败按无数据处理 */ }
+    if(storedHasData){
+      // 内存空但存储有数据 → 不覆写、不清空，仅静默返回保护既有数据。
+      return;
+    }
+  }
+  state.ordersTs = Date.now();
+  const payload = JSON.stringify({ orders: state.orders, cutoff: state.cutoffDate || null, ts: state.ordersTs });
   let lsOk = false;
   // 1) localStorage 同步（最快恢复路径，刷新/卸载前都会执行，最可靠）
   try{ localStorage.setItem(ORDERS_STORAGE_KEY, payload); lsOk = true; }
@@ -186,6 +218,9 @@ function persistOrders(){
   // 3) 桥接父窗口：跨域 / 一次性 origin 的 iframe 内部存储不可靠，转交稳定的顶层壳窗口持久化
   try{ if(window.parent && window.parent !== window) window.parent.postMessage({ type:'dp:persist', key:ORDERS_STORAGE_KEY, payload }, '*'); }catch(e){}
   showOrdersSaved(lsOk);
+  // 云端持久化：订单变更后异步同步服务端（防抖 800ms），仅发布域名生效；本地/预览环境自动降级为仅本机。
+  // syncNow=true 时跳过防抖立即同步——用于「导入订单」等关键落盘点，避免用户紧接着刷新/关页导致云端尚未写入。
+  saveOrdersToCloud(!!syncNow);
 }
 function restoreOrders(){
   // 同步优先：localStorage（顶层调用不阻塞页面解析）
@@ -222,6 +257,232 @@ window.addEventListener('message', (e) => {
   if(state.orders.length > 0) return;
   if(applyOrdersRaw(m.payload)) runRestoredRecompute();
 });
+
+/* =================== 云端持久化（WorkBuddy Cloud Service，按账号隔离） ===================
+ * 根因：发布/访问环境会抹掉 localStorage/IndexedDB 的跨会话持久性（sandbox 不透明源 / origin 漂移），
+ * 导致刷新/重进丢数据。改为订单数据落地云端（服务端），刷新 / 换设备 / 关机均不丢。
+ * 仅在注册域名（haibei-medical.app.workbuddy.host）生效；本地/预览环境会优雅降级为「仅本机」。 */
+const CLOUD_ENDPOINT = (typeof window !== 'undefined' && window.CLOUD_ENDPOINT) || 'https://haibei-medical.app.workbuddy.host';
+const CLOUD_PK = (typeof window !== 'undefined' && window.CLOUD_PK) || 'wbpk_KQXIeDHLXWDHN7WQp3zqUQ_Y5IlM6hJd7n10U8UN5bYmSGUYeevVOwl';
+let _cloudClient = null;
+let _cloudUser = null;
+let _cloudSaveTimer = null;
+let _pendingOtp = null;
+
+function getCloud(){
+  if(_cloudClient) return _cloudClient;
+  if(typeof window.WorkBuddyCloud === 'undefined') return null;
+  try{ _cloudClient = window.WorkBuddyCloud.createWorkBuddyCloud({ endpoint: CLOUD_ENDPOINT, publishableKey: CLOUD_PK }); }
+  catch(e){ _cloudClient = null; }
+  return _cloudClient;
+}
+function setCloudStatus(text, kind){
+  const el = $('cloud-status'); if(!el) return;
+  el.textContent = text || '';
+  el.className = 'file-meta' + (kind ? ' cloud-' + kind : '');
+}
+function applyOrdersObj(obj){
+  if(obj && Array.isArray(obj.orders)){
+    state.orders = obj.orders.map(r => {
+      if(r && typeof r.payTime === 'string'){ try{ r.payTime = new Date(r.payTime); }catch(_){} }
+      if(r && !r._uid) r._uid = nextUid();
+      return r;
+    });
+    if(obj.cutoff) state.cutoffDate = obj.cutoff;
+    if(obj.ts) state.ordersTs = Number(obj.ts) || 0;
+    return true;
+  }
+  return false;
+}
+function cloudPayload(){ return { orders: state.orders, cutoff: state.cutoffDate || null, ts: Date.now() }; }
+// 取一组订单的「最新月份」（形如 2026-10）；无有效日期返回 ''。用于本地/云端新旧裁决。
+function monthOfOrders(orders){
+  let max = '';
+  if(!Array.isArray(orders)) return max;
+  for(const r of orders){
+    if(!r || !r.payTime) continue;
+    const d = (r.payTime instanceof Date) ? r.payTime : new Date(r.payTime);
+    if(isNaN(d)) continue;
+    const m = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0');
+    if(m > max) max = m;
+  }
+  return max;
+}
+
+async function syncFromCloud(){
+  const cloud = getCloud();
+  if(!cloud){ setCloudStatus('云端未就绪（本地模式）', 'warn'); return; }
+  let session = null;
+  try{ const r = await cloud.auth.getSession(); session = r.data; if(r.error) session = null; }catch(e){ session = null; }
+  if(!session){
+    _cloudUser = null;
+    // 不自动弹窗（避免每次刷新都打断）；把状态条变为可点击的登录入口，用户需要时再登录
+    setCloudStatus('未登录 · 点击此处登录同步云端', 'warn');
+    return;
+  }
+  _cloudUser = session.user || null;
+  hideLoginOverlay();
+  setCloudStatus('已登录 · 同步云端…', 'ok');
+  try{
+    const { data, error } = await cloud.database.from('dp_orders')
+      .select('id, payload, updated_at').order('updated_at', { ascending:false }).limit(1);
+    if(error){ setCloudStatus('云端读取失败：' + (error.message || ''), 'err'); return; }
+    const row = Array.isArray(data) ? data[0] : data;
+    if(row && row.payload){
+      const data2 = row;
+      // 新旧裁决：避免「云端旧快照覆盖本地新数据」。
+      // 背景：云端写入失败/多行残留时云端可能停留在旧月份，刷新后若无条件 apply，
+      // 会把刚导入并已落盘本地的新数据（如本月）倒退成旧的 9 月数据。
+      // 规则：比较 payload.ts（写入时刻）与本地 state.cutoffDate 指向的数据月份；
+      //   - 云端 ts 更新 且 云端数据月份 >= 本地月份 → 采用云端；
+      //   - 云端数据月份 < 本地月份（本地更新）→ 保留本地并把本地推回云端；
+      //   - 月份相同 → 采用条数更多的一方（更可能是完整快照）。
+      const cloudTs   = Number(data2.payload && data2.payload.ts) || 0;
+      const localTs   = Number(state.ordersTs) || 0;
+      const cloudCnt  = (data2.payload.orders && data2.payload.orders.length) || 0;
+      const localCnt  = Array.isArray(state.orders) ? state.orders.length : 0;
+      const cloudMon  = monthOfOrders(data2.payload.orders);
+      const localMon  = monthOfOrders(state.orders);
+      const cloudNewer = cloudTs > localTs;
+      const cloudMonNewerOrEq = cloudMon >= localMon;           // 月份字典比较：'2026-10' >= '2026-09'
+      const localIsNewerByMonth = !cloudMonNewerOrEq;            // 本地月份更新
+      const adoptCloud = localIsNewerByMonth ? false
+                        : (cloudMonNewerOrEq && (cloudNewer || cloudCnt > localCnt) ? true
+                          : (cloudCnt > localCnt));
+      if(adoptCloud){
+        applyOrdersObj(data2.payload);
+        state.ordersTs = cloudTs || Date.now();
+        try{ localStorage.setItem(ORDERS_STORAGE_KEY, JSON.stringify(data2.payload)); }catch(e){}
+        if(typeof runRestoredRecompute === 'function') runRestoredRecompute();
+        setCloudStatus('已同步云端（' + cloudCnt + ' 条）', 'ok');
+      }else{
+        // 本地更新 → 覆盖云端，避免云端长期停留在旧数据导致下次刷新又倒退
+        if(localCnt > 0){
+          await saveOrdersToCloud(true);
+        }else{
+          setCloudStatus('已同步云端（' + cloudCnt + ' 条）', 'ok');
+        }
+      }
+    }else if(state.orders.length > 0){
+      await saveOrdersToCloud(true);
+    }else{
+      setCloudStatus('已登录 · 云端暂无数据', 'ok');
+    }
+  }catch(e){
+    setCloudStatus('云端同步异常：' + (e && e.message ? e.message : '网络错误'), 'err');
+  }
+}
+async function saveOrdersToCloud(force){
+  if(_cloudSaveTimer){ clearTimeout(_cloudSaveTimer); _cloudSaveTimer = null; }
+  const doSave = async () => {
+    _cloudSaveTimer = null;
+    const cloud = getCloud(); if(!cloud) return;
+    let session = null;
+    try{ const r = await cloud.auth.getSession(); session = r.data; if(r.error) session = null; }catch(e){ session = null; }
+    if(!session){ setCloudStatus('未登录 · 未同步云端', 'warn'); return; }
+    const payload = cloudPayload();
+    // 空数据不写云端（清数据走 clearOrdersInCloud），避免把好的云端数据覆盖/误删成空的
+    if(payload.orders.length === 0) return;
+    try{
+      // 显式按 updated_at 倒序取最新一条并 upsert，避免 maybeSingle() 在存在多条历史残留记录时
+      // 直接报错导致「云端保存失败」→ 云端长期停留在旧快照，刷新后把新数据倒退覆盖。
+      const { data: rows, error: selErr } = await cloud.database.from('dp_orders')
+        .select('id, updated_at').order('updated_at', { ascending:false }).limit(1);
+      if(selErr){ setCloudStatus('云端保存失败：' + (selErr.message || ''), 'err'); return; }
+      const latest = Array.isArray(rows) && rows.length ? rows[0] : null;
+      if(latest && latest.id != null){
+        const { error } = await cloud.database.from('dp_orders').update({ payload, updated_at: new Date().toISOString() }).eq('id', latest.id);
+        if(error){ setCloudStatus('云端保存失败：' + (error.message || ''), 'err'); return; }
+        // 清理可能存在的多余旧记录，保证下次读取只命中最新一条
+        try{
+          const { data: others } = await cloud.database.from('dp_orders').select('id');
+          if(Array.isArray(others)){
+            for(const r of others){
+              if(r && r.id != null && r.id !== latest.id){
+                try{ await cloud.database.from('dp_orders').delete().eq('id', r.id); }catch(_){}
+              }
+            }
+          }
+        }catch(_){}
+      }else{
+        const { error } = await cloud.database.from('dp_orders').insert({ payload, updated_at: new Date().toISOString() });
+        if(error){ setCloudStatus('云端保存失败：' + (error.message || ''), 'err'); return; }
+      }
+      state.ordersTs = Number(payload.ts) || Date.now();
+      setCloudStatus('已同步云端（' + payload.orders.length + ' 条）', 'ok');
+    }catch(e){
+      setCloudStatus('云端保存异常：' + (e && e.message ? e.message : '网络错误'), 'err');
+    }
+  };
+  if(force){ await doSave(); } else { _cloudSaveTimer = setTimeout(doSave, 800); }
+}
+async function clearOrdersInCloud(){
+  const cloud = getCloud(); if(!cloud) return;
+  let session = null;
+  try{ const r = await cloud.auth.getSession(); session = r.data; if(r.error) session = null; }catch(e){ session = null; }
+  if(!session) return;
+  try{
+    const { data: rows } = await cloud.database.from('dp_orders').select('id');
+    if(Array.isArray(rows)){
+      for(const r of rows){ if(r && r.id != null){ try{ await cloud.database.from('dp_orders').delete().eq('id', r.id); }catch(_){} } }
+    }
+  }catch(e){}
+}
+
+/* ---- 登录浮层 ---- */
+function showLoginOverlay(){
+  const el = $('login-overlay'); if(el) el.style.display = 'flex';
+  const lo = $('login-logout'); if(lo) lo.style.display = _cloudUser ? '' : 'none';
+}
+function hideLoginOverlay(){ const el = $('login-overlay'); if(el) el.style.display = 'none'; }
+async function handleSendCode(){
+  const email = ($('login-email') || {}).value || '';
+  if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)){ showToast('请输入有效的邮箱', 'err'); return; }
+  const cloud = getCloud(); if(!cloud) return;
+  const sent = await cloud.auth.sendOtp({ email });
+  if(sent.error){ showToast('验证码发送失败：' + (sent.error.message || ''), 'err'); return; }
+  _pendingOtp = { email, verificationId: sent.data && sent.data.verificationId, isExistingUser: sent.data && sent.data.isExistingUser };
+  showToast('验证码已发送至 ' + email, 'ok');
+  const row = $('login-code-row'); if(row) row.style.display = '';
+}
+async function handleVerify(){
+  const code = ($('login-code') || {}).value || '';
+  if(!_pendingOtp){ showToast('请先获取验证码', 'err'); return; }
+  const cloud = getCloud(); if(!cloud) return;
+  const pwd = ($('login-pwd') || {}).value || '';
+  const params = {
+    email: _pendingOtp.email,
+    verificationId: _pendingOtp.verificationId,
+    isExistingUser: _pendingOtp.isExistingUser,
+    token: code,
+  };
+  // 新账号注册需填密码；已注册用户仅凭验证码即可登录
+  if(!_pendingOtp.isExistingUser) params.password = pwd;
+  const done = await cloud.auth.verifyOtp(params);
+  if(done.error){
+    showToast('验证失败：' + (done.error.message || (pwd ? '验证码或密码错误' : '新账号请同时填写密码')), 'err');
+    return;
+  }
+  _pendingOtp = null;
+  await syncFromCloud();
+}
+async function handlePasswordLogin(){
+  const email = ($('login-email') || {}).value || '';
+  const pwd = ($('login-pwd') || {}).value || '';
+  if(!email || !pwd){ showToast('请输入邮箱与密码', 'err'); return; }
+  const cloud = getCloud(); if(!cloud) return;
+  const { error } = await cloud.auth.signInWithPassword({ email, password: pwd });
+  if(error){ showToast('登录失败：' + (error.message || '账号或密码错误'), 'err'); return; }
+  await syncFromCloud();
+}
+async function handleLogout(){
+  const cloud = getCloud(); if(cloud){ try{ await cloud.auth.signOut(); }catch(e){} }
+  _cloudUser = null;
+  setCloudStatus('未登录 · 数据仅存本机', 'warn');
+  showLoginOverlay();
+}
+function handleLoginLater(){ hideLoginOverlay(); }
+
 function clearManualOverrides(){
   state.manual = { month:{}, daily:{} };
   persistManual();
@@ -269,6 +530,8 @@ function makeEditable(el, onSave, opts={}){
       if(done) return;
       done = true;
       const raw = input.value.trim();
+      // allowEmpty：清空输入 = 删除该格手动覆盖（onSave 收到 ''），恢复自动计算值
+      if(save && raw === '' && opts.allowEmpty){ onSave(''); return; }
       if(save && raw !== ''){
         const v = evalArithmetic(raw, oldVal);
         onSave(isNaN(v) ? 0 : v);
@@ -516,6 +779,7 @@ function clearAllData(){
   }catch(e){}
   // 同步清除 IndexedDB 持久化层，避免刷新后从 IDB 重新恢复已被清除的订单
   idbDel(ORDERS_STORAGE_KEY).catch(()=>{});
+  clearOrdersInCloud(); // 云端一并清空（异步，不阻塞本机清除流程）
   state.orders = [];
   state.manual = { month:{}, daily:{} };
   state.targets = Object.assign({}, DEFAULT_TARGETS);
@@ -535,7 +799,13 @@ const fmtInt = (n) => (n==null||isNaN(n)) ? '0' : Math.round(Number(n)).toLocale
 const fmtPlain = (n) => (n==null||isNaN(n)) ? '0' : String(Math.round(Number(n)*100)/100);
 // HTML 转义：订单字段(name/memberNo 等)经 innerHTML 渲染前必须转义，防止自注入
 const esc = (s) => String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-const todayIso = () => new Date().toISOString().slice(0,10);
+// 本地时区的「今天」(YYYY-MM-DD)。
+// 注意：不可用 toISOString()（那是 UTC），否则东八区凌晨 0~8 点会退回前一天，
+// 导致 initApp 把截止日设成昨天、报表标题与恢复的月份错位。
+const todayIso = () => {
+  const d = new Date();
+  return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+};
 function showToast(msg, type='ok', timeout=2400){
   const t = $('toast');
   t.textContent = msg;
@@ -737,10 +1007,11 @@ function calculate(orders, vabSet, cutoff){
   // --- 11. 管家部：开单咨询师 不为空 且 不属于排除名单；开单咨询师为空时按渠道兜底（见 isSteward） ---
   const r11 = orders.filter(r => isSteward(r));
 
-  // --- 14. 北郊：收款员工≠南媛 ---
-  const r14 = orders.filter(r => (r.cashier||'').toString().trim() !== '南媛');
-  // --- 15. 高新 = 合计 - 北郊（即收款员工=南媛） ---
-  const rGaoXin = orders.filter(r => (r.cashier||'').toString().trim() === '南媛');
+  // 门店归属判定（高新店 / 经开店）：高新店=收款员工为「南媛」或「系统管理员」；经开店=其余
+  // --- 14. 北郊（经开店）：收款员工 非 南媛 且 非 系统管理员 ---
+  const r14 = orders.filter(r => !isGaoXinCashier(r));
+  // --- 15. 高新 = 收款员工为 南媛 或 系统管理员（系统管理员数据计入高新店） ---
+  const rGaoXin = orders.filter(r => isGaoXinCashier(r));
 
   // --- 15. 高新 = 合计 - 北郊 ---
   const sumBeiJiao = sum(r14);
@@ -789,12 +1060,12 @@ function calculate(orders, vabSet, cutoff){
 // 5. 报表渲染：表结构完全对齐截图 + 原表配色
 const REPORT_TEMPLATE = [
   // 营销部（rowspan 5 = 公司支持2 + 部门业绩3）
-  // 月目标：公司支持块2行共享360；部门业绩块下 电商组独立(77)，短视频组+品牌组-自然到店 合并为一格(3, rowspanTarget:2)
+  // 月目标：公司支持块2行共享360；部门业绩块下 电商组+短视频组 合并为一格(77, rowspanTarget:2)，品牌组-自然到店 单独一格(3)
   {main:'营销部', sub:'公司支持', item:'品牌组-其他', targetKey:'品牌组-其他', rowspanMain:5, rowspanSub:2, rowspanTarget:2, indent:1},
   {main:'',       sub:'',        item:'活动组-活动支持', targetKey:'活动组-活动支持', indent:1},
-  {main:'',       sub:'部门业绩', item:'电商组', targetKey:'电商组', rowspanSub:3, indent:1},
-  {main:'',       sub:'',        item:'短视频组', targetKey:'短视频组及自然到店', valueKey:'短视频组', rowspanTarget:2, indent:1},
-  {main:'',       sub:'',        item:'品牌组-自然到店', targetKey:'短视频组及自然到店', valueKey:'品牌组-自然到店', indent:1},
+  {main:'',       sub:'部门业绩', item:'电商组', targetKey:'电商组及短视频组', valueKey:'电商组', targetMergeKey:'电商组及短视频组', rowspanSub:3, rowspanTarget:2, indent:1},
+  {main:'',       sub:'',        item:'短视频组', targetKey:'电商组及短视频组', valueKey:'短视频组', indent:1},
+  {main:'',       sub:'',        item:'品牌组-自然到店', targetKey:'品牌组-自然到店', valueKey:'品牌组-自然到店', indent:1},
   {main:'商务部', sub:'',        item:'', targetKey:'商务部', mergedLabel:true},
   {main:'其他',   sub:'',        item:'', targetKey:'其他', mergedLabel:true},
   {main:'合计',   sub:'',        item:'', targetKey:'合计', mergedLabel:true, highlight:true},
@@ -888,7 +1159,7 @@ function recomputeDerived(base, manual){
 // 作用：手动改「每日」单元格 → 该行月累计联动更新；手动改「月累计」单元格 → 合计/派生行联动更新。
 // 无手动编辑时，Σ每日值 与 calculate() 的月累计口径(当月1日~截止日)数值等价，无回归。
 // 合计 = 各叶子部门月累计之和（含手动覆盖），使手动改任一部门后"合计/基础业绩/其他"等派生行同步更新。
-function computeMonthValues(dateList, dailyResults){
+function computeMonthValues(dateList, dailyResults, monthKey){
   const m = {};
   dateList.forEach((d, idx) => {
     const dr = dailyResults[idx];
@@ -900,8 +1171,9 @@ function computeMonthValues(dateList, dailyResults){
                        : (manDay && Object.keys(manDay).length ? Object.assign({}, manDay) : {});
     for(const k in dayVals){ m[k] = (m[k] || 0) + (Number(dayVals[k]) || 0); }
   });
-  // 应用手动月累计覆盖（覆盖优先于按日求和）
-  const mm = state.manual.month || {};
+  // 应用手动月累计覆盖（覆盖优先于按日求和）——按月份隔离：只应用当前报表月份的覆盖，
+  // 旧格式扁平键（无月份）不再生效，避免历史月份的手动值污染本月月累计。
+  const mm = (state.manual.month && state.manual.month[monthKey || curMonthKey()]) || {};
   for(const k in mm){ if(mm[k] !== undefined && mm[k] !== '') m[k] = Number(mm[k]) || 0; }
   // 合计 = 6个部门块 + 其他（新增业绩/管家部不计入）；手动"合计"覆盖优先
   const BLOCKS = ['品牌组-其他','活动组-活动支持','电商组','短视频组','品牌组-自然到店','商务部'];
@@ -989,6 +1261,20 @@ function renderReportInner(){
   const monthCalc = computeMonthValues(dateList, dailyResults);
   const dispValues = recomputeDerived(monthCalc, {});
 
+  // 健康检查：子集行（新增业绩/管家部）月累计不应超过「合计」；超限通常意味着历史手动覆盖残留
+  // （如跨月残留的「新增业绩」手动月累计，使 基础业绩=合计−新增 变为负数）。提示用户清除手动调整。
+  // 用 window.__subsetWarn 做会话级去重，避免每次渲染重复弹窗。
+  window.__subsetWarn = window.__subsetWarn || {};
+  ['新增业绩','管家部'].forEach(k=>{
+    const sv = Number(dispValues[k]) || 0, tv = Number(dispValues['合计']) || 0;
+    if(tv > 0 && sv > tv){
+      if(!window.__subsetWarn[k]){
+        window.__subsetWarn[k] = true;
+        showToast(`⚠ 「${k}」月累计(${fmt(sv)}) 大于「合计」(${fmt(tv)})，疑似历史手动覆盖残留——请点击「🧹 清除手动调整」或双击该单元格清空后恢复自动计算`, 'warn', 9000);
+      }
+    } else { window.__subsetWarn[k] = false; }
+  });
+
   // 表头：标题行 + 一行表头，与参考图片一致
   //   行1：标题（深藏蓝）
   //   行2：部门类别(colspan=3) | 月目标 | 月累计 | 每日日期列 | 批量 | 展开
@@ -1018,7 +1304,7 @@ function renderReportInner(){
     if(row.hideRow) return;
     const rowKey = row.valueKey || row.targetKey || row.sub || row.item;
     // rowspanTarget > 1 的合并行，月目标用 row.sub 作为 key（如「公司支持」），否则用 row.targetKey
-    const targetKey = (row.rowspanTarget > 1 && row.sub) ? row.sub : row.targetKey;
+    const targetKey = (row.rowspanTarget > 1) ? (row.targetMergeKey || row.sub || row.targetKey) : row.targetKey;
     const target = state.targets[targetKey] ?? 0;
     // 月累计取值键必须与单元格 data-rowkey（手动编辑写入的键）完全一致：统一用 rowKey = targetKey||sub||item
     // 旧逻辑先读 row.sub/row.item 会导致合并行（如「短视频组及自然到店」对应 短视频组/品牌组-自然到店 两子行）
@@ -1119,32 +1405,48 @@ function bindManualEdit(tableEl){
       showToast(`月目标「${key}」已改为 ${v} 万元`, 'ok');
     }, {step:'0.1'});
   });
-  // 月累计列（双击 → 保存到 state.manual.month）
+  // 月累计列（双击 → 保存到 state.manual.month[当前月份]；清空输入 = 删除覆盖恢复自动计算）
   tableEl.querySelectorAll('td.num[data-rowkey]:not([data-idx])').forEach(td=>{
     const key = td.dataset.rowkey;
+    const mk = curMonthKey();
     makeEditable(td, v=>{
-      state.manual.month[key] = v;
+      if(v === ''){
+        if(state.manual.month[mk]) delete state.manual.month[mk][key];
+        persistManual();
+        renderReport();
+        showToast(`「${key}」月累计手动覆盖已清除，恢复自动计算`, 'ok');
+        return;
+      }
+      if(!state.manual.month[mk]) state.manual.month[mk] = {};
+      state.manual.month[mk][key] = v;
       persistManual();
       renderReport();
-      showToast(`「${key}」月累计已手动调整为 ${fmt(v)}`, 'ok');
-    });
+      showToast(`「${key}」月累计已手动调整为 ${fmt(v)}（仅 ${mk} 生效）`, 'ok');
+    }, {allowEmpty:true});
   });
-  // 每日数据列（双击 → 保存到 state.manual.daily[date][rowKey]）
+  // 每日数据列（双击 → 保存到 state.manual.daily[date][rowKey]；清空输入 = 删除覆盖恢复自动计算）
   tableEl.querySelectorAll('td.num[data-idx][data-rowkey]').forEach(td=>{
     const key = td.dataset.rowkey;
     const dateStr = td.dataset.date;
     makeEditable(td, v=>{
+      if(v === ''){
+        if(state.manual.daily[dateStr]) delete state.manual.daily[dateStr][key];
+        persistManual();
+        renderReport();
+        showToast(`${dateStr}「${key}」手动覆盖已清除，恢复自动计算`, 'ok');
+        return;
+      }
       if(!state.manual.daily[dateStr]) state.manual.daily[dateStr] = {};
       state.manual.daily[dateStr][key] = v;
       persistManual();
       renderReport();
       showToast(`${dateStr}「${key}」已手动调整为 ${fmt(v)}`, 'ok');
-    });
+    }, {allowEmpty:true});
   });
 }
 
 // ④ 门店业绩（高新店 / 经开店）：独立表格，显示每天各门店的业绩（不显示月目标）
-// 高新店 = 收款员工为「南媛」；经开店 = 收款员工≠「南媛」
+// 高新店 = 收款员工为「南媛」或「系统管理员」；经开店 = 收款员工既非「南媛」也非「系统管理员」
 const STORE_ROWS = [
   {name:'高新店', targetKey:'高新', highlight:false},
   {name:'经开店', targetKey:'北郊', highlight:false},
@@ -1595,8 +1897,8 @@ function filterOrdersByTab(key){
   let list;
   if(key === 'all') list = orders.slice();
   else if(key === 'today') list = orders.filter(r => isToday(r));
-  else if(key === 'today_gaoxin')  list = orders.filter(r => isToday(r) && (r.cashier||'').trim() === '南媛');
-  else if(key === 'today_beijiao') list = orders.filter(r => isToday(r) && (r.cashier||'').trim() !== '南媛');
+  else if(key === 'today_gaoxin')  list = orders.filter(r => isToday(r) && isGaoXinCashier(r));
+  else if(key === 'today_beijiao') list = orders.filter(r => isToday(r) && !isGaoXinCashier(r));
   else if(key === 'shangwu') list = orders.filter(r => isToday(r) && (chanHas(r,'商务部') || chanHas(r,'市场部') || isRecToShangwu(r)));
   else if(key === 'newperf')  list = orders.filter(r => isToday(r) && isVabMember(r.memberNo));
   else if(key === 'bigspend'){
@@ -1919,6 +2221,7 @@ function deleteOrder(uid){
     renderReport();
     renderImportDetails();
     persistOrders(); // 删空后同步持久化（空数组），刷新不再出现旧数据
+    clearOrdersInCloud(); // 本地已空 → 同步清空云端，避免重新登录后旧数据回灌
     showToast('已删除全部数据，手动调整已清空，各统计表已同步更新', 'ok');
     return;
   }
@@ -1948,7 +2251,20 @@ async function onFileOrders(input){
   const mergeMode = $('merge-mode') ? $('merge-mode').checked : true;
   try{
     await ensureXlsx();
-    const rows = (await parseExcelFile(f)).map(normalizeOrder).filter(r=>r.payTime).map(ensureUid);
+    const parsed = await parseExcelFile(f);
+    const allRows = parsed.map(normalizeOrder);
+    // 静默失败防护：若「收款时间」解析失败，.filter(r=>r.payTime) 会把所有行丢弃，
+    // 导致 rows 为空、合并 0 条、cutoff 仍停在旧月份——用户看到「刷新后还是 9 月」却毫无线索。
+    // 故在此显式拦截并给出可操作提示。
+    const rows = allRows.filter(r => r.payTime).map(ensureUid);
+    if(parsed.length > 0 && rows.length === 0){
+      state.demoOrders = false;
+      showOrdersSaved(true);
+      showToast(`❌ 导入失败：已读到 ${parsed.length} 行，但「收款时间」全部无法解析（订单已全部丢弃，未写入任何数据）。请确认表头含「收款时间」列且为可识别日期格式`, 'err', 9000);
+      $('orders-meta').textContent = `❌ 导入失败：${parsed.length} 行全部缺少可解析的「收款时间」`;
+      $('orders-meta').className = 'file-meta';
+      return;
+    }
     if(mergeMode && state.orders.length > 0){
       const { orders, newMaxDate, replaced, coveredDates } = mergeOrdersByDate(state.orders, rows);
       state.orders = orders;
@@ -1964,7 +2280,7 @@ async function onFileOrders(input){
     const maxDate = state.orders.reduce((a,b)=>{ if(!b.payTime) return a; const s=fmtDate(b.payTime); return (!a || s>a) ? s : a; }, null);
     if(maxDate && $('cutoff-date').value !== maxDate){ $('cutoff-date').value = maxDate; }
     recompute();
-    persistOrders(); // 持久化导入的订单（含截止日期），刷新网页后自动恢复
+    persistOrders(false, true); // 持久化导入的订单（含截止日期）；syncNow=true 立即同步云端，确保刷新/关页不丢
     if(state.demoVab){
       showToast('⚠ 当前"新增业绩"仍使用示例VAB会员，请上传真实VAB会员表', 'warn', 4200);
     }
@@ -2120,7 +2436,7 @@ function buildReportGrid(){
   REPORT_TEMPLATE.forEach(row=>{
     if(row.hideRow) return;
     const rowKey = row.valueKey || row.targetKey || row.sub || row.item;
-    const targetKey = (row.rowspanTarget > 1 && row.sub) ? row.sub : row.targetKey;
+    const targetKey = (row.rowspanTarget > 1) ? (row.targetMergeKey || row.sub || row.targetKey) : row.targetKey;
     const target = state.targets[targetKey] ?? 0;
     // 月累计展示值必须与屏幕一致：用 computeMonthValues（按日重算后求和，含每日覆盖 + 月累计覆盖优先），
     // 而非原始 state.results.values（不含每日覆盖），否则「双击改每日」后屏幕月累计更新、导出月累计却仍是旧值。
@@ -2508,6 +2824,12 @@ function initApp(){
   }
 
   $('file-orders').addEventListener('change', e=>onFileOrders(e.target));
+  // 「合并历史数据」勾选框：勾选本身不导入任何数据，仍需点击「上传订单表」选择文件。
+  // 这里给出显式提示，避免用户误以为「勾了就已经把 10 月数据并进来了」。
+  const mmBox = $('merge-mode');
+  if(mmBox) mmBox.addEventListener('change', () => {
+    if(mmBox.checked) showToast('已勾选「合并历史数据」——但这不会自动导入数据；仍需点击「📤 上传订单表」并选择 10 月的订单文件（重叠日期会覆盖，其它日期保留）', 'warn', 7000);
+  });
   $('file-vab').addEventListener('change', e=>onFileVab(e.target));
   $('edit-vab').addEventListener('click', toggleVabList);
   $('recompute').addEventListener('click', recompute);
@@ -2544,6 +2866,16 @@ function initApp(){
 
   // 调试条已按需求下线（2026-09-29），仅保持横幅隐藏
   refreshDebug();
+
+  // ---- 云端：绑定登录浮层按钮；未登录时点击状态条也可打开浮层 ----
+  const lb1 = $('login-send-code'); if(lb1) lb1.addEventListener('click', handleSendCode);
+  const lb2 = $('login-verify'); if(lb2) lb2.addEventListener('click', handleVerify);
+  const lb3 = $('login-pwd-login'); if(lb3) lb3.addEventListener('click', handlePasswordLogin);
+  const lb4 = $('login-later'); if(lb4) lb4.addEventListener('click', handleLoginLater);
+  const lb5 = $('login-logout'); if(lb5) lb5.addEventListener('click', handleLogout);
+  const csEl = $('cloud-status'); if(csEl) csEl.addEventListener('click', () => { if(!_cloudUser) showLoginOverlay(); });
+  // 首次进入：已登录则拉取云端订单；未登录则把状态条变为登录入口（不强制弹窗打断）
+  syncFromCloud();
 }
 
 // 历史订单恢复后的渲染与重算（localStorage 同步恢复 / IndexedDB 异步恢复共用）
@@ -2557,7 +2889,27 @@ function runRestoredRecompute(){
     // 避免点击菜单后因“解析+重算+整表重渲染”全阻塞主线程而长时间白屏/卡死
     renderReport();
     showOrdersSaved(true);
-    const runRecompute = () => { recompute(); showToast(`已从本地恢复 ${state.orders.length} 条历史订单，月累计/每日数据已自动刷新`, 'ok'); };
+    const runRecompute = () => {
+      recompute();
+      showToast(`已从本地恢复 ${state.orders.length} 条历史订单，月累计/每日数据已自动刷新`, 'ok');
+      // 若已存数据的最新月份早于当前月，说明存在「比存储更新的数据未落盘」的情况
+      // （例如上一会话看过 10 月但未成功导入/保存）。此时明确提示，避免用户误以为数据被系统吞掉。
+      try{
+        const nowMonth = todayIso().slice(0,7);                 // 形如 2026-10
+        let maxMonth = '';
+        for(const r of state.orders){
+          if(!r.payTime) continue;
+          const m = fmtMonth(r.payTime);
+          if(m > maxMonth) maxMonth = m;
+        }
+        if(maxMonth && maxMonth < nowMonth){
+          const [y, mo] = nowMonth.split('-');
+          setTimeout(()=>showToast(
+            `⚠ 已保存数据最新为 ${maxMonth.replace('-','年')}月，少于当前 ${y}年${Number(mo)}月。若你此前看过 ${y}年${Number(mo)}月数据，说明那份数据未成功保存——请重新上传订单表（勾选「合并历史数据」可与 ${maxMonth.replace('-','年')}月数据合并，不重复计数）`,
+            'warn', 9000), 900);
+        }
+      }catch(_){}
+    };
     if(window.requestIdleCallback) window.requestIdleCallback(runRecompute, { timeout: 400 });
     else setTimeout(runRecompute, 30);
   } else {

@@ -358,11 +358,12 @@ https://github.com/nodeca/pako/blob/main/LICENSE
   var XLSX = window.XLSX, JSZip = window.JSZip, htmlToImage = window.htmlToImage;
 
   // 统计说明（三报表平台：页面与导出件共用）
-  var NOTE_TEXT = "统计说明：数据来源 领健系统每周一至周六数据（截止时间：周六 12:00）\n1、初诊客量~周区间内到访类型为初诊 复诊客量~周区间内到访类型为复诊/疗程内/再消费/复查/为空\n2、成交率 现款支付不为0并且不是退款的消费客量 占总客量的比例\n3、如果一个客户 周一来体检 周三来解读报告 计算客量为1";
-  // 统计说明里的「截止时间：周六 12:00」跟随同一控件（chkShow1200）显示/隐藏，与日期区间标签保持一致
+  var NOTE_TEXT = "统计说明：数据来源 领健系统每周一至周六数据（截止时间：{CUT}）\n1、初诊客量~周区间内到访类型为初诊 复诊客量~周区间内到访类型为复诊/疗程内/再消费/复查/为空\n2、成交率 现款支付不为0并且不是退款的消费客量 占总客量的比例\n3、如果一个客户 周一来体检 周三来解读报告 计算客量为1";
+  // 统计说明「截止时间」显示具体日期（数据区间结束日 RANGE.end）；「 12:00」后缀仍跟随 chkShow1200 显示/隐藏
   function noteText(){
     var show = document.getElementById("chkShow1200") && document.getElementById("chkShow1200").checked;
-    return NOTE_TEXT.replace("周六 12:00", "周六" + (show ? " 12:00" : ""));
+    var cut = RANGE.end ? RANGE.end : "周六";
+    return NOTE_TEXT.replace("{CUT}", cut + (show ? " 12:00" : ""));
   }
 
   // 预约量统计模块专用统计说明（按所选统计日，不分周区间）
@@ -578,15 +579,21 @@ https://github.com/nodeca/pako/blob/main/LICENSE
     perfRows.forEach(function(r){ if(r.total>maxV){maxV=r.total;maxDay=r.date;} if(r.total<minV){minV=r.total;minDay=r.date;} });
     var avg = perfRows.length ? pSum.total/perfRows.length : 0;
 
-    // 管家：纯按"开单咨询师"分组；仅王勤红/空咨询师归入"无"
+    // 管家：纯按"开单咨询师"分组；仅空咨询师 / 营销部归入"无"；王勤红独立成行（不并入"无"）
+    // 王勤红个人业绩剔除「商务部」渠道订单；但为保持与周业绩合计对账一致，该部分计入「无」
     var perfByName={};
     ORDER.forEach(function(r){
       if(!inRange(r.date)) return;
-      var add=Math.round(r.cash*100)/100;
       var c=r.consultant||"";
-      var key=(c==="王勤红" || c==="营销部" || c==="")?"无":c;
+      var add=Math.round(r.cash*100)/100;
+      if(c==="王勤红" && deptOrder(r.deptSrc)==="商务部"){
+        perfByName["无"]=Math.round(((perfByName["无"]||0)+add)*100)/100;   // 王勤红商务部渠道业绩归入「无」，保总量对账
+        return;
+      }
+      var key=(c==="营销部" || c==="")?"无":c;
       perfByName[key]=Math.round(((perfByName[key]||0)+add)*100)/100;
     });
+    if(!("王勤红" in perfByName)) perfByName["王勤红"]=0;   // 保证王勤红始终作为独立管家行展示（避免其预约量被并入"无"）
     var bBook={},bVisit={};
     APPT.forEach(function(r){
       if(!inRange(r.date)||!r.mem) return; if(!r.butler) return;

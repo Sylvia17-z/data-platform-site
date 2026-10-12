@@ -4,7 +4,7 @@
   var XLSX = window.XLSX, JSZip = window.JSZip, htmlToImage = window.htmlToImage;
 
   // 统计说明（三报表平台：页面与导出件共用）
-  var NOTE_TEXT = "统计说明：数据来源 领健系统每周一至周六数据（截止时间：周六 12:00）\n1、初诊客量~周区间内到访类型为初诊 复诊客量~周区间内到访类型为复诊/疗程内/再消费/复查/为空\n2、成交率 现款支付不为0并且不是退款的消费客量 占总客量的比例\n3、如果一个客户 周一来体检 周三来解读报告 计算客量为1";
+  var NOTE_TEXT = "统计说明：数据来源 领健系统每周一至周六数据（截止时间：{CUT} 12:00）\n1、初诊客量~周区间内到访类型为初诊 复诊客量~周区间内到访类型为复诊/疗程内/再消费/复查/为空\n2、成交率 现款支付不为0并且不是退款的消费客量 占总客量的比例\n3、如果一个客户 周一来体检 周三来解读报告 计算客量为1";
 
   // 预约量统计模块专用统计说明（按所选统计日，不分周区间）
   var NEXT_NOTE_TEXT = "统计说明：\n1、数据来源 领健系统预约列表\n2、初诊预约客量~预约类型为初诊 复诊预约客量~预约类型为复诊/疗程内/再消费/复查/为空";
@@ -219,15 +219,18 @@
     perfRows.forEach(function(r){ if(r.total>maxV){maxV=r.total;maxDay=r.date;} if(r.total<minV){minV=r.total;minDay=r.date;} });
     var avg = perfRows.length ? pSum.total/perfRows.length : 0;
 
-    // 管家：纯按"开单咨询师"分组；仅王勤红/空咨询师归入"无"
+    // 管家：纯按"开单咨询师"分组；仅空咨询师 / 营销部归入"无"；王勤红独立成行（不并入"无"）
+    // 王勤红的业绩不含渠道分类为「商务部」的订单
     var perfByName={};
     ORDER.forEach(function(r){
       if(!inRange(r.date)) return;
-      var add=Math.round(r.cash*100)/100;
       var c=r.consultant||"";
-      var key=(c==="王勤红" || c==="营销部" || c==="")?"无":c;
+      if(c==="王勤红" && deptOrder(r.deptSrc)==="商务部") return;   // 王勤红业绩剔除商务部渠道
+      var add=Math.round(r.cash*100)/100;
+      var key=(c==="营销部" || c==="")?"无":c;
       perfByName[key]=Math.round(((perfByName[key]||0)+add)*100)/100;
     });
+    if(!("王勤红" in perfByName)) perfByName["王勤红"]=0;   // 保证王勤红始终作为独立管家行展示（避免其预约量被并入"无"）
     var bBook={},bVisit={};
     APPT.forEach(function(r){
       if(!inRange(r.date)||!r.mem) return; if(!r.butler) return;
@@ -258,7 +261,7 @@
     document.getElementById("perfTitle").textContent="周业绩统计(数据区间："+periodText+")";
     document.getElementById("butlerTitle").textContent="管家业绩统计(数据区间："+periodText+")";
     var noteEl=document.getElementById("reportNote");
-    if(noteEl) noteEl.innerHTML=NOTE_TEXT;
+    if(noteEl) noteEl.innerHTML = NOTE_TEXT.replace("{CUT}", RANGE.end ? RANGE.end : "周六");
 
     // 周客量
     var kv=R.kv, d=R.depts;
@@ -472,7 +475,7 @@
   // ---------- 导出 Excel (手写 OOXML，还原模板合并+公式) ----------
   function buildXlsxZip(R, periodText){
     var HDR="FF01418B";
-    var note=NOTE_TEXT;
+    var note=NOTE_TEXT.replace("{CUT}", RANGE.end ? RANGE.end : "周六");
     var kv=R.kv, d=R.depts, p=R.perf, b=R.butler;
 
     var styles='<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'+
