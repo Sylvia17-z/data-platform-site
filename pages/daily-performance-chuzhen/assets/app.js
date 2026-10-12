@@ -2524,6 +2524,8 @@ function isMktChuzhenOrder(r){
 // ⑤ 筛选状态：姓名/会员号模糊包含，来源渠道/初诊日期精确
 let mktFilters = { name:'', memberNo:'', channel:'', date:'' };
 let _mktFilterTimer = null;
+let mktPage = 1;      // ⑤清单分页：当前页（1 基）
+let mktPageSize = 10; // ⑤清单分页：每页条数
 function mktChannelText(r){
   return [r.channelClass, r.channelL1, r.channelL2].map(v=>String(v||'').trim()).filter(Boolean).join('-');
 }
@@ -2595,18 +2597,43 @@ function renderMktFirstClients(){
       <span style="color:var(--c-muted);font-size:12px;">${clients.length}/${allClients.length} 位</span>
     </div>`;
   clients.sort((a,b)=> String(a.firstDate).localeCompare(String(b.firstDate)) || String(a.name).localeCompare(String(b.name),'zh-CN'));
+  // 分页（与⑥明细一致的分页器样式；筛选后列表分页，页码窗口化）
+  const pageCount = Math.max(1, Math.ceil(clients.length / mktPageSize));
+  if(mktPage > pageCount) mktPage = pageCount;
+  if(mktPage < 1) mktPage = 1;
+  const pStart = (mktPage-1) * mktPageSize;
+  const pageItems = clients.slice(pStart, pStart + mktPageSize);
+  const pEnd = Math.min(pStart + mktPageSize, clients.length);
+  const nums = [...new Set([1, pageCount, mktPage, mktPage-1, mktPage+1].filter(n=>n>=1&&n<=pageCount))].sort((a,b)=>a-b);
+  const pagerParts = [`<button type="button" class="pg-btn" data-mpage="${mktPage-1}" ${mktPage<=1?'disabled':''}>上一页</button>`];
+  let prev = 0;
+  nums.forEach(n=>{
+    if(n-prev>1) pagerParts.push('<span class="pg-sep">…</span>');
+    pagerParts.push(`<button type="button" class="pg-btn ${n===mktPage?'active':''}" data-mpage="${n}">${n}</button>`);
+    prev = n;
+  });
+  pagerParts.push(`<button type="button" class="pg-btn" data-mpage="${mktPage+1}" ${mktPage>=pageCount?'disabled':''}>下一页</button>`);
+  const sizeOpts = [10,20,50,100].map(s=>`<option value="${s}" ${s===mktPageSize?'selected':''}>每页 ${s}</option>`).join('');
+  const pagerHTML = `
+    <div class="detail-pager">
+      ${pagerParts.join('')}
+      <span class="pg-info">第 ${mktPage}/${pageCount} 页</span>
+      <label class="detail-filter" style="margin:0 0 0 14px;">每页
+        <select id="mkt-pagesize" class="detail-select" style="min-width:auto;">${sizeOpts}</select>
+      </label>
+    </div>`;
   const tableHTML = clients.length === 0
     ? '<div class="file-meta" style="padding:12px 0;">无匹配客户（可调整或清除筛选）</div>'
     : `
     <div class="table-wrap" style="max-height:none;overflow:visible;border:1px solid var(--c-border);border-radius:8px;">
       <table class="data">
         <thead><tr><th>#</th><th>客户姓名</th><th>客户会员号</th><th>来源渠道</th><th>初诊日期</th><th>当月消费笔数</th><th>当月现款合计</th></tr></thead>
-        <tbody>${clients.map((c,i)=>{
+        <tbody>${pageItems.map((c,i)=>{
           const rows = state.orders.filter(r=>inMonth(r) && mktFirstClientKey(r)===c.key);
           const cnt = rows.length;
           const sum = rows.reduce((a,b)=>a+(Number(b.cashPay)||0),0);
           return `<tr class="mkt-first-row" data-key="${esc(c.key)}" style="cursor:pointer;" title="点击查看该客户当月消费明细">
-            <td style="text-align:center;color:var(--c-muted);">${i+1}</td>
+            <td style="text-align:center;color:var(--c-muted);">${pStart+i+1}</td>
             <td>${esc(c.name)}</td>
             <td>${esc(c.memberNo)}</td>
             <td>${esc(c.channel)}</td>
@@ -2618,7 +2645,8 @@ function renderMktFirstClients(){
         </tbody>
       </table>
     </div>
-    <div style="padding:6px 0 0;color:var(--c-muted);font-size:12px;">共 ${clients.length} 位初诊客户（${month}）· 来源渠道=渠道分类-一级渠道-二级渠道 · 点击数据行查看该客户当月消费明细</div>`;
+    ${pagerHTML}
+    <div style="padding:6px 0 0;color:var(--c-muted);font-size:12px;">共 ${clients.length} 位初诊客户（${month}）· 本页 ${pStart+1}-${pEnd} · 来源渠道=渠道分类-一级渠道-二级渠道 · 点击数据行查看该客户当月消费明细</div>`;
   el.innerHTML = filterBar + tableHTML;
   if(!el.dataset.bound){
     el.addEventListener('click', onMktFirstClick);
@@ -2629,14 +2657,18 @@ function renderMktFirstClients(){
   }
 }
 
-// ⑤ 筛选交互：下拉/重置（click 上的重置按钮）+ 文本防抖（保持焦点）
+// ⑤ 筛选/分页交互：翻页按钮 + 下拉/重置 + 文本防抖（保持焦点）
 function onMktFirstFilterClick(e){
+  const pg = e.target.closest && e.target.closest('[data-mpage]');
+  if(pg){ mktPage = parseInt(pg.dataset.mpage, 10) || 1; renderMktFirstClients(); return; }
   const rst = e.target.closest && e.target.closest('#mkt-filter-reset');
-  if(rst){ mktFilters = { name:'', memberNo:'', channel:'', date:'' }; renderMktFirstClients(); }
+  if(rst){ mktFilters = { name:'', memberNo:'', channel:'', date:'' }; mktPage = 1; renderMktFirstClients(); }
 }
 function onMktFirstFilterChange(e){
+  const ps = e.target.closest && e.target.closest('#mkt-pagesize');
+  if(ps){ mktPageSize = parseInt(ps.value, 10) || 10; mktPage = 1; renderMktFirstClients(); return; }
   const sel = e.target.closest && e.target.closest('select[data-mkt-filter]');
-  if(sel){ mktFilters[sel.dataset.mktFilter] = sel.value || ''; renderMktFirstClients(); }
+  if(sel){ mktFilters[sel.dataset.mktFilter] = sel.value || ''; mktPage = 1; renderMktFirstClients(); }
 }
 function onMktFirstFilterInput(e){
   const inp = e.target.closest && e.target.closest('input[data-mkt-filter]');
@@ -2646,6 +2678,7 @@ function onMktFirstFilterInput(e){
   clearTimeout(_mktFilterTimer);
   _mktFilterTimer = setTimeout(()=>{
     mktFilters[key] = val;
+    mktPage = 1;
     renderMktFirstClients();
     const inp2 = document.querySelector('#mkt-first-clients input[data-mkt-filter="'+key+'"]');
     if(inp2){ inp2.focus(); try{ inp2.setSelectionRange(inp2.value.length, inp2.value.length); }catch(err){} }
