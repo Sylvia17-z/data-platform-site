@@ -2083,11 +2083,11 @@ function filterOrdersByTab(key){
   // 营销部·初诊：与 ③ 报表 / ⑤ 清单口径完全一致——
   // 「30天内营销部初诊客户」（mktFirstKeysCached，客户级集合）的【全部】营销部订单明细
   // （不限到访类型：初诊/复诊/空白均计入），保证页签「合计现款」= 当日报表营销部总金额。
-  // 不再按订单日期窗口过滤（旧口径会让「初诊在窗口外、消费在窗口内」的订单误计入，
-  // 与报表 month/day 列只认客户级初诊门槛相矛盾）。
-  // 营销部·类型空白：上述客户的营销部订单中，到访类型空白（未填写）的子集。
   else if(key === 'yx_chuzhen') list = orders.filter(r => (chanHas(r,'营销部') || isRecToYingxiao(r)) && mktFirstKeysCached().has(mktFirstClientKey(r)));
-  else if(key === 'yx_blank')   list = orders.filter(r => (chanHas(r,'营销部') || isRecToYingxiao(r)) && !(r.visitType||'').trim() && mktFirstKeysCached().has(mktFirstClientKey(r)));
+  // 营销部·类型空白：审计视图——营销部渠道下到访类型空白（未填写）的【全部】订单，
+  // 不受「30天初诊客户」集合限制（2026-10-13 需求：10月闫语函/冯梓芯/魏周朝等无初诊记录的
+  // 空白类型订单需在此页签可见；此类客户在报表中落「其他」，不影响营销部业绩金额）。
+  else if(key === 'yx_blank')   list = orders.filter(r => (chanHas(r,'营销部') || isRecToYingxiao(r)) && !(r.visitType||'').trim());
   // 推荐页签：渠道分类=推荐 的订单（用于核对新归类逻辑落位：一级含营销部→营销部，含商务部→商务部，未匹配→其他）
   else if(key === 'recommend') list = orders.filter(r => (r.channelClass||'').trim() === '推荐');
   // 员工消费：渠道分类=公司所有 且 客户渠道标记为"员工本人及家属"。
@@ -2294,10 +2294,12 @@ function renderImportDetails(){
   const activeFieldCount = Object.values(detailFilters||{}).filter(Boolean).length;
   const filterNote = (detailMonth?('月度 '+detailMonth+' · '):'')+dateNote
     +(activeFieldCount?('字段筛选 '+activeFieldCount+' 项 · '):'');
-  // 营销部两类页签的口径说明（30天内初诊客户，与 ③ 报表 / ⑤ 清单一致）
+  // 营销部两类页签的口径说明：初诊=30天内初诊客户（与③报表·⑤清单一致）；类型空白=审计视图（全部空白类型订单）
   const mw = mktWindow();
-  const mktTabNote = (detailTab === 'yx_chuzhen' || detailTab === 'yx_blank')
-    ? ('口径：30天内初诊客户（窗口 ' + mw.start + ' ~ ' + mw.end + '，与③报表·⑤清单一致）· ') : '';
+  const mktTabNote = detailTab === 'yx_chuzhen'
+    ? ('口径：30天内初诊客户（窗口 ' + mw.start + ' ~ ' + mw.end + '，与③报表·⑤清单一致）· ')
+    : (detailTab === 'yx_blank'
+      ? '口径：营销部渠道·到访类型空白（全部订单审计视图，不受初诊客户集合限制）· ' : '');
   // 手机端排序条（桌面端隐藏，由表格表头排序代替）
   const mobileSort = `
     <div class="detail-mobile-bar">
