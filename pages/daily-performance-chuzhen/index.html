@@ -265,6 +265,13 @@
   .detail-del{margin:0 2px;border:1px solid var(--c-border);background:#fff;color:var(--c-error);cursor:pointer;font-size:13px;line-height:1;border-radius:5px;padding:2px 8px;font-family:inherit;}
   .detail-del:hover{background:var(--c-error);color:#fff;border-color:var(--c-error);}
   .detail-filters{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin:2px 0 10px;}
+  /* 筛选区展开/收起（2026-10-13：手机端与电脑端均支持） */
+  .detail-filters .filters-body{display:flex;flex-wrap:wrap;align-items:center;gap:10px;flex:1 1 200px;}
+  .detail-filters.collapsed .filters-body{display:none;}
+  .detail-filters .ftoggle{cursor:pointer;user-select:none;white-space:nowrap;}
+  /* ⑤清单/弹窗 手机端卡片整卡可点击 */
+  .detail-card.mkt-first-card{cursor:pointer;}
+  .detail-card.mkt-first-card:active{background:var(--c-blue-tint);}
   .detail-filter{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--c-muted);}
   .detail-select{border:1px solid var(--c-border);background:#fff;color:var(--c-text);padding:5px 10px;border-radius:8px;font-size:12px;font-family:inherit;font-weight:500;cursor:pointer;min-width:120px;}
   .detail-select:hover{border-color:var(--c-head);}

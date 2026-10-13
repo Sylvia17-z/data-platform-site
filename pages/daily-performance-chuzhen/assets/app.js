@@ -2260,6 +2260,10 @@ function filterOrdersByTab(key){
 let detailPage = 1;
 let detailPageSize = 10;
 
+// 筛选区折叠状态（⑥明细）：localStorage 持久化，手机端/电脑端一致
+let detailFiltersCollapsed = false;
+try{ detailFiltersCollapsed = localStorage.getItem('dp_detail_filters_collapsed') === '1'; }catch(e){}
+
 // 是否手机端视图（2026-10-13 需求：手机端一律卡片形式）
 // 判定：窄屏（max-width:640px，与 index.html 断点一致）或 触屏设备（pointer:coarse，
 // 覆盖平板/大屏手机/横屏等宽屏触屏场景——触屏下表格点击删除/改类型不便，统一用卡片）
@@ -2407,7 +2411,9 @@ function renderImportDetails(){
   const activeFilterEntries = Object.entries(detailFilters||{}).filter(([k,v]) => v && !k.endsWith('Op'));
   const anyDetailFilter = !!(detailMonth||effDateOn||activeFilterEntries.length);
   const filterBar = `
-    <div class="detail-filters">
+    <div class="detail-filters ${detailFiltersCollapsed?'collapsed':''}">
+      <button type="button" id="detail-filter-toggle" class="detail-reset ftoggle" title="展开/收起筛选区">⚙ 筛选${activeFilterEntries.length?`（${activeFilterEntries.length}）`:''} ${detailFiltersCollapsed?'▸':'▴'}</button>
+      <div class="filters-body">
       <label class="detail-filter">月度
         <select id="detail-month-filter" class="detail-select">${monthOpts}</select>
       </label>
@@ -2437,6 +2443,7 @@ function renderImportDetails(){
         </select>
       </label>
       ${anyDetailFilter?'<button type="button" id="detail-filter-reset" class="detail-reset" title="清除全部筛选">清除筛选</button>':''}
+      </div>
     </div>`;
   const tabs = DETAIL_TABS.map(t=>`<button class="detail-tab ${t.key===detailTab?'active':''}" data-tab="${t.key}">${t.label}</button>`).join('');
   // 表头：# 与 操作 不排序，其余列点击排序（当前排序列显示 ▲升序 / ▼降序）
@@ -2514,6 +2521,14 @@ function renderImportDetails(){
 function onImportDetailsClick(e){
   const del = e.target.closest && e.target.closest('.detail-del');
   if(del){ deleteOrder(del.dataset.uid); return; }
+  // 筛选区展开/收起（2026-10-13：手机端与电脑端均支持，状态持久化）
+  const ftg = e.target.closest && e.target.closest('#detail-filter-toggle');
+  if(ftg){
+    detailFiltersCollapsed = !detailFiltersCollapsed;
+    try{ localStorage.setItem('dp_detail_filters_collapsed', detailFiltersCollapsed?'1':'0'); }catch(err){}
+    renderImportDetails();
+    return;
+  }
   const tab = e.target.closest && e.target.closest('.detail-tab');
   if(tab){ detailTab = tab.dataset.tab; detailPage = 1; renderImportDetails(); return; }
   // 分页按钮（含上一页/下一页/页码）：data-page 为 1 基页码
@@ -2750,6 +2765,9 @@ let mktFilters = { name:'', memberNo:'', channel:'', date:'', cnt:'', cntOp:'' }
 let _mktFilterTimer = null;
 let mktPage = 1;      // ⑤清单分页：当前页（1 基）
 let mktPageSize = 10; // ⑤清单分页：每页条数
+// 筛选区折叠状态（⑤清单）：localStorage 持久化
+let mktFiltersCollapsed = false;
+try{ mktFiltersCollapsed = localStorage.getItem('dp_mkt_filters_collapsed') === '1'; }catch(e){}
 function mktChannelText(r){
   return [r.channelClass, r.channelL1, r.channelL2].map(v=>String(v||'').trim()).filter(Boolean).join('-');
 }
@@ -2810,7 +2828,9 @@ function renderMktFirstClients(){
   }
   const anyF = !!(f.name||f.memberNo||f.channel||f.date||f.cnt);
   const filterBar = `
-    <div class="detail-filters" style="margin:0 0 8px;">
+    <div class="detail-filters ${mktFiltersCollapsed?'collapsed':''}" style="margin:0 0 8px;">
+      <button type="button" id="mkt-filter-toggle" class="detail-reset ftoggle" title="展开/收起筛选区">⚙ 筛选 ${mktFiltersCollapsed?'▸':'▴'}</button>
+      <div class="filters-body">
       <label class="detail-filter">姓名
         <input type="text" class="detail-select" data-mkt-filter="name" value="${esc(f.name||'')}" placeholder="含…" style="min-width:88px;">
       </label>
@@ -2837,6 +2857,7 @@ function renderMktFirstClients(){
       </label>
       ${anyF?'<button type="button" id="mkt-filter-reset" class="detail-reset" title="清除全部筛选">清除筛选</button>':''}
       <span style="color:var(--c-muted);font-size:12px;">${clients.length}/${allClients.length} 位</span>
+      </div>
     </div>`;
   clients.sort((a,b)=> String(a.firstDate).localeCompare(String(b.firstDate)) || String(a.name).localeCompare(String(b.name),'zh-CN'));
   // 分页（与⑥明细一致的分页器样式；筛选后列表分页，页码窗口化）
@@ -2864,10 +2885,30 @@ function renderMktFirstClients(){
         <select id="mkt-pagesize" class="detail-select" style="min-width:auto;">${sizeOpts}</select>
       </label>
     </div>`;
-  const tableHTML = clients.length === 0
+  // 内容区：手机端卡片 / 桌面端表格（2026-10-13：手机端⑤清单改为卡片形式）
+  const isMobile = isMobileView();
+  const listHTML = clients.length === 0
     ? '<div class="file-meta" style="padding:12px 0;">无匹配客户（可调整或清除筛选）</div>'
-    : `
-    <div class="table-wrap" style="max-height:none;overflow:visible;border:1px solid var(--c-border);border-radius:8px;">
+    : (isMobile
+      ? `<div class="detail-cards">${pageItems.map((c,i)=>{
+          const rows = state.orders.filter(r=>inWin(r) && mktFirstClientKey(r)===c.key);
+          const cnt = rows.length;
+          const sum = rows.reduce((a,b)=>a+(Number(b.cashPay)||0),0);
+          return `<div class="detail-card mkt-first-card" data-key="${esc(c.key)}" title="点击查看该客户近30天消费明细">
+            <div class="dc-head">
+              <span class="dc-name">${esc(c.name)}</span>
+              <span class="dc-vab">#${pStart+i+1} · ${cnt} 笔</span>
+            </div>
+            <div class="dc-rows">
+              ${`<span>会员号</span><b>${esc(c.memberNo)}</b>`}
+              ${`<span>来源渠道</span><b>${esc(c.channel)}</b>`}
+              ${`<span>初诊日期</span><b>${esc(c.firstDate)}</b>`}
+              ${`<span>近30天消费笔数</span><b>${cnt}</b>`}
+              ${`<span>近30天现款合计</span><b class="amt">${fmt(sum)}</b>`}
+            </div>
+          </div>`;
+        }).join('')}</div>`
+      : `<div class="table-wrap" style="max-height:none;overflow:visible;border:1px solid var(--c-border);border-radius:8px;">
       <table class="data">
         <thead><tr><th>#</th><th>客户姓名</th><th>客户会员号</th><th>来源渠道</th><th>初诊日期</th><th>近30天消费笔数</th><th>近30天现款合计</th></tr></thead>
         <tbody>${pageItems.map((c,i)=>{
@@ -2886,10 +2927,9 @@ function renderMktFirstClients(){
         }).join('')}
         </tbody>
       </table>
-    </div>
-    ${pagerHTML}
-    <div style="padding:6px 0 0;color:var(--c-muted);font-size:12px;">共 ${clients.length} 位初诊客户（${winLabel}）· 本页 ${pStart+1}-${pEnd} · 来源渠道=渠道分类-一级渠道-二级渠道 · 点击数据行查看该客户近30天消费明细</div>`;
-  el.innerHTML = filterBar + tableHTML;
+    </div>`);
+  el.innerHTML = filterBar + listHTML + pagerHTML + `
+    <div style="padding:6px 0 0;color:var(--c-muted);font-size:12px;">共 ${clients.length} 位初诊客户（${winLabel}）· 本页 ${pStart+1}-${pEnd} · 来源渠道=渠道分类-一级渠道-二级渠道 · 点击${isMobile?'卡片':'数据行'}查看该客户近30天消费明细</div>`;
   if(!el.dataset.bound){
     el.addEventListener('click', onMktFirstClick);
     el.addEventListener('click', onMktFirstFilterClick);
@@ -2903,6 +2943,14 @@ function renderMktFirstClients(){
 function onMktFirstFilterClick(e){
   const pg = e.target.closest && e.target.closest('[data-mpage]');
   if(pg){ mktPage = parseInt(pg.dataset.mpage, 10) || 1; renderMktFirstClients(); return; }
+  // 筛选区展开/收起（2026-10-13：手机端与电脑端均支持，状态持久化）
+  const ftg = e.target.closest && e.target.closest('#mkt-filter-toggle');
+  if(ftg){
+    mktFiltersCollapsed = !mktFiltersCollapsed;
+    try{ localStorage.setItem('dp_mkt_filters_collapsed', mktFiltersCollapsed?'1':'0'); }catch(err){}
+    renderMktFirstClients();
+    return;
+  }
   const rst = e.target.closest && e.target.closest('#mkt-filter-reset');
   if(rst){ mktFilters = { name:'', memberNo:'', channel:'', date:'', cnt:'', cntOp:'' }; mktPage = 1; renderMktFirstClients(); }
 }
@@ -2930,7 +2978,7 @@ function onMktFirstFilterInput(e){
 
 // ⑤ 行点击 → 弹窗展示该客户近30天消费明细（该客户窗口内全部订单，不限营销部初诊）
 function onMktFirstClick(e){
-  const tr = e.target.closest && e.target.closest('tr.mkt-first-row');
+  const tr = (e.target.closest && (e.target.closest('tr.mkt-first-row') || e.target.closest('.mkt-first-card')));
   if(!tr) return;
   const key = tr.dataset.key;
   const cutoff = state.cutoffDate ? new Date(state.cutoffDate) : new Date();
@@ -2950,10 +2998,30 @@ function showClientMonthModal(r0, rows, month){
   const sorted = rows.slice().sort((a,b)=>(a.payTime&&b.payTime)?(a.payTime-b.payTime):0);
   const total = sorted.reduce((a,b)=>a+(Number(b.cashPay)||0),0);
   const totalAsset = sorted.reduce((a,b)=>a+(Number(b.assetDeduct)||0),0);
-  mask.innerHTML = `
-    <div class="modal-box" role="dialog" aria-modal="true" style="width:min(820px,96vw);">
-      <div class="modal-title">📋 ${esc(r0.name||'—')}（会员号 ${esc(String(r0.memberNo||'').trim()||'无')}）· ${month} 消费明细 · 共 ${sorted.length} 笔</div>
-      <div class="table-wrap" style="max-height:54vh;overflow:auto;border:1px solid var(--c-border);border-radius:8px;">
+  // 手机端：明细以卡片形式展示（2026-10-13）；桌面端保持表格
+  const bodyHTML = isMobileView()
+    ? `<div class="detail-cards">${sorted.map((r,i)=>{
+        const row = (k,v,cls='') => `<span>${k}</span><b class="${cls}">${v}</b>`;
+        return `<div class="detail-card">
+          <div class="dc-head"><span class="dc-name">#${i+1} · ${r.payTime?esc(fmtDate(r.payTime)):''}</span><span class="dc-vab">${esc(r.visitType)||'（空白）'}</span></div>
+          <div class="dc-rows">
+            ${row('渠道分类', esc(r.channelClass))}
+            ${row('一级渠道', esc(r.channelL1))}
+            ${row('开单咨询师', esc(r.consultant))}
+            ${row('收款员工', esc(r.cashier))}
+            ${row('现款支付', esc(fmt(r.cashPay)), 'amt')}
+            ${row('资产抵扣金额', esc(fmt(r.assetDeduct)), 'amt')}
+          </div>
+        </div>`;
+      }).join('')}
+      <div class="detail-card" style="background:var(--c-blue-tint);">
+        <div class="dc-rows">
+          <span>合计（${sorted.length} 笔）</span><b class="amt">现款 ${fmt(total)}</b>
+          <span></span><b class="amt">资产抵扣 ${fmt(totalAsset)}</b>
+        </div>
+      </div>
+    </div>`
+    : `<div class="table-wrap" style="max-height:54vh;overflow:auto;border:1px solid var(--c-border);border-radius:8px;">
         <table class="data">
           <thead><tr><th>#</th><th>收款时间</th><th>到访类型</th><th>渠道分类</th><th>一级渠道</th><th>开单咨询师</th><th>收款员工</th><th>现款支付</th><th>资产抵扣金额</th></tr></thead>
           <tbody>${sorted.map((r,i)=>`
@@ -2975,7 +3043,11 @@ function showClientMonthModal(r0, rows, month){
             <td style="text-align:right;">${fmt(totalAsset)}</td>
           </tr></tfoot>
         </table>
-      </div>
+      </div>`;
+  mask.innerHTML = `
+    <div class="modal-box" role="dialog" aria-modal="true" style="width:min(820px,96vw);">
+      <div class="modal-title">📋 ${esc(r0.name||'—')}（会员号 ${esc(String(r0.memberNo||'').trim()||'无')}）· ${month} 消费明细 · 共 ${sorted.length} 笔</div>
+      ${bodyHTML}
       <div class="row" style="justify-content:flex-end;margin-top:12px;">
         <button class="btn" id="client-modal-close">关闭</button>
       </div>
