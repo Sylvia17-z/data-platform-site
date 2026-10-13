@@ -2213,13 +2213,19 @@ function filterOrdersByTab(key){
   return list;
 }
 
-// 导入明细分页状态
+// 导入明细分页状态（2026-10-13 需求：所有页签默认每页 10 条）
 let detailPage = 1;
-let detailPageSize = 20;
+let detailPageSize = 10;
 
-// 是否手机端视图（与 index.html 的 @media (max-width:640px) 断点保持一致）
+// 是否手机端视图（2026-10-13 需求：手机端一律卡片形式）
+// 判定：窄屏（max-width:640px，与 index.html 断点一致）或 触屏设备（pointer:coarse，
+// 覆盖平板/大屏手机/横屏等宽屏触屏场景——触屏下表格点击删除/改类型不便，统一用卡片）
 function isMobileView(){
-  try { return !!(window.matchMedia && window.matchMedia('(max-width: 640px)').matches); }
+  try {
+    if(window.matchMedia && window.matchMedia('(max-width: 640px)').matches) return true;
+    if(window.matchMedia && window.matchMedia('(pointer: coarse)').matches) return true;
+    return false;
+  }
   catch(e){ return false; }
 }
 
@@ -2527,7 +2533,7 @@ function onImportDetailsChange(e){
   const fs = e.target.closest && e.target.closest('select[data-dfilter]');
   if(fs){ detailFilters[fs.dataset.dfilter] = fs.value || ''; detailPage = 1; renderImportDetails(); return; }
   const ps = e.target.closest && e.target.closest('#detail-pagesize-filter');
-  if(ps){ detailPageSize = parseInt(ps.value, 10) || 20; detailPage = 1; renderImportDetails(); return; }
+  if(ps){ detailPageSize = parseInt(ps.value, 10) || 10; detailPage = 1; renderImportDetails(); return; }
   const ms = e.target.closest && e.target.closest('#detail-mobile-sort');
   if(ms){
     const v = ms.value;
