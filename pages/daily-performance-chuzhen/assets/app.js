@@ -2058,9 +2058,8 @@ function applyDetailSort(list){
 function filterOrdersByTab(key){
   const orders = state.orders || [];
   const latest = latestOrderDate();
-  // 近30天窗口（截止日起往前30天，含两端，可跨月）：供「营销部·初诊 / 营销部·类型空白」页签使用
-  const mw = mktWindow();
-  const inMktWin = r => !!r.payTime && fmtDate(r.payTime) >= mw.start && fmtDate(r.payTime) <= mw.end;
+  // 营销部·初诊 / 营销部·类型空白 页签改用「客户级 30天初诊集合」门控（见下方 filter），
+  // 不再按订单日期窗口过滤——与 ③ 报表 / ⑤ 清单口径完全一致（避免「初诊在窗口外、消费在窗口内」误计入）。
   let list;
   if(key === 'all') list = orders.slice();
   else if(key === 'today') list = orders.slice(); // 当日口径由日期筛选（默认当日）承担
@@ -2081,12 +2080,12 @@ function filterOrdersByTab(key){
     list = orders.filter(r=>{ const m=String(r.memberNo||'').trim(); return m && hit.has(fmtDate(r.payTime)+'|'+m); });
   }
   else if(key === 'yingxiao') list = orders.filter(r => chanHas(r,'营销部') || isRecToYingxiao(r));
-  // 营销部·初诊 / 营销部·类型空白：营销部口径与「营销部」页签一致（含推荐→营销部落位），
-  // 再按到访类型二分：初诊 / 空白（未填写）。
-  // 2026-10-12 口径更新：限定「近30天」窗口（截止日起往前30天，含两端，可跨月）——
-  // 与 ⑤ 清单 / ③ 报表的「30天内初诊客户」口径一致；超窗口的历史行不参与营销部业绩，不再混入本页签。
-  else if(key === 'yx_chuzhen') list = orders.filter(r => (chanHas(r,'营销部') || isRecToYingxiao(r)) && (r.visitType||'').trim() === '初诊' && inMktWin(r));
-  else if(key === 'yx_blank')   list = orders.filter(r => (chanHas(r,'营销部') || isRecToYingxiao(r)) && !(r.visitType||'').trim() && inMktWin(r));
+  // 营销部·初诊 / 营销部·类型空白：与 ③ 报表 / ⑤ 清单口径完全一致——
+  // 仅「30天内营销部初诊客户」（mktFirstKeysCached，客户级集合）的消费明细才会展示，
+  // 不再按订单日期窗口过滤（旧口径会让「初诊在窗口外、消费在窗口内」的订单误计入，
+  // 与报表 month/day 列只认客户级初诊门槛相矛盾）。到访类型二分：初诊 / 空白（未填写）。
+  else if(key === 'yx_chuzhen') list = orders.filter(r => (chanHas(r,'营销部') || isRecToYingxiao(r)) && (r.visitType||'').trim() === '初诊' && mktFirstKeysCached().has(mktFirstClientKey(r)));
+  else if(key === 'yx_blank')   list = orders.filter(r => (chanHas(r,'营销部') || isRecToYingxiao(r)) && !(r.visitType||'').trim() && mktFirstKeysCached().has(mktFirstClientKey(r)));
   // 推荐页签：渠道分类=推荐 的订单（用于核对新归类逻辑落位：一级含营销部→营销部，含商务部→商务部，未匹配→其他）
   else if(key === 'recommend') list = orders.filter(r => (r.channelClass||'').trim() === '推荐');
   // 员工消费：渠道分类=公司所有 且 客户渠道标记为"员工本人及家属"。
@@ -2296,10 +2295,10 @@ function renderImportDetails(){
   const activeFieldCount = Object.values(detailFilters||{}).filter(Boolean).length;
   const filterNote = (detailMonth?('月度 '+detailMonth+' · '):'')+dateNote
     +(activeFieldCount?('字段筛选 '+activeFieldCount+' 项 · '):'');
-  // 营销部两类页签的口径说明（近30天窗口，与 ③ 报表 / ⑤ 清单一致）
+  // 营销部两类页签的口径说明（30天内初诊客户，与 ③ 报表 / ⑤ 清单一致）
   const mw = mktWindow();
   const mktTabNote = (detailTab === 'yx_chuzhen' || detailTab === 'yx_blank')
-    ? ('口径：近30天（' + mw.start + ' ~ ' + mw.end + '）· ') : '';
+    ? ('口径：30天内初诊客户（窗口 ' + mw.start + ' ~ ' + mw.end + '，与③报表·⑤清单一致）· ') : '';
   // 手机端排序条（桌面端隐藏，由表格表头排序代替）
   const mobileSort = `
     <div class="detail-mobile-bar">
