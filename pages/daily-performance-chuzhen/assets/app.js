@@ -2092,7 +2092,21 @@ let detailTab = 'all';
 let detailMonth = ''; // 月度筛选：''=全部，'YYYY-MM'
 let detailDate = '__latest__';  // 日期筛选三态：'__latest__'=默认显示当日（最新日期）；''=全部日期；'YYYY-MM-DD'=指定日期
 let detailSort = { key:'', dir:1 }; // 列排序：''=未排序；dir 1=升序 -1=降序（再次点击同列切换）
-let detailFilters = {}; // 字段筛选：key -> 值（''=全部）；name/memberNo 为模糊包含；vab 为 hit/miss
+let detailFilters = {}; // 字段筛选：key -> 值（''=全部）；name/memberNo 为模糊包含；vab 为 hit/miss；cashPay/assetDeduct 为数值（配 *Op 运算符）
+
+// 数值比较（2026-10-13 需求：笔数/金额筛选改为「运算符+数值」形式，参考 Excel 筛选）
+// op ∈ eq(等于)/ne(不等于)/gt(大于)/ge(大于或等于)/lt(小于)/le(小于或等于)，''/缺省 = 等于
+function cmpNum(v, op, t){
+  switch(op){
+    case 'ne': return v !== t;
+    case 'gt': return v >  t;
+    case 'ge': return v >= t;
+    case 'lt': return v <  t;
+    case 'le': return v <= t;
+    default:   return v === t;
+  }
+}
+const NUM_OPS = [['','等于'],['ne','不等于'],['gt','大于'],['ge','大于或等于'],['lt','小于'],['le','小于或等于']];
 
 // 明细表排序取值：日期按时间戳、金额按数值、VAB 按 0/1，其余按中文字符串比较
 function detailSortVal(r, key){
@@ -2185,6 +2199,15 @@ function filterOrdersByTab(key){
     if(f[k]) list=list.filter(r=>String(r[k]||'').trim()===f[k]);
   });
   if(f.dept) list=list.filter(r=>effectiveDept(r)===f.dept);
+  // 金额筛选（运算符+数值）：数值非空才生效；op 存于 <key>Op（''=等于）
+  const applyAmt = (field) => {
+    const raw = String(f[field]||'').trim();
+    if(raw === '' || isNaN(Number(raw))) return;
+    const t = Number(raw), op = f[field+'Op'] || 'eq';
+    list = list.filter(r => cmpNum(Number(r[field])||0, op, t));
+  };
+  applyAmt('cashPay');
+  applyAmt('assetDeduct');
   if(f.vab==='hit') list=list.filter(r=>isVabMember(r.memberNo));
   else if(f.vab==='miss') list=list.filter(r=>!isVabMember(r.memberNo));
   return list;
@@ -2323,8 +2346,17 @@ function renderImportDetails(){
     + ['<option value="">'+label+'：全部</option>']
         .concat(arr.map(v=>`<option value="${esc(v)}" ${String(detailFilters[key]||'')===v?'selected':''}>${esc(v)}</option>`)).join('')
     + '</select></label>';
+  // 数值筛选（运算符+数值，2026-10-13 需求）：op 存 <key>Op（''=等于），数值存 <key>；数值为空=不筛选
+  const fNum = (key,label) => `<label class="detail-filter">${label}`
+    + `<select class="detail-select" data-dfilter="${key}Op" style="min-width:auto;" title="选择比较方式">`
+    + NUM_OPS.map(([v,l])=>`<option value="${v}" ${String(detailFilters[key+'Op']||'')===v?'selected':''}>${l}</option>`).join('')
+    + '</select>'
+    + `<input type="number" step="any" class="detail-select" data-dfilter-text="${key}" value="${esc(detailFilters[key]||'')}" `
+    + `placeholder="数值" style="width:96px;min-width:auto;"></label>`;
   const effDateOn = !!detailDate && detailDate !== '__latest__';
-  const anyDetailFilter = !!(detailMonth||effDateOn||Object.values(detailFilters||{}).some(Boolean));
+  // 运算符键（*Op，''=等于）不计入「已激活筛选」，避免仅选运算符未填数值时出现清除按钮/计数虚高
+  const activeFilterEntries = Object.entries(detailFilters||{}).filter(([k,v]) => v && !k.endsWith('Op'));
+  const anyDetailFilter = !!(detailMonth||effDateOn||activeFilterEntries.length);
   const filterBar = `
     <div class="detail-filters">
       <label class="detail-filter">月度
@@ -2345,6 +2377,8 @@ function renderImportDetails(){
       ${fSel('visitType','到访类型',distinct('visitType'))}
       ${fSel('consultant','咨询师',distinct('consultant'))}
       ${fSel('cashier','收款员工',distinct('cashier'))}
+      ${fNum('cashPay','现款支付')}
+      ${fNum('assetDeduct','资产抵扣金额')}
       ${fSel('dept','报表归属',DEPT_OPTIONS)}
       <label class="detail-filter">VAB
         <select class="detail-select" data-dfilter="vab">
@@ -2367,7 +2401,7 @@ function renderImportDetails(){
     .concat(['<th>操作</th>']).join('');
   const tabLabel = DETAIL_TABS.find(t=>t.key===detailTab).label;
   const dateNote = detailDate === '__latest__' ? ('当日 '+latest+' · ') : (detailDate ? ('日期 '+detailDate+' · ') : '');
-  const activeFieldCount = Object.values(detailFilters||{}).filter(Boolean).length;
+  const activeFieldCount = activeFilterEntries.length;
   const filterNote = (detailMonth?('月度 '+detailMonth+' · '):'')+dateNote
     +(activeFieldCount?('字段筛选 '+activeFieldCount+' 项 · '):'');
   // 营销部两类页签的口径说明：初诊=30天内初诊客户（窗口随筛选日期联动，与③报表每日列一致）；
@@ -2662,8 +2696,8 @@ function mktFirstClientKey(r){
 function isMktChuzhenOrder(r){
   return (chanHas(r,'营销部') || isRecToYingxiao(r)) && (r.visitType||'').trim() === '初诊';
 }
-// ⑤ 筛选状态：姓名/会员号模糊包含，来源渠道/初诊日期/消费笔数精确
-let mktFilters = { name:'', memberNo:'', channel:'', date:'', cnt:'' };
+// ⑤ 筛选状态：姓名/会员号模糊包含，来源渠道/初诊日期精确，消费笔数=运算符(cntOp)+数值(cnt)
+let mktFilters = { name:'', memberNo:'', channel:'', date:'', cnt:'', cntOp:'' };
 let _mktFilterTimer = null;
 let mktPage = 1;      // ⑤清单分页：当前页（1 基）
 let mktPageSize = 10; // ⑤清单分页：每页条数
@@ -2717,9 +2751,15 @@ function renderMktFirstClients(){
   if(f.memberNo){ const q=String(f.memberNo).toLowerCase(); clients=clients.filter(c=>String(c.memberNo).toLowerCase().includes(q)); }
   if(f.channel) clients=clients.filter(c=>c.channel===f.channel);
   if(f.date) clients=clients.filter(c=>c.firstDate===f.date);
-  if(f.cnt) clients=clients.filter(c=>String(c.cnt)===String(f.cnt));
+  // 消费笔数（运算符+数值，2026-10-13 需求）：数值非空才生效；op 存 cntOp（''=等于）
+  {
+    const raw = String(f.cnt||'').trim();
+    if(raw !== '' && !isNaN(Number(raw))){
+      const t = Number(raw), op = f.cntOp || 'eq';
+      clients = clients.filter(c => cmpNum(c.cnt, op, t));
+    }
+  }
   const anyF = !!(f.name||f.memberNo||f.channel||f.date||f.cnt);
-  const cntOpts = [...new Set(allClients.map(c=>c.cnt))].sort((a,b)=>a-b);
   const filterBar = `
     <div class="detail-filters" style="margin:0 0 8px;">
       <label class="detail-filter">姓名
@@ -2740,10 +2780,11 @@ function renderMktFirstClients(){
           title="按初诊日期筛选；清空=全部">
       </label>
       <label class="detail-filter">消费笔数
-        <select class="detail-select" data-mkt-filter="cnt">
-          <option value="">全部</option>
-          ${cntOpts.map(v=>`<option value="${v}" ${String(f.cnt||'')===String(v)?'selected':''}>${v} 笔</option>`).join('')}
+        <select class="detail-select" data-mkt-filter="cntOp" style="min-width:auto;" title="选择比较方式">
+          ${NUM_OPS.map(([v,l])=>`<option value="${v}" ${String(f.cntOp||'')===v?'selected':''}>${l}</option>`).join('')}
         </select>
+        <input type="number" step="any" class="detail-select" data-mkt-filter="cnt" value="${esc(f.cnt||'')}"
+          placeholder="笔数" style="width:76px;min-width:auto;" title="输入笔数；清空=全部">
       </label>
       ${anyF?'<button type="button" id="mkt-filter-reset" class="detail-reset" title="清除全部筛选">清除筛选</button>':''}
       <span style="color:var(--c-muted);font-size:12px;">${clients.length}/${allClients.length} 位</span>
@@ -2814,7 +2855,7 @@ function onMktFirstFilterClick(e){
   const pg = e.target.closest && e.target.closest('[data-mpage]');
   if(pg){ mktPage = parseInt(pg.dataset.mpage, 10) || 1; renderMktFirstClients(); return; }
   const rst = e.target.closest && e.target.closest('#mkt-filter-reset');
-  if(rst){ mktFilters = { name:'', memberNo:'', channel:'', date:'', cnt:'' }; mktPage = 1; renderMktFirstClients(); }
+  if(rst){ mktFilters = { name:'', memberNo:'', channel:'', date:'', cnt:'', cntOp:'' }; mktPage = 1; renderMktFirstClients(); }
 }
 function onMktFirstFilterChange(e){
   const ps = e.target.closest && e.target.closest('#mkt-pagesize');
