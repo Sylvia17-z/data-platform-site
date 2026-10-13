@@ -2228,9 +2228,10 @@ function renderImportDetails(){
   const dates  = [...new Set(orders.map(r=>r.payTime?fmtDate(r.payTime):null).filter(Boolean))].sort();
   const monthOpts = ['<option value="">全部月份</option>']
     .concat(months.map(m=>`<option value="${m}" ${m===detailMonth?'selected':''}>${m}</option>`)).join('');
-  const dateOpts = ['<option value="__latest__" '+('__latest__'===detailDate?'selected':'')+'>当日（'+latest+'）</option>',
-    '<option value="" '+(''===detailDate?'selected':'')+'>全部日期</option>']
-    .concat(dates.map(d=>`<option value="${d}" ${d===detailDate?'selected':''}>${d}</option>`)).join('');
+  // 日期筛选改为日期控件（type=date）：值='' 表示全部日期；默认显示当日（最新日期）；
+  // 「当日」按钮可随时回到默认口径。min/max 限定在数据实际日期范围内，便于控件选择。
+  const dateMin = dates[0] || '';
+  const dateMax = dates[dates.length-1] || '';
   // 字段筛选下拉选项（取自全部订单，与页签无关，保证跨页签稳定）
   const distinct = key => [...new Set(orders.map(r=>String(r[key]||'').trim()).filter(Boolean))]
     .sort((a,b)=>a.localeCompare(b,'zh-CN'));
@@ -2258,8 +2259,12 @@ function renderImportDetails(){
         <select id="detail-month-filter" class="detail-select">${monthOpts}</select>
       </label>
       <label class="detail-filter">日期
-        <select id="detail-date-filter" class="detail-select">${dateOpts}</select>
+        <input type="date" id="detail-date-filter" class="detail-select" style="min-width:auto;"
+          min="${dateMin}" max="${dateMax}"
+          value="${detailDate==='__latest__'?latest:(detailDate||'')}"
+          title="选择筛选日期；清空=全部日期">
       </label>
+      <button type="button" id="detail-date-today" class="detail-reset" title="回到当日（最新日期 ${latest}）">当日</button>
       ${fText('name','姓名')}
       ${fText('memberNo','会员号')}
       ${fSel('channelClass','渠道分类',distinct('channelClass'))}
@@ -2367,6 +2372,8 @@ function onImportDetailsClick(e){
     renderImportDetails();
     return;
   }
+  const dtBtn = e.target.closest && e.target.closest('#detail-date-today');
+  if(dtBtn){ detailDate='__latest__'; detailPage=1; renderImportDetails(); return; }
   const reset = e.target.closest && e.target.closest('#detail-filter-reset');
   if(reset){
     detailMonth = ''; detailDate = '__latest__'; detailFilters = {}; detailPage = 1;
@@ -2654,10 +2661,9 @@ function renderMktFirstClients(){
         </select>
       </label>
       <label class="detail-filter">初诊日期
-        <select class="detail-select" data-mkt-filter="date">
-          <option value="">全部</option>
-          ${dateOpts.map(v=>`<option value="${esc(v)}" ${f.date===v?'selected':''}>${esc(v)}</option>`).join('')}
-        </select>
+        <input type="date" class="detail-select" data-mkt-filter="date" style="min-width:auto;"
+          min="${dateOpts[0]||''}" max="${dateOpts[dateOpts.length-1]||''}" value="${esc(f.date||'')}"
+          title="按初诊日期筛选；清空=全部">
       </label>
       <label class="detail-filter">消费笔数
         <select class="detail-select" data-mkt-filter="cnt">
@@ -2739,12 +2745,13 @@ function onMktFirstFilterClick(e){
 function onMktFirstFilterChange(e){
   const ps = e.target.closest && e.target.closest('#mkt-pagesize');
   if(ps){ mktPageSize = parseInt(ps.value, 10) || 10; mktPage = 1; renderMktFirstClients(); return; }
-  const sel = e.target.closest && e.target.closest('select[data-mkt-filter]');
+  // 下拉与日期控件（type=date）统一走 change：清空=全部
+  const sel = e.target.closest && e.target.closest('select[data-mkt-filter], input[type="date"][data-mkt-filter]');
   if(sel){ mktFilters[sel.dataset.mktFilter] = sel.value || ''; mktPage = 1; renderMktFirstClients(); }
 }
 function onMktFirstFilterInput(e){
   const inp = e.target.closest && e.target.closest('input[data-mkt-filter]');
-  if(!inp) return;
+  if(!inp || inp.type === 'date') return; // 日期控件由 change 事件承担，避免防抖打断选择
   const key = inp.dataset.mktFilter;
   const val = inp.value.trim();
   clearTimeout(_mktFilterTimer);
