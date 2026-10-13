@@ -391,7 +391,7 @@ async function syncFromCloud(){
   backupAuthSession(session);   // 保持登录：每次拿到有效会话都刷新本地备份
   startCloudKeepalive();        // 页面打开期间定时续期，避免长期闲置后 refreshToken 失效
   hideLoginOverlay();
-  setCloudStatus('已登录 · 同步云端…', 'ok');
+  setCloudStatus('已登录 · 同步云端（点击可修改密码/退出）', 'ok');
   try{
     const { data, error } = await cloud.database.from('dp_orders')
       .select('id, payload, updated_at').order('updated_at', { ascending:false }).limit(1);
@@ -423,13 +423,13 @@ async function syncFromCloud(){
         state.ordersTs = cloudTs || Date.now();
         try{ localStorage.setItem(ORDERS_STORAGE_KEY, JSON.stringify(data2.payload)); }catch(e){}
         if(typeof runRestoredRecompute === 'function') runRestoredRecompute();
-        setCloudStatus('已同步云端（' + cloudCnt + ' 条）', 'ok');
+        setCloudStatus('已同步云端（' + cloudCnt + ' 条）· 点击可修改密码/退出', 'ok');
       }else{
         // 本地更新 → 覆盖云端，避免云端长期停留在旧数据导致下次刷新又倒退
         if(localCnt > 0){
           await saveOrdersToCloud(true);
         }else{
-          setCloudStatus('已同步云端（' + cloudCnt + ' 条）', 'ok');
+          setCloudStatus('已同步云端（' + cloudCnt + ' 条）· 点击可修改密码/退出', 'ok');
         }
       }
     }else if(state.orders.length > 0){
@@ -485,7 +485,7 @@ async function saveOrdersToCloud(force){
         if(error){ setCloudStatus('云端保存失败：' + (error.message || ''), 'err'); return; }
       }
       state.ordersTs = Number(payload.ts) || Date.now();
-      setCloudStatus('已同步云端（' + payload.orders.length + ' 条）', 'ok');
+      setCloudStatus('已同步云端（' + payload.orders.length + ' 条）· 点击可修改密码/退出', 'ok');
     }catch(e){
       setCloudStatus('云端保存异常：' + (e && e.message ? e.message : '网络错误'), 'err');
     }
@@ -3536,7 +3536,7 @@ function initApp(){
   const lb4 = $('login-later'); if(lb4) lb4.addEventListener('click', handleLoginLater);
   const lb5 = $('login-logout'); if(lb5) lb5.addEventListener('click', handleLogout);
   const lb6 = $('login-change-pwd'); if(lb6) lb6.addEventListener('click', handleChangePassword);
-  const csEl = $('cloud-status'); if(csEl) csEl.addEventListener('click', () => { if(!_cloudUser) showLoginOverlay(); });
+  const csEl = $('cloud-status'); if(csEl) csEl.addEventListener('click', () => showLoginOverlay());
   // 首次进入：已登录则拉取云端订单；未登录则把状态条变为登录入口（不强制弹窗打断）
   syncFromCloud();
   // SDK 多源回退晚于首帧加载完成时：加载成功→重试云端同步刷新状态条；全部失败→明确提示
