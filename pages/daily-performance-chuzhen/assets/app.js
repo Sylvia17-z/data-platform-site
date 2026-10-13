@@ -509,8 +509,38 @@ async function clearOrdersInCloud(){
 function showLoginOverlay(){
   const el = $('login-overlay'); if(el) el.style.display = 'flex';
   const lo = $('login-logout'); if(lo) lo.style.display = _cloudUser ? '' : 'none';
+  // 已登录时显示「修改密码」区（2026-10-13 需求：云端同步支持修改密码）
+  const cpBtn = $('login-change-pwd'); if(cpBtn) cpBtn.style.display = _cloudUser ? '' : 'none';
+  const cpRow = $('login-pwdchange-row'); if(cpRow) cpRow.style.display = _cloudUser ? '' : 'none';
 }
 function hideLoginOverlay(){ const el = $('login-overlay'); if(el) el.style.display = 'none'; }
+
+// 修改密码：SDK 流程 = 旧密码换 sudo_token → PATCH 新密码（cloud.auth.resetPasswordForOld）
+async function handleChangePassword(){
+  const oldPwd = ($('login-old-pwd') || {}).value || '';
+  const p1 = ($('login-new-pwd') || {}).value || '';
+  const p2 = ($('login-new-pwd2') || {}).value || '';
+  if(!_cloudUser){ showToast('请先登录后再修改密码', 'warn'); return; }
+  if(!oldPwd){ showToast('请输入当前密码', 'warn'); return; }
+  if(!p1 || p1.length < 6){ showToast('新密码至少 6 位', 'warn'); return; }
+  if(p1 !== p2){ showToast('两次输入的新密码不一致', 'err'); return; }
+  if(p1 === oldPwd){ showToast('新密码不能与当前密码相同', 'warn'); return; }
+  const cloud = getCloud();
+  if(!cloud){ showToast('云端组件尚未加载完成，请稍候重试', 'err'); return; }
+  const btn = $('login-change-pwd');
+  if(btn){ btn.disabled = true; btn.textContent = '提交中…'; }
+  try{
+    const r = await cloud.auth.resetPasswordForOld({ oldPassword: oldPwd, newPassword: p1 });
+    if(r && r.error){ showToast('修改失败：' + (r.error.message || '请检查当前密码是否正确'), 'err', 6000); return; }
+    ['login-old-pwd','login-new-pwd','login-new-pwd2'].forEach(id=>{ const el2=$(id); if(el2) el2.value=''; });
+    showToast('密码修改成功，下次登录请使用新密码', 'ok', 6000);
+    hideLoginOverlay();
+  }catch(e){
+    showToast('修改失败：' + ((e && e.message) || '未知错误'), 'err', 6000);
+  }finally{
+    if(btn){ btn.disabled = false; btn.textContent = '🔑 修改密码'; }
+  }
+}
 async function handleSendCode(){
   const email = ($('login-email') || {}).value || '';
   if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)){ showToast('请输入有效的邮箱', 'err'); return; }
@@ -1365,6 +1395,19 @@ function computeMonthValues(dateList, dailyResults, monthKey){
   return m;
 }
 
+// 月累计展示值派生（专用，勿用 recomputeDerived——2026-10-13 BUG 修复）
+// computeMonthValues 已含「Σ每日(含当日手动覆盖) + 月累计覆盖优先」；
+// 此处仅补算可由月值安全派生的 其他/基础业绩，
+// 【不重算】高新/门店合计/北郊：它们的月累计=Σ每日，若按「合计-北郊」公式重算，
+// 会把日值手动覆盖（如改高新某日值）后的正确 Σ 覆盖回主表合计值（表现为"手动修改后总业绩不变"）。
+function monthDispValues(monthCalc){
+  const m = Object.assign({}, monthCalc || {});
+  const g = k => (Number(m[k]) || 0);
+  m['其他'] = g('合计') - (g('品牌组-其他') + g('活动组-活动支持') + g('电商组') + g('短视频组') + g('品牌组-自然到店') + g('商务部'));
+  m['基础业绩'] = g('合计') - g('新增业绩');
+  return m;
+}
+
 // 默认隐藏除最新日期外的所有日期列（仅保留截止日那列可见）
 function defaultHideOldDates(tableEl, dateList){
   const lastIdx = dateList.length - 1;
@@ -1443,7 +1486,7 @@ function renderReportInner(){
   // 月累计展示值 = 各日求和(含当日手动覆盖)；手动月累计覆盖优先。
   // 手动改每日→联动月累计；手动改月累计→联动合计/派生行（dateList/dailyResults 在此处已就绪）
   const monthCalc = computeMonthValues(dateList, dailyResults);
-  const dispValues = recomputeDerived(monthCalc, {});
+  const dispValues = monthDispValues(monthCalc);
 
   // 健康检查：子集行（新增业绩/管家部）月累计不应超过「合计」；超限通常意味着历史手动覆盖残留
   // （如跨月残留的「新增业绩」手动月累计，使 基础业绩=合计−新增 变为负数）。提示用户清除手动调整。
@@ -1647,7 +1690,7 @@ function renderStoreReport(dateList, dailyResults){
   }
   // 月累计展示值 = 各日求和(含当日手动覆盖)；手动月累计覆盖优先（与 ③ 主表一致）
   const monthCalc = computeMonthValues(dateList, dailyResults);
-  const dispValues = recomputeDerived(monthCalc, {});
+  const dispValues = monthDispValues(monthCalc);
   const cutoff = state.cutoffDate ? new Date(state.cutoffDate) : new Date();
   const monthStr = (cutoff.getMonth()+1) + '月' + cutoff.getDate() + '日';
   const storeTitleCols = 1 + 1 + dateList.length; // 门店类别 + 月累计 + 每日（批量/展开已移至面板标题栏按钮）
@@ -3058,7 +3101,7 @@ function buildReportGrid(){
     const target = state.targets[targetKey] ?? 0;
     // 月累计展示值必须与屏幕一致：用 computeMonthValues（按日重算后求和，含每日覆盖 + 月累计覆盖优先），
     // 而非原始 state.results.values（不含每日覆盖），否则「双击改每日」后屏幕月累计更新、导出月累计却仍是旧值。
-    const dispValues = recomputeDerived(computeMonthValues(dateList, dailyResults), {});
+    const dispValues = monthDispValues(computeMonthValues(dateList, dailyResults));
     // 月累计取值键与 HTML 表一致：统一用 rowKey（避免合并行 短视频组及自然到店 显示/写入键错位）
     const monthVal = dispValues[rowKey] ?? 0;
     const isPink = row.rowClass === 'row-pink';
@@ -3130,7 +3173,7 @@ function buildStoreGrid(){
     const isOrange = !!row.highlight;
     const arr = Array.from({length:nCols}, () => null);
     arr[0] = cell(row.name, 's', isOrange ? 'orange' : 'cat');
-    const dispValues = recomputeDerived(computeMonthValues(dateList, dailyResults), {});
+    const dispValues = monthDispValues(computeMonthValues(dateList, dailyResults));
     const monthVal = dispValues[row.targetKey] ?? 0;
     arr[1] = cell(monthVal, 'n', isOrange ? 'orange' : 'num');
     dailyIdx.forEach((di,k)=>{
@@ -3492,6 +3535,7 @@ function initApp(){
   const lb3 = $('login-pwd-login'); if(lb3) lb3.addEventListener('click', handlePasswordLogin);
   const lb4 = $('login-later'); if(lb4) lb4.addEventListener('click', handleLoginLater);
   const lb5 = $('login-logout'); if(lb5) lb5.addEventListener('click', handleLogout);
+  const lb6 = $('login-change-pwd'); if(lb6) lb6.addEventListener('click', handleChangePassword);
   const csEl = $('cloud-status'); if(csEl) csEl.addEventListener('click', () => { if(!_cloudUser) showLoginOverlay(); });
   // 首次进入：已登录则拉取云端订单；未登录则把状态条变为登录入口（不强制弹窗打断）
   syncFromCloud();

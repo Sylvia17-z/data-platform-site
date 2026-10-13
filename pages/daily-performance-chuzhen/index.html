@@ -545,11 +545,18 @@
         <label>密码（已注册用户）</label>
         <input id="login-pwd" class="modal-input" type="password" placeholder="密码" autocomplete="current-password" />
       </div>
+      <div class="modal-field" id="login-pwdchange-row" style="display:none;">
+        <label>修改密码（已登录时可用）</label>
+        <input id="login-old-pwd" class="modal-input" type="password" placeholder="当前密码" autocomplete="current-password" />
+        <input id="login-new-pwd" class="modal-input" type="password" placeholder="新密码（至少 6 位）" autocomplete="new-password" style="margin-top:6px;" />
+        <input id="login-new-pwd2" class="modal-input" type="password" placeholder="确认新密码" autocomplete="new-password" style="margin-top:6px;" />
+      </div>
     </div>
     <div class="modal-actions" style="flex-wrap:wrap;gap:8px;">
       <button class="btn btn-primary" id="login-send-code" type="button">📧 获取验证码</button>
       <button class="btn btn-primary" id="login-verify" type="button">✅ 验证并登录</button>
       <button class="btn" id="login-pwd-login" type="button">🔑 密码登录</button>
+      <button class="btn" id="login-change-pwd" type="button" style="display:none;">🔑 修改密码</button>
       <button class="btn" id="login-later" type="button">稍后再说</button>
       <button class="btn btn-danger" id="login-logout" type="button" style="display:none;margin-left:auto;">退出登录</button>
     </div>
