@@ -1,10 +1,12 @@
 /* ================================================================
- * 整站共享登录门（2026-10-13 需求：进入网站任意页面都需登录，登录后多端同步）
+ * 整站共享登录门（2026-10-13 改版：独立登录页方案）
  * - 同源共享 SDK 会话（localStorage），一次登录全站/全部 iframe 生效
- * - 未登录：全屏遮罩强制登录（验证码 / 密码登录 / 忘记密码重置）
- * - 已登录：右下角账号徽章（修改密码 / 退出登录），20 分钟定时续期
+ * - 未登录：整页跳转至 /pages/login/index.html?next=<原页面>（独立登录界面）
+ *   登录成功后登录页跳回 next 目标页
+ * - 已登录：右下角账号徽章 → 点「账号」打开账号信息面板
+ *   （查看当前登录账号：邮箱/用户ID；修改密码；退出登录）
  * - 解锁后广播 window 事件 site-auth-ready + localStorage 'site-auth-ping'
- *   （其他 iframe / 标签页监听该键自动解锁）
+ *   （其他 iframe / 标签页监听该键自动解锁；退出时同样广播→各页跳登录页）
  * ================================================================ */
 (function(){
   if(window.__SITE_AUTH_GATE__) return; window.__SITE_AUTH_GATE__ = true;
@@ -13,6 +15,7 @@
   var ENDPOINT = (window.CLOUD_ENDPOINT) || (typeof location !== 'undefined' ? location.origin : '');
   var SESSION_KEY = 'workbuddy-cloud.session.' + PK;
   var PING_KEY = 'site-auth-ping';
+  var LOGIN_URL = '/pages/login/index.html';
 
   /* ---------- SDK 加载（若宿主页已加载则直接复用） ---------- */
   function loadSdk(cb){
@@ -33,7 +36,7 @@
     })();
   }
 
-  var cloud = null, user = null, pendingOtp = null, pwdReset = null;
+  var cloud = null, user = null;
 
   function getCloud(){
     if(cloud) return cloud;
@@ -43,82 +46,85 @@
     return cloud;
   }
 
-  /* ---------- UI ---------- */
+  /* ---------- 跳转登录页 ---------- */
+  function isTop(){ try{ return window.self === window.top; }catch(e){ return false; } }
+  function goLogin(){
+    if(window.__SA_NO_REDIRECT) return;                       // 测试钩子：禁止跳转
+    try{
+      var p = (typeof location !== 'undefined' && location.pathname) || '';
+      if(p.indexOf('/pages/login/') === 0) return;            // 已在登录页，防循环
+      var next = p + ((typeof location !== 'undefined' && location.search) || '');
+      var url = LOGIN_URL + '?next=' + encodeURIComponent(next);
+      if(isTop()) location.replace(url);
+      else { try{ window.top.location.replace(url); }catch(e){} }
+    }catch(e){}
+  }
+
+  /* ---------- UI：徽章 + 账号信息面板 ---------- */
   var CSS = ''
-    + '#sa-mask{position:fixed;inset:0;background:rgba(15,35,64,.55);backdrop-filter:blur(3px);display:none;align-items:center;justify-content:center;z-index:2147483000;}'
-    + '#sa-mask.show{display:flex;}'
-    + '#sa-box{background:#fff;border-radius:14px;box-shadow:0 18px 60px rgba(15,35,64,.35);padding:22px 24px;width:min(400px,94vw);font-family:inherit;color:#1c2b3a;}'
-    + '#sa-box h3{margin:0 0 14px;font-size:16px;color:#123c73;}'
-    + '#sa-box label{display:block;font-size:12px;color:#5a6b80;margin:10px 0 4px;}'
-    + '#sa-box input{width:100%;box-sizing:border-box;border:1px solid #d5dde7;border-radius:8px;padding:8px 10px;font-size:13px;font-family:inherit;}'
-    + '#sa-box .sa-row{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px;}'
-    + '#sa-box button{border:1px solid #123c73;background:#fff;color:#123c73;border-radius:8px;padding:8px 12px;font-size:13px;font-family:inherit;cursor:pointer;}'
-    + '#sa-box button.sa-pri{background:#123c73;color:#fff;}'
-    + '#sa-box button:disabled{opacity:.55;cursor:default;}'
-    + '#sa-tip{margin-top:12px;font-size:11px;color:#8a97a8;line-height:1.5;}'
-    + '#sa-msg{margin-top:8px;font-size:12px;min-height:16px;color:#c0392b;}'
     + '#sa-badge{position:fixed;right:12px;bottom:12px;z-index:2147483000;background:#fff;border:1px solid #d5dde7;border-radius:999px;box-shadow:0 4px 14px rgba(15,35,64,.18);padding:6px 12px;font-size:12px;color:#1c2b3a;display:none;align-items:center;gap:8px;font-family:inherit;}'
     + '#sa-badge b{color:#123c73;font-weight:600;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}'
     + '#sa-badge button{border:none;background:none;color:#123c73;cursor:pointer;font-size:12px;font-family:inherit;padding:2px;}'
-    + '#sa-badge button:hover{text-decoration:underline;}';
+    + '#sa-badge button:hover{text-decoration:underline;}'
+    + '#sa-panel{position:fixed;right:12px;bottom:52px;z-index:2147483000;background:#fff;border:1px solid #d5dde7;border-radius:14px;box-shadow:0 14px 44px rgba(15,35,64,.3);padding:16px 18px;width:min(320px,92vw);font-family:inherit;color:#1c2b3a;display:none;}'
+    + '#sa-panel h4{margin:0 0 10px;font-size:14px;color:#123c73;}'
+    + '#sa-panel .sa-info{background:#f4f7fb;border-radius:8px;padding:10px 12px;font-size:12px;line-height:1.9;color:#1c2b3a;}'
+    + '#sa-panel .sa-info b{color:#123c73;word-break:break-all;}'
+    + '#sa-panel label{display:block;font-size:12px;color:#5a6b80;margin:10px 0 4px;}'
+    + '#sa-panel input{width:100%;box-sizing:border-box;border:1px solid #d5dde7;border-radius:8px;padding:8px 10px;font-size:13px;font-family:inherit;outline:none;}'
+    + '#sa-panel input:focus{border-color:#2a5da8;}'
+    + '#sa-panel .sa-row{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px;}'
+    + '#sa-panel button{border:1px solid #123c73;background:#fff;color:#123c73;border-radius:8px;padding:8px 12px;font-size:13px;font-family:inherit;cursor:pointer;}'
+    + '#sa-panel button.sa-pri{background:#123c73;color:#fff;}'
+    + '#sa-panel button.sa-danger{border-color:#c0392b;color:#c0392b;}'
+    + '#sa-panel button:disabled{opacity:.55;cursor:default;}'
+    + '#sa-panel .sa-chg-tt{margin-top:14px;padding-top:12px;border-top:1px dashed #e4ebf3;font-size:12px;color:#5a6b80;font-weight:600;}'
+    + '#sa-msg{margin-top:8px;font-size:12px;min-height:15px;color:#c0392b;}';
   var style = document.createElement('style'); style.textContent = CSS; document.head.appendChild(style);
 
-  var mask = document.createElement('div'); mask.id = 'sa-mask';
-  mask.innerHTML = ''
-    + '<div id="sa-box" role="dialog" aria-modal="true">'
-    + '<h3 id="sa-title">🔐 登录后使用（数据多端同步）</h3>'
-    + '<label>邮箱</label><input id="sa-email" type="email" placeholder="you@example.com" autocomplete="username">'
-    + '<div id="sa-code-wrap" style="display:none;"><label>验证码</label><input id="sa-code" type="text" inputmode="numeric" placeholder="6 位验证码"></div>'
-    + '<div id="sa-pwd-wrap"><label>密码（已注册用户）</label><input id="sa-pwd" type="password" placeholder="密码" autocomplete="current-password"></div>'
-    + '<div id="sa-reset-wrap" style="display:none;"><label>重置密码（验证码已发送至上方邮箱）</label><input id="sa-reset-code" type="text" inputmode="numeric" placeholder="6 位验证码"><input id="sa-reset-pwd" type="password" placeholder="新密码（至少 6 位）" style="margin-top:6px;" autocomplete="new-password"></div>'
-    + '<div id="sa-chg-wrap" style="display:none;"><label>修改密码</label><input id="sa-old-pwd" type="password" placeholder="当前密码" autocomplete="current-password"><input id="sa-new-pwd" type="password" placeholder="新密码（至少 6 位）" style="margin-top:6px;" autocomplete="new-password"><input id="sa-new-pwd2" type="password" placeholder="确认新密码" style="margin-top:6px;" autocomplete="new-password"></div>'
-    + '<div id="sa-msg"></div>'
-    + '<div class="sa-row">'
-    + '<button class="sa-pri" id="sa-send">📧 获取验证码</button>'
-    + '<button class="sa-pri" id="sa-verify">✅ 验证并登录</button>'
-    + '<button id="sa-pwdlogin">🔑 密码登录</button>'
-    + '<button id="sa-forgot">忘记密码？</button>'
-    + '<button id="sa-reset" style="display:none;">✅ 重置密码</button>'
-    + '<button id="sa-chg" style="display:none;">🔑 修改密码</button>'
-    + '<button id="sa-logout" style="display:none;">退出登录</button>'
-    + '</div>'
-    + '<div id="sa-tip">首次使用邮箱即自动注册（新账号请同时填写密码）；数据按账号隔离，仅本人可读取；登录后各页面数据自动云端同步。</div>'
-    + '</div>';
   var badge = document.createElement('div'); badge.id = 'sa-badge';
   badge.innerHTML = '<span>👤</span><b id="sa-badge-name"></b><button id="sa-badge-acct">账号</button>';
+  var panel = document.createElement('div'); panel.id = 'sa-panel';
+  panel.innerHTML = ''
+    + '<h4>👤 当前登录账号</h4>'
+    + '<div class="sa-info">'
+    + '邮箱：<b id="sa-info-email">—</b><br>'
+    + '用户ID：<b id="sa-info-uid">—</b>'
+    + '</div>'
+    + '<div class="sa-chg-tt">修改密码</div>'
+    + '<label>当前密码</label><input id="sa-old-pwd" type="password" autocomplete="current-password">'
+    + '<label>新密码（至少 6 位）</label><input id="sa-new-pwd" type="password" autocomplete="new-password">'
+    + '<label>确认新密码</label><input id="sa-new-pwd2" type="password" autocomplete="new-password">'
+    + '<div id="sa-msg"></div>'
+    + '<div class="sa-row">'
+    + '<button class="sa-pri" id="sa-chg">🔑 修改密码</button>'
+    + '<button class="sa-danger" id="sa-logout">退出登录</button>'
+    + '</div>';
+
   var _uiAppended = false;
   function appendUI(){
     if(_uiAppended || !document.body) return;
     _uiAppended = true;
-    document.body.appendChild(mask);
     document.body.appendChild(badge);
-    if(user) badge.style.display = 'flex';   // 解锁早于 DOM 就绪时补显徽章
+    document.body.appendChild(panel);
+    if(user){ badge.style.display = 'flex'; fillInfo(); }   // 解锁早于 DOM 就绪时补显徽章
   }
   document.addEventListener('DOMContentLoaded', appendUI);
   if(document.readyState !== 'loading'){ appendUI(); }
 
-  function $(id){ return document.getElementById(id) || (mask && mask.querySelector('#' + id)) || null; }
+  function $(id){ return document.getElementById(id); }
   function msg(t, isErr){ var el = $('sa-msg'); if(el){ el.textContent = t || ''; el.style.color = isErr ? '#c0392b' : '#1a7a3a'; } }
-  function show(el, on){ if(el) el.style.display = on ? '' : 'none'; }
-
-  function renderMode(){
-    var logged = !!user;
-    $('sa-title').textContent = logged ? '👤 账号' : '🔐 登录后使用（数据多端同步）';
-    show($('sa-email'), !logged); show($('sa-pwd-wrap'), !logged);
-    show($('sa-code-wrap'), !logged && !!pendingOtp);
-    show($('sa-send'), !logged); show($('sa-verify'), !logged);
-    show($('sa-pwdlogin'), !logged);
-    show($('sa-forgot'), !logged && !pwdReset);
-    show($('sa-reset'), !logged && !!pwdReset);
-    show($('sa-reset-wrap'), !logged && !!pwdReset);
-    show($('sa-chg'), logged); show($('sa-chg-wrap'), logged);
-    show($('sa-logout'), logged);
+  function fillInfo(){
+    var e = $('sa-info-email'), u = $('sa-info-uid'), n = $('sa-badge-name');
+    var email = (user && (user.email || user.name)) || '—';
+    if(e) e.textContent = email;
+    if(u) u.textContent = (user && user.id) || '—';
+    if(n) n.textContent = email;
   }
-  function lock(){ mask.classList.add('show'); renderMode(); }
+
   function unlock(){
-    mask.classList.remove('show');
     badge.style.display = 'flex';   // 显式覆盖 CSS 默认 display:none
-    if(badge){ var n = $('sa-badge-name'); if(n) n.textContent = (user && (user.email || user.name || user.id)) || '已登录'; }
+    fillInfo();
     try{ localStorage.setItem(PING_KEY, String(Date.now())); }catch(e){}
     try{ window.dispatchEvent(new Event('site-auth-ready')); }catch(e){}
   }
@@ -129,7 +135,7 @@
     var session = null;
     try{ var r = await c.auth.getSession(); session = r.data; if(r.error) session = null; }catch(e){ session = null; }
     if(session && session.user){ user = session.user; unlock(); startKeepalive(); }
-    else { user = null; lock(); }
+    else { user = null; goLogin(); }
   }
   var _ka = null;
   function startKeepalive(){
@@ -143,69 +149,6 @@
   }
 
   /* ---------- 动作 ---------- */
-  async function actSend(){
-    var email = ($('sa-email')||{}).value || '';
-    if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)){ msg('请输入有效的邮箱', true); return; }
-    var c = getCloud(); if(!c){ msg('云端组件加载中，请稍候重试', true); return; }
-    var b = $('sa-send'); b.disabled = true; var old = b.textContent; b.textContent = '发送中…';
-    var sent = await c.auth.sendOtp({ email: email });
-    b.disabled = false; b.textContent = old;
-    if(sent.error){ msg('验证码发送失败：' + (sent.error.message || ''), true); return; }
-    pendingOtp = { email: email, verificationId: sent.data && sent.data.verificationId, isExistingUser: sent.data && sent.data.isExistingUser };
-    msg('验证码已发送至 ' + email, false);
-    renderMode();
-  }
-  async function actVerify(){
-    if(!pendingOtp){ msg('请先获取验证码', true); return; }
-    var c = getCloud(); if(!c){ msg('云端组件加载中，请稍候重试', true); return; }
-    var code = ($('sa-code')||{}).value || '';
-    var pwd = ($('sa-pwd')||{}).value || '';
-    if(!code.trim()){ msg('请输入验证码', true); return; }
-    var params = { email: pendingOtp.email, verificationId: pendingOtp.verificationId, isExistingUser: pendingOtp.isExistingUser, token: code.trim() };
-    if(!pendingOtp.isExistingUser) params.password = pwd;   // 新账号注册需同时填密码
-    var done = await c.auth.verifyOtp(params);
-    if(done.error){ msg('登录失败：' + (done.error.message || ''), true); return; }
-    pendingOtp = null; user = (done.data && done.data.user) || null; msg(''); unlock(); startKeepalive();
-  }
-  async function actPwdLogin(){
-    var c = getCloud(); if(!c){ msg('云端组件加载中，请稍候重试', true); return; }
-    var email = ($('sa-email')||{}).value || '';
-    var pwd = ($('sa-pwd')||{}).value || '';
-    if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)){ msg('请输入有效的邮箱', true); return; }
-    if(!pwd){ msg('请输入密码', true); return; }
-    var b = $('sa-pwdlogin'); b.disabled = true;
-    var r = await c.auth.signInWithPassword({ email: email, password: pwd });
-    b.disabled = false;
-    if(r.error){ msg('登录失败：' + (r.error.message || ''), true); return; }
-    user = (r.data && r.data.user) || null; msg(''); unlock(); startKeepalive();
-  }
-  async function actForgot(){
-    var email = ($('sa-email')||{}).value || '';
-    if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)){ msg('请输入有效的邮箱', true); return; }
-    var c = getCloud(); if(!c){ msg('云端组件加载中，请稍候重试', true); return; }
-    var b = $('sa-forgot'); b.disabled = true; var old = b.textContent; b.textContent = '发送中…';
-    var r = await c.auth.resetPasswordForEmail(email);
-    b.disabled = false; b.textContent = old;
-    if(r.error){ msg('重置验证码发送失败：' + (r.error.message || ''), true); return; }
-    if(r.data && typeof r.data.updateUser === 'function'){
-      pwdReset = { email: email, updateUser: r.data.updateUser };
-      msg('重置验证码已发送至 ' + email, false); renderMode();
-    } else msg('重置流程返回异常，请稍候重试', true);
-  }
-  async function actReset(){
-    if(!pwdReset){ msg('请先点击「忘记密码？」获取验证码', true); return; }
-    var code = ($('sa-reset-code')||{}).value || '';
-    var pwd = ($('sa-reset-pwd')||{}).value || '';
-    if(!code.trim()){ msg('请输入邮箱验证码', true); return; }
-    if(!pwd || pwd.length < 6){ msg('新密码至少 6 位', true); return; }
-    var b = $('sa-reset'); b.disabled = true;
-    var r = await pwdReset.updateUser({ nonce: code.trim(), password: pwd });
-    b.disabled = false;
-    if(r.error){ msg('密码重置失败：' + (r.error.message || '请检查验证码'), true); return; }
-    pwdReset = null;
-    ['sa-reset-code','sa-reset-pwd'].forEach(function(id){ var el = $(id); if(el) el.value = ''; });
-    user = (r.data && r.data.user) || null; msg(''); unlock(); startKeepalive();
-  }
   async function actChange(){
     var c = getCloud(); if(!c){ msg('云端组件加载中，请稍候重试', true); return; }
     var o = ($('sa-old-pwd')||{}).value || '', p1 = ($('sa-new-pwd')||{}).value || '', p2 = ($('sa-new-pwd2')||{}).value || '';
@@ -225,24 +168,24 @@
     try{ await c.auth.signOut(); }catch(e){}
     user = null;
     try{ localStorage.removeItem(SESSION_KEY); localStorage.removeItem('dp_auth_backup'); }catch(e){}
-    badge.style.display = 'none';
-    lock();
+    try{ localStorage.setItem(PING_KEY, String(Date.now())); }catch(e){}   // 通知其他 iframe/标签页
+    if(panel) panel.style.display = 'none';
+    if(badge) badge.style.display = 'none';
+    goLogin();
   }
 
   /* ---------- 事件 ---------- */
   function bind(){
-    var q = function(id){ return mask.querySelector('#' + id) || document.getElementById(id); };
-    q('sa-send').addEventListener('click', actSend);
-    q('sa-verify').addEventListener('click', actVerify);
-    q('sa-pwdlogin').addEventListener('click', actPwdLogin);
-    q('sa-forgot').addEventListener('click', actForgot);
-    q('sa-reset').addEventListener('click', actReset);
-    q('sa-chg').addEventListener('click', actChange);
-    q('sa-logout').addEventListener('click', actLogout);
-    badge.querySelector('#sa-badge-acct').addEventListener('click', function(){ lock(); });   // 徽章「账号」→ 打开账号面板
-    mask.addEventListener('click', function(e){ if(e.target === mask){ /* 强制登录：点空白不关闭 */ } });
+    if(!badge || !panel) return;
+    badge.querySelector('#sa-badge-acct').addEventListener('click', function(){
+      var on = panel.style.display === 'block';
+      panel.style.display = on ? 'none' : 'block';
+      if(!on) fillInfo();
+    });
+    panel.querySelector('#sa-chg').addEventListener('click', actChange);
+    panel.querySelector('#sa-logout').addEventListener('click', actLogout);
     window.addEventListener('storage', function(e){
-      if(e.key === PING_KEY){ checkSession(); }                             // 其他 iframe/标签登录 → 本页解锁
+      if(e.key === PING_KEY){ checkSession(); }   // 其他 iframe/标签登录或退出 → 本页同步（登录=解锁，退出=跳登录页）
     });
   }
 

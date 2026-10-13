@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>登录 · 海蓓医管考核数据平台</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0;}
+  html,body{height:100%;}
+  body{
+    font-family:"Microsoft YaHei","PingFang SC",sans-serif;
+    background:linear-gradient(160deg,#eef3f9 0%,#dce7f3 55%,#cddcec 100%);
+    display:flex;align-items:center;justify-content:center;
+    min-height:100vh;padding:24px 16px;color:#1c2b3a;
+  }
+  .login-card{
+    background:#fff;border-radius:16px;box-shadow:0 18px 60px rgba(15,35,64,.22);
+    width:min(420px,94vw);padding:32px 30px 24px;
+  }
+  .brand{display:flex;align-items:center;gap:12px;margin-bottom:6px;}
+  .brand .logo{
+    width:44px;height:44px;border-radius:12px;flex:none;
+    background:linear-gradient(135deg,#123c73,#2a5da8);
+    display:flex;align-items:center;justify-content:center;font-size:24px;color:#fff;
+  }
+  .brand h1{font-size:19px;color:#123c73;font-weight:700;letter-spacing:.5px;}
+  .brand .sub{font-size:12px;color:#8a97a8;margin-top:2px;}
+  .divider{height:1px;background:#e4ebf3;margin:16px 0 4px;}
+  h3{margin:14px 0 4px;font-size:15px;color:#123c73;}
+  label{display:block;font-size:12px;color:#5a6b80;margin:12px 0 4px;}
+  input{
+    width:100%;border:1px solid #d5dde7;border-radius:8px;padding:10px 12px;
+    font-size:14px;font-family:inherit;outline:none;transition:border .15s;
+  }
+  input:focus{border-color:#2a5da8;}
+  .row{display:flex;flex-wrap:wrap;gap:10px;margin-top:18px;}
+  button{
+    border:1px solid #123c73;background:#fff;color:#123c73;border-radius:8px;
+    padding:10px 16px;font-size:14px;font-family:inherit;cursor:pointer;transition:all .15s;
+  }
+  button:hover{background:#f0f5fb;}
+  button.sa-pri{background:#123c73;color:#fff;}
+  button.sa-pri:hover{background:#1a4d8f;}
+  button:disabled{opacity:.55;cursor:default;}
+  .sa-danger{border-color:#c0392b;color:#c0392b;}
+  .sa-danger:hover{background:#fdf2f0;}
+  #sa-msg{margin-top:10px;font-size:13px;min-height:18px;color:#c0392b;}
+  #sa-tip{margin-top:14px;font-size:11px;color:#8a97a8;line-height:1.7;border-top:1px dashed #e4ebf3;padding-top:12px;}
+  .foot{margin-top:16px;text-align:center;font-size:11px;color:#a8b4c4;}
+</style>
+</head>
+<body>
+<div class="login-card">
+  <div class="brand">
+    <div class="logo">🏥</div>
+    <div>
+      <h1>海蓓医管考核数据平台</h1>
+      <div class="sub">登录后可多端同步数据 · 请使用邮箱登录</div>
+    </div>
+  </div>
+  <div class="divider"></div>
+
+  <h3>账号登录</h3>
+  <label>邮箱</label>
+  <input id="sa-email" type="email" placeholder="you@example.com" autocomplete="username">
+  <div id="sa-code-wrap" style="display:none;">
+    <label>验证码</label>
+    <input id="sa-code" type="text" inputmode="numeric" placeholder="6 位邮箱验证码">
+  </div>
+  <div id="sa-pwd-wrap">
+    <label>密码（已注册用户 / 新用户注册需设置）</label>
+    <input id="sa-pwd" type="password" placeholder="密码（至少 6 位）" autocomplete="current-password">
+  </div>
+  <div id="sa-reset-wrap" style="display:none;">
+    <label>重置密码（验证码已发送至上方邮箱）</label>
+    <input id="sa-reset-code" type="text" inputmode="numeric" placeholder="6 位邮箱验证码">
+    <input id="sa-reset-pwd" type="password" placeholder="新密码（至少 6 位）" style="margin-top:8px;" autocomplete="new-password">
+  </div>
+  <div id="sa-msg"></div>
+  <div class="row">
+    <button class="sa-pri" id="sa-send">📧 获取验证码</button>
+    <button class="sa-pri" id="sa-verify">✅ 验证并登录</button>
+    <button id="sa-pwdlogin">🔑 密码登录</button>
+    <button id="sa-forgot">忘记密码？</button>
+    <button class="sa-pri" id="sa-reset" style="display:none;">✅ 重置密码</button>
+  </div>
+  <div id="sa-tip">首次使用邮箱即自动注册（新账号请同时填写密码）；数据按账号隔离，仅本人可读取；登录后各页面数据自动云端同步。</div>
+  <div class="foot">海蓓 · 医管考核数据统计</div>
+</div>
+
+<script>
+(function(){
+  var PK = 'wbpk_KQXIeDHLXWDHN7WQp3zqUQ_Y5IlM6hJd7n10U8UN5bYmSGUYeevVOwl';
+  var ENDPOINT = location.origin;
+
+  /* ---------- 回跳目标 ---------- */
+  function nextUrl(){
+    var n = '';
+    try{ n = new URLSearchParams(location.search).get('next') || ''; }catch(e){}
+    if(!n || n.charAt(0) !== '/' || n.charAt(1) === '/') n = '/';
+    return n;
+  }
+  function goNext(){ location.replace(nextUrl()); }
+
+  /* ---------- SDK 加载 ---------- */
+  function loadSdk(cb){
+    if(window.WorkBuddyCloud) return cb();
+    var urls = [
+      'https://cdn.jsdelivr.net/npm/@tencent-ai/workbuddy-cloud-sdk@dev/lib/index.global.js',
+      'https://unpkg.com/@tencent-ai/workbuddy-cloud-sdk@dev/lib/index.global.js',
+      'https://registry.npmmirror.com/@tencent-ai/workbuddy-cloud-sdk/latest/files/lib/index.global.js'
+    ];
+    var i = 0;
+    (function tryNext(){
+      if(i >= urls.length){ setTimeout(function(){ tryNext(); }, 5000); return; }
+      var s = document.createElement('script');
+      s.src = urls[i++];
+      s.onload = function(){ if(window.WorkBuddyCloud) cb(); else tryNext(); };
+      s.onerror = function(){ tryNext(); };
+      document.head.appendChild(s);
+    })();
+  }
+
+  var cloud = null, pendingOtp = null, pwdReset = null;
+  function getCloud(){
+    if(cloud) return cloud;
+    if(typeof window.WorkBuddyCloud === 'undefined') return null;
+    try{ cloud = window.WorkBuddyCloud.createWorkBuddyCloud({ endpoint: ENDPOINT, publishableKey: PK }); }
+    catch(e){ cloud = null; }
+    return cloud;
+  }
+
+  function $(id){ return document.getElementById(id); }
+  function msg(t, isErr){ var el = $('sa-msg'); if(el){ el.textContent = t || ''; el.style.color = isErr ? '#c0392b' : '#1a7a3a'; } }
+  function show(el, on){ if(el) el.style.display = on ? '' : 'none'; }
+
+  function renderMode(){
+    var logged = false;   // 登录页只在未登录态展示表单
+    show($('sa-code-wrap'), !!pendingOtp);
+    show($('sa-send'), true); show($('sa-verify'), true); show($('sa-pwdlogin'), true);
+    show($('sa-forgot'), !pwdReset);
+    show($('sa-reset'), !!pwdReset);
+    show($('sa-reset-wrap'), !!pwdReset);
+    show($('sa-pwd-wrap'), !pwdReset);
+  }
+
+  /* ---------- 已登录 → 直接跳转目标页 ---------- */
+  async function checkSession(){
+    var c = getCloud(); if(!c){ setTimeout(function(){ checkSession(); }, 800); return; }
+    try{
+      var r = await c.auth.getSession();
+      if(r.data && r.data.user){ goNext(); return; }
+    }catch(e){}
+  }
+
+  /* ---------- 动作 ---------- */
+  async function actSend(){
+    var email = ($('sa-email')||{}).value || '';
+    if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)){ msg('请输入有效的邮箱', true); return; }
+    var c = getCloud(); if(!c){ msg('云端组件加载中，请稍候重试', true); return; }
+    var b = $('sa-send'); b.disabled = true; var old = b.textContent; b.textContent = '发送中…';
+    var sent = await c.auth.sendOtp({ email: email });
+    b.disabled = false; b.textContent = old;
+    if(sent.error){ msg('验证码发送失败：' + (sent.error.message || ''), true); return; }
+    pendingOtp = { email: email, verificationId: sent.data && sent.data.verificationId, isExistingUser: sent.data && sent.data.isExistingUser };
+    msg('验证码已发送至 ' + email, false);
+    renderMode();
+  }
+  async function actVerify(){
+    if(!pendingOtp){ msg('请先获取验证码', true); return; }
+    var c = getCloud(); if(!c){ msg('云端组件加载中，请稍候重试', true); return; }
+    var code = ($('sa-code')||{}).value || '';
+    var pwd = ($('sa-pwd')||{}).value || '';
+    if(!code.trim()){ msg('请输入验证码', true); return; }
+    var params = { email: pendingOtp.email, verificationId: pendingOtp.verificationId, isExistingUser: pendingOtp.isExistingUser, token: code.trim() };
+    if(!pendingOtp.isExistingUser) params.password = pwd;   // 新账号注册需同时填密码
+    var done = await c.auth.verifyOtp(params);
+    if(done.error){ msg('登录失败：' + (done.error.message || ''), true); return; }
+    msg('登录成功，正在跳转…', false);
+    goNext();
+  }
+  async function actPwdLogin(){
+    var c = getCloud(); if(!c){ msg('云端组件加载中，请稍候重试', true); return; }
+    var email = ($('sa-email')||{}).value || '';
+    var pwd = ($('sa-pwd')||{}).value || '';
+    if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)){ msg('请输入有效的邮箱', true); return; }
+    if(!pwd){ msg('请输入密码', true); return; }
+    var b = $('sa-pwdlogin'); b.disabled = true;
+    var r = await c.auth.signInWithPassword({ email: email, password: pwd });
+    b.disabled = false;
+    if(r.error){ msg('登录失败：' + (r.error.message || ''), true); return; }
+    msg('登录成功，正在跳转…', false);
+    goNext();
+  }
+  async function actForgot(){
+    var email = ($('sa-email')||{}).value || '';
+    if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)){ msg('请输入有效的邮箱', true); return; }
+    var c = getCloud(); if(!c){ msg('云端组件加载中，请稍候重试', true); return; }
+    var b = $('sa-forgot'); b.disabled = true; var old = b.textContent; b.textContent = '发送中…';
+    var r = await c.auth.resetPasswordForEmail(email);
+    b.disabled = false; b.textContent = old;
+    if(r.error){ msg('重置验证码发送失败：' + (r.error.message || ''), true); return; }
+    if(r.data && typeof r.data.updateUser === 'function'){
+      pwdReset = { email: email, updateUser: r.data.updateUser };
+      msg('重置验证码已发送至 ' + email, false); renderMode();
+    } else msg('重置流程返回异常，请稍候重试', true);
+  }
+  async function actReset(){
+    if(!pwdReset){ msg('请先点击「忘记密码？」获取验证码', true); return; }
+    var code = ($('sa-reset-code')||{}).value || '';
+    var pwd = ($('sa-reset-pwd')||{}).value || '';
+    if(!code.trim()){ msg('请输入邮箱验证码', true); return; }
+    if(!pwd || pwd.length < 6){ msg('新密码至少 6 位', true); return; }
+    var b = $('sa-reset'); b.disabled = true;
+    var r = await pwdReset.updateUser({ nonce: code.trim(), password: pwd });
+    b.disabled = false;
+    if(r.error){ msg('密码重置失败：' + (r.error.message || '请检查验证码'), true); return; }
+    pwdReset = null;
+    ['sa-reset-code','sa-reset-pwd'].forEach(function(id){ var el = $(id); if(el) el.value = ''; });
+    msg('密码重置成功，正在跳转…', false);
+    goNext();   // updateUser 成功后 SDK 已自动登录
+  }
+
+  $('sa-send').addEventListener('click', actSend);
+  $('sa-verify').addEventListener('click', actVerify);
+  $('sa-pwdlogin').addEventListener('click', actPwdLogin);
+  $('sa-forgot').addEventListener('click', actForgot);
+  $('sa-reset').addEventListener('click', actReset);
+
+  loadSdk(function(){ renderMode(); checkSession(); });
+})();
+</script>
+</body>
+</html>
