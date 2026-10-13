@@ -276,6 +276,69 @@ function getCloud(){
   catch(e){ _cloudClient = null; }
   return _cloudClient;
 }
+
+/* ---- 登录态持久化（2026-10-13 需求：登录不退出的情况下保持为登录状态）----
+ * 问题：SDK 会话存于 localStorage 键 workbuddy-cloud.session.<PK>，但发布环境下
+ * localStorage 跨会话可能被清（origin 漂移），且 access_token 过期后若刷新失败
+ * SDK 会 abandon() 清空会话 → 刷新页面就变「未登录」。
+ * 方案（三层）：
+ *   1. 备份：每次拿到有效会话时，把 {accessToken,refreshToken,expiresAt,user}
+ *      备份到独立键 dp_auth_backup（与 SDK 键分离，防单点丢失）；
+ *   2. 恢复：启动时 getSession() 为空但备份存在 → 把备份写回 SDK 存储键，
+ *      再次 getSession() 触发 SDK 用 refreshToken 静默续期，成功则仍是登录态；
+ *   3. 保活：页面打开期间每 20 分钟 + 每次切回前台时 getSession() 一次，
+ *      让 token 在过期前完成滚动刷新，避免长期闲置后 refreshToken 整体失效。 */
+const AUTH_BACKUP_KEY = 'dp_auth_backup';
+const SDK_SESSION_KEY = 'workbuddy-cloud.session.' + CLOUD_PK;
+function backupAuthSession(session){
+  try{
+    if(!session || !session.user) return;
+    localStorage.setItem(AUTH_BACKUP_KEY, JSON.stringify({
+      accessToken: session.accessToken, refreshToken: session.refreshToken,
+      expiresAt: session.expiresAt, user: session.user, savedAt: Date.now(),
+    }));
+  }catch(e){}
+}
+function readAuthBackup(){
+  try{
+    const raw = localStorage.getItem(AUTH_BACKUP_KEY);
+    if(!raw) return null;
+    const s = JSON.parse(raw);
+    return (s && s.refreshToken && s.user) ? s : null;
+  }catch(e){ return null; }
+}
+function clearAuthBackup(){ try{ localStorage.removeItem(AUTH_BACKUP_KEY); }catch(e){} }
+async function restoreAuthSession(){
+  const cloud = getCloud(); if(!cloud) return null;
+  const bk = readAuthBackup(); if(!bk) return null;
+  try{
+    // 把备份会话写回 SDK 的存储键，再走 getSession() → ensure() → refreshOnce 静默续期
+    localStorage.setItem(SDK_SESSION_KEY, JSON.stringify({
+      accessToken: bk.accessToken, refreshToken: bk.refreshToken,
+      expiresAt: bk.expiresAt || 0, user: bk.user,
+    }));
+    const r = await cloud.auth.getSession();
+    if(r && r.data && r.data.user){ backupAuthSession(r.data); return r.data; }
+  }catch(e){}
+  clearAuthBackup();
+  return null;
+}
+let _cloudKeepaliveTimer = null;
+function startCloudKeepalive(){
+  if(_cloudKeepaliveTimer) return;
+  _cloudKeepaliveTimer = setInterval(() => {
+    const cloud = getCloud(); if(!cloud || !_cloudUser) return;
+    cloud.auth.getSession().then(r => {
+      if(r && r.data && r.data.user) backupAuthSession(r.data);
+    }).catch(() => {});
+  }, 20 * 60 * 1000);
+  // 切回前台立即续一次（移动端/后台标签页休眠后回来自动保持登录）
+  document.addEventListener('visibilitychange', () => {
+    if(document.visibilityState !== 'visible' || !_cloudUser) return;
+    const cloud = getCloud(); if(!cloud) return;
+    cloud.auth.getSession().then(r => { if(r && r.data && r.data.user) backupAuthSession(r.data); }).catch(() => {});
+  });
+}
 function setCloudStatus(text, kind){
   const el = $('cloud-status'); if(!el) return;
   el.textContent = text || '';
@@ -315,12 +378,18 @@ async function syncFromCloud(){
   let session = null;
   try{ const r = await cloud.auth.getSession(); session = r.data; if(r.error) session = null; }catch(e){ session = null; }
   if(!session){
+    // 会话丢失（SDK 存储被清/token 过期 abandon）→ 尝试用本地备份静默恢复登录态
+    session = await restoreAuthSession();
+  }
+  if(!session){
     _cloudUser = null;
     // 不自动弹窗（避免每次刷新都打断）；把状态条变为可点击的登录入口，用户需要时再登录
     setCloudStatus('未登录 · 点击此处登录同步云端', 'warn');
     return;
   }
   _cloudUser = session.user || null;
+  backupAuthSession(session);   // 保持登录：每次拿到有效会话都刷新本地备份
+  startCloudKeepalive();        // 页面打开期间定时续期，避免长期闲置后 refreshToken 失效
   hideLoginOverlay();
   setCloudStatus('已登录 · 同步云端…', 'ok');
   try{
@@ -487,6 +556,7 @@ async function handlePasswordLogin(){
 }
 async function handleLogout(){
   const cloud = getCloud(); if(cloud){ try{ await cloud.auth.signOut(); }catch(e){} }
+  clearAuthBackup();   // 主动退出 → 清除会话备份，防止下次启动被静默恢复
   _cloudUser = null;
   setCloudStatus('未登录 · 数据仅存本机', 'warn');
   showLoginOverlay();
@@ -2058,8 +2128,11 @@ function applyDetailSort(list){
 function filterOrdersByTab(key){
   const orders = state.orders || [];
   const latest = latestOrderDate();
-  // 营销部·初诊 / 营销部·类型空白 页签改用「客户级 30天初诊集合」门控（见下方 filter），
-  // 不再按订单日期窗口过滤——与 ③ 报表 / ⑤ 清单口径完全一致（避免「初诊在窗口外、消费在窗口内」误计入）。
+  // 日期筛选的生效日期需【先于】页签筛选算出：营销部·初诊页签的初诊客户集合
+  // 以「筛选日期」为截止日构建（与 ③ 报表每日列 calculate(g, cutoff=当日) 完全一致）。
+  // '__latest__'=默认当日（最新日期），''=全部日期（此时用报表截止日，对应月累计口径）
+  let effDate = detailDate;
+  if(effDate === '__latest__') effDate = latest;
   let list;
   if(key === 'all') list = orders.slice();
   else if(key === 'today') list = orders.slice(); // 当日口径由日期筛选（默认当日）承担
@@ -2080,10 +2153,15 @@ function filterOrdersByTab(key){
     list = orders.filter(r=>{ const m=String(r.memberNo||'').trim(); return m && hit.has(fmtDate(r.payTime)+'|'+m); });
   }
   else if(key === 'yingxiao') list = orders.filter(r => chanHas(r,'营销部') || isRecToYingxiao(r));
-  // 营销部·初诊：与 ③ 报表 / ⑤ 清单口径完全一致——
-  // 「30天内营销部初诊客户」（mktFirstKeysCached，客户级集合）的【全部】营销部订单明细
-  // （不限到访类型：初诊/复诊/空白均计入），保证页签「合计现款」= 当日报表营销部总金额。
-  else if(key === 'yx_chuzhen') list = orders.filter(r => (chanHas(r,'营销部') || isRecToYingxiao(r)) && mktFirstKeysCached().has(mktFirstClientKey(r)));
+  // 营销部·初诊：与 ③ 报表每日列口径完全一致——
+  // 以「筛选日期」为截止日构建「30天内营销部初诊客户」集合（buildMktFirstKeys 语义：
+  // 窗口内有任一营销部初诊的客户即入集合），集合内客户的【全部】营销部订单明细计入
+  // （不限到访类型：初诊/复诊/空白均计入，即"30天内有初诊的客户多次到访都核算为初诊业绩"）。
+  // 日期筛选=某日 d 时 → 集合截止=d，与报表 d 日列逐笔一致；全部日期 → 集合截止=报表截止日（月累计口径）。
+  else if(key === 'yx_chuzhen'){
+    const gateSet = effDate ? buildMktFirstKeys(orders, new Date(effDate)) : mktFirstKeysCached();
+    list = orders.filter(r => (chanHas(r,'营销部') || isRecToYingxiao(r)) && gateSet.has(mktFirstClientKey(r)));
+  }
   // 营销部·类型空白：审计视图——营销部渠道下到访类型空白（未填写）的【全部】订单，
   // 不受「30天初诊客户」集合限制（2026-10-13 需求：10月闫语函/冯梓芯/魏周朝等无初诊记录的
   // 空白类型订单需在此页签可见；此类客户在报表中落「其他」，不影响营销部业绩金额）。
@@ -2096,10 +2174,8 @@ function filterOrdersByTab(key){
   else if(key === 'staff')    list = orders.filter(r => chanHas(r,'公司所有') && ((r.channelL2||'').includes('员工本人及家属') || (r.channelL3||'').includes('员工本人及家属')));
   else if(key === 'steward')  list = orders.filter(r => isSteward(r)); // 管家部：开单咨询师口径 + 渠道兜底（全月审计，不限于当日）
   else list = orders.slice();
-  // 月度 / 日期 筛选叠加（与标签取交集）。'__latest__'=默认当日（最新日期），''=全部日期
+  // 月度 / 日期 筛选叠加（与标签取交集）。effDate 已在函数开头算出（供 yx_chuzhen 集合门控复用）
   if(detailMonth) list = list.filter(r => r.payTime && fmtMonth(r.payTime) === detailMonth);
-  let effDate = detailDate;
-  if(effDate === '__latest__') effDate = latest;
   if(effDate) list = list.filter(r => r.payTime && fmtDate(r.payTime) === effDate);
   // 字段筛选叠加（展示的全部字段）：姓名/会员号模糊包含，其余精确匹配；收款时间用月度/日期承担，VAB 按命中状态
   const f = detailFilters || {};
@@ -2294,10 +2370,12 @@ function renderImportDetails(){
   const activeFieldCount = Object.values(detailFilters||{}).filter(Boolean).length;
   const filterNote = (detailMonth?('月度 '+detailMonth+' · '):'')+dateNote
     +(activeFieldCount?('字段筛选 '+activeFieldCount+' 项 · '):'');
-  // 营销部两类页签的口径说明：初诊=30天内初诊客户（与③报表·⑤清单一致）；类型空白=审计视图（全部空白类型订单）
-  const mw = mktWindow();
+  // 营销部两类页签的口径说明：初诊=30天内初诊客户（窗口随筛选日期联动，与③报表每日列一致）；
+  // 类型空白=审计视图（全部空白类型订单）
+  const noteCut = (() => { try { return (detailDate==='__latest__'?latest:(detailDate||'')) || (state.cutoffDate||''); } catch(e){ return ''; } })();
+  const mwNote = noteCut ? mktWindow(new Date(noteCut)) : mktWindow();
   const mktTabNote = detailTab === 'yx_chuzhen'
-    ? ('口径：30天内初诊客户（窗口 ' + mw.start + ' ~ ' + mw.end + '，与③报表·⑤清单一致）· ')
+    ? ('口径：30天内初诊客户·多次到访均计初诊业绩（窗口 ' + mwNote.start + ' ~ ' + mwNote.end + '，随筛选日期联动，与③报表当日列一致）· ')
     : (detailTab === 'yx_blank'
       ? '口径：营销部渠道·到访类型空白（全部订单审计视图，不受初诊客户集合限制）· ' : '');
   // 手机端排序条（桌面端隐藏，由表格表头排序代替）
@@ -2573,8 +2651,8 @@ function latestOrderDate(){
 // 口径：来源渠道=营销部（与「营销部」页签一致，含推荐→营销部落位）且 到访类型=初诊；
 // 近30天 = 截止日起往前30天（含两端，可跨月）；按客户去重（会员号优先，无会员号按姓名）。
 // 近30天窗口（截止日起往前30天，含两端，可跨月）：⑤清单 / ③报表门槛 / ⑥营销部页签 统一口径
-function mktWindow(){
-  const cutoff = state.cutoffDate ? new Date(state.cutoffDate) : new Date();
+function mktWindow(cutoffOverride){
+  const cutoff = cutoffOverride || (state.cutoffDate ? new Date(state.cutoffDate) : new Date());
   if(isNaN(cutoff.getTime())) return { start:'', end:'' };
   return { start: fmtDate(new Date(cutoff.getTime() - 30*86400000)), end: fmtDate(cutoff) };
 }
