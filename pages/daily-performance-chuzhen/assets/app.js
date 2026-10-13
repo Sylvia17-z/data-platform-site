@@ -510,10 +510,20 @@ function showLoginOverlay(){
   const el = $('login-overlay'); if(el) el.style.display = 'flex';
   const lo = $('login-logout'); if(lo) lo.style.display = _cloudUser ? '' : 'none';
   // 修改密码区始终显示（2026-10-13：未登录也显示入口；未登录点击会提示先登录）
-  const cpBtn = $('login-change-pwd'); if(cpBtn) cpBtn.style.display = '';
-  const cpRow = $('login-pwdchange-row'); if(cpRow) cpRow.style.display = '';
+  // 修改密码区：仅登录后显示；未登录显示「忘记密码？」重置入口（2026-10-13 口径）
+  const cpBtn = $('login-change-pwd'); if(cpBtn) cpBtn.style.display = _cloudUser ? '' : 'none';
+  const cpRow = $('login-pwdchange-row'); if(cpRow) cpRow.style.display = _cloudUser ? '' : 'none';
+  // 忘记密码（重置）入口：仅未登录显示；重置流程区随 _pwdReset 状态显隐
+  const fg = $('login-forgot'); if(fg) fg.style.display = _cloudUser ? 'none' : '';
+  const rbtn = $('login-reset-btn'); if(rbtn) rbtn.style.display = (!_cloudUser && _pwdReset) ? '' : 'none';
+  const rrow = $('login-reset-row'); if(rrow) rrow.style.display = (!_cloudUser && _pwdReset) ? '' : 'none';
 }
 function hideLoginOverlay(){ const el = $('login-overlay'); if(el) el.style.display = 'none'; }
+
+// 忘记密码（重置）流程状态：{ email, updateUser }，由 cloud.auth.resetPasswordForEmail 返回
+let _pwdReset = null;
+// 测试钩子（仅供 E2E 注入模拟 updateUser；不影响正常流程）
+if(typeof window !== 'undefined'){ window.__PWD_RESET = { get: () => _pwdReset, set: v => { _pwdReset = v; } }; }
 
 // 修改密码：SDK 流程 = 旧密码换 sudo_token → PATCH 新密码（cloud.auth.resetPasswordForOld）
 async function handleChangePassword(){
@@ -539,6 +549,54 @@ async function handleChangePassword(){
     showToast('修改失败：' + ((e && e.message) || '未知错误'), 'err', 6000);
   }finally{
     if(btn){ btn.disabled = false; btn.textContent = '🔑 修改密码'; }
+  }
+}
+// 忘记密码：发送重置验证码（SDK resetPasswordForEmail，usage=PASSWORD_RESET）
+async function handleForgotPassword(){
+  const email = ($('login-email') || {}).value || '';
+  if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)){ showToast('请输入有效的邮箱', 'err'); return; }
+  const cloud = getCloud();
+  if(!cloud){ showToast('云端组件尚未加载完成，请稍候重试', 'err', 6000); return; }
+  const btn = $('login-forgot');
+  if(btn){ btn.disabled = true; btn.textContent = '发送中…'; }
+  try{
+    const r = await cloud.auth.resetPasswordForEmail(email);
+    if(r && r.error){ showToast('重置验证码发送失败：' + (r.error.message || ''), 'err', 6000); return; }
+    if(r && r.data && typeof r.data.updateUser === 'function'){
+      _pwdReset = { email, updateUser: r.data.updateUser };
+      const rrow = $('login-reset-row'); if(rrow) rrow.style.display = '';
+      const rbtn = $('login-reset-btn'); if(rbtn) rbtn.style.display = '';
+      showToast('重置验证码已发送至 ' + email + '，请查收邮箱', 'ok', 6000);
+    } else {
+      showToast('重置流程返回异常，请稍候重试', 'err', 6000);
+    }
+  }catch(e){
+    showToast('重置验证码发送失败：' + ((e && e.message) || '未知错误'), 'err', 6000);
+  }finally{
+    if(btn){ btn.disabled = false; btn.textContent = '忘记密码？'; }
+  }
+}
+// 重置密码：验证码 + 新密码 → updateUser（成功后自动登录）
+async function handleResetPassword(){
+  if(!_pwdReset){ showToast('请先点击「忘记密码？」获取验证码', 'warn'); return; }
+  const code = ($('login-reset-code') || {}).value || '';
+  const pwd = ($('login-reset-pwd') || {}).value || '';
+  if(!code.trim()){ showToast('请输入邮箱验证码', 'warn'); return; }
+  if(!pwd || pwd.length < 6){ showToast('新密码至少 6 位', 'warn'); return; }
+  const btn = $('login-reset-btn');
+  if(btn){ btn.disabled = true; btn.textContent = '提交中…'; }
+  try{
+    const r = await _pwdReset.updateUser({ nonce: code.trim(), password: pwd });
+    if(r && r.error){ showToast('密码重置失败：' + (r.error.message || '请检查验证码'), 'err', 6000); return; }
+    _pwdReset = null;
+    ['login-reset-code','login-reset-pwd'].forEach(id=>{ const el2=$(id); if(el2) el2.value=''; });
+    showToast('密码已重置，已自动登录', 'ok', 6000);
+    hideLoginOverlay();
+    syncFromCloud();
+  }catch(e){
+    showToast('密码重置失败：' + ((e && e.message) || '未知错误'), 'err', 6000);
+  }finally{
+    if(btn){ btn.disabled = false; btn.textContent = '✅ 重置密码'; }
   }
 }
 async function handleSendCode(){
@@ -3608,6 +3666,8 @@ function initApp(){
   const lb4 = $('login-later'); if(lb4) lb4.addEventListener('click', handleLoginLater);
   const lb5 = $('login-logout'); if(lb5) lb5.addEventListener('click', handleLogout);
   const lb6 = $('login-change-pwd'); if(lb6) lb6.addEventListener('click', handleChangePassword);
+  const lb7 = $('login-forgot'); if(lb7) lb7.addEventListener('click', handleForgotPassword);
+  const lb8 = $('login-reset-btn'); if(lb8) lb8.addEventListener('click', handleResetPassword);
   const csEl = $('cloud-status'); if(csEl) csEl.addEventListener('click', () => showLoginOverlay());
   // 首次进入：已登录则拉取云端订单；未登录则把状态条变为登录入口（不强制弹窗打断）
   syncFromCloud();
