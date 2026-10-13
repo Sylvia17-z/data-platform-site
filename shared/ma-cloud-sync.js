@@ -23,6 +23,14 @@
   // 可观测性：E2E/排障用
   window.__MA_SYNC_DEBUG = { started: false, initDone: false, lastError: null, lastAdopt: null, lastPush: null };
 
+  /* 默认管理员（本地内置账号）：假会话无云端权限，云同步整体跳过，数据仅存本机 */
+  function isAdminSession(){
+    try{
+      var s = JSON.parse(localStorage.getItem('site-admin-session') || 'null');
+      return !!(s && s.user && Number(s.expiresAt) > Date.now());
+    }catch(e){ return false; }
+  }
+
   function getCloud(){
     if(cloud) return cloud;
     if(typeof window.WorkBuddyCloud === 'undefined') return null;
@@ -199,6 +207,7 @@
   }
 
   function start(){
+    if(isAdminSession()){ window.__MA_SYNC_DEBUG.adminMode = true; return; }   // 管理员：本地模式
     window.__MA_SYNC_DEBUG.started = true;
     initialSync();
     setInterval(pollTick, POLL_MS);

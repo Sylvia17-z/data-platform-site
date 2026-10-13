@@ -16,6 +16,14 @@
   var SESSION_KEY = 'workbuddy-cloud.session.' + PK;
   var PING_KEY = 'site-auth-ping';
   var LOGIN_URL = '/pages/login/index.html';
+  var ADMIN_KEY = 'site-admin-session';   // 默认管理员本地会话（登录页 seed，30 天）
+
+  function readAdminSession(){
+    try{
+      var s = JSON.parse(localStorage.getItem(ADMIN_KEY) || 'null');
+      return (s && s.user && Number(s.expiresAt) > Date.now()) ? s : null;
+    }catch(e){ return null; }
+  }
 
   /* ---------- SDK 加载（若宿主页已加载则直接复用） ---------- */
   function loadSdk(cb){
@@ -131,6 +139,8 @@
 
   /* ---------- 登录态检查 ---------- */
   async function checkSession(){
+    var admin = readAdminSession();
+    if(admin){ user = admin.user; unlock(); return; }   // 管理员本地会话有效 → 直接解锁（不走云端，避免 SDK 触碰本地假会话）
     var c = getCloud(); if(!c){ setTimeout(function(){ checkSession(); }, 800); return; }
     var session = null;
     try{ var r = await c.auth.getSession(); session = r.data; if(r.error) session = null; }catch(e){ session = null; }
@@ -150,6 +160,7 @@
 
   /* ---------- 动作 ---------- */
   async function actChange(){
+    if(readAdminSession()){ msg('默认管理员为内置本地账号，不支持在线修改密码', true); return; }
     var c = getCloud(); if(!c){ msg('云端组件加载中，请稍候重试', true); return; }
     var o = ($('sa-old-pwd')||{}).value || '', p1 = ($('sa-new-pwd')||{}).value || '', p2 = ($('sa-new-pwd2')||{}).value || '';
     if(!o){ msg('请输入当前密码', true); return; }
@@ -167,7 +178,7 @@
     var c = getCloud(); if(!c) return;
     try{ await c.auth.signOut(); }catch(e){}
     user = null;
-    try{ localStorage.removeItem(SESSION_KEY); localStorage.removeItem('dp_auth_backup'); }catch(e){}
+    try{ localStorage.removeItem(SESSION_KEY); localStorage.removeItem('dp_auth_backup'); localStorage.removeItem(ADMIN_KEY); }catch(e){}
     try{ localStorage.setItem(PING_KEY, String(Date.now())); }catch(e){}   // 通知其他 iframe/标签页
     if(panel) panel.style.display = 'none';
     if(badge) badge.style.display = 'none';
