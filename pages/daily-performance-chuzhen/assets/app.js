@@ -509,9 +509,9 @@ async function clearOrdersInCloud(){
 function showLoginOverlay(){
   const el = $('login-overlay'); if(el) el.style.display = 'flex';
   const lo = $('login-logout'); if(lo) lo.style.display = _cloudUser ? '' : 'none';
-  // 已登录时显示「修改密码」区（2026-10-13 需求：云端同步支持修改密码）
-  const cpBtn = $('login-change-pwd'); if(cpBtn) cpBtn.style.display = _cloudUser ? '' : 'none';
-  const cpRow = $('login-pwdchange-row'); if(cpRow) cpRow.style.display = _cloudUser ? '' : 'none';
+  // 修改密码区始终显示（2026-10-13：未登录也显示入口；未登录点击会提示先登录）
+  const cpBtn = $('login-change-pwd'); if(cpBtn) cpBtn.style.display = '';
+  const cpRow = $('login-pwdchange-row'); if(cpRow) cpRow.style.display = '';
 }
 function hideLoginOverlay(){ const el = $('login-overlay'); if(el) el.style.display = 'none'; }
 
