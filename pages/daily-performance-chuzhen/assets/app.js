@@ -2080,11 +2080,13 @@ function filterOrdersByTab(key){
     list = orders.filter(r=>{ const m=String(r.memberNo||'').trim(); return m && hit.has(fmtDate(r.payTime)+'|'+m); });
   }
   else if(key === 'yingxiao') list = orders.filter(r => chanHas(r,'营销部') || isRecToYingxiao(r));
-  // 营销部·初诊 / 营销部·类型空白：与 ③ 报表 / ⑤ 清单口径完全一致——
-  // 仅「30天内营销部初诊客户」（mktFirstKeysCached，客户级集合）的消费明细才会展示，
+  // 营销部·初诊：与 ③ 报表 / ⑤ 清单口径完全一致——
+  // 「30天内营销部初诊客户」（mktFirstKeysCached，客户级集合）的【全部】营销部订单明细
+  // （不限到访类型：初诊/复诊/空白均计入），保证页签「合计现款」= 当日报表营销部总金额。
   // 不再按订单日期窗口过滤（旧口径会让「初诊在窗口外、消费在窗口内」的订单误计入，
-  // 与报表 month/day 列只认客户级初诊门槛相矛盾）。到访类型二分：初诊 / 空白（未填写）。
-  else if(key === 'yx_chuzhen') list = orders.filter(r => (chanHas(r,'营销部') || isRecToYingxiao(r)) && (r.visitType||'').trim() === '初诊' && mktFirstKeysCached().has(mktFirstClientKey(r)));
+  // 与报表 month/day 列只认客户级初诊门槛相矛盾）。
+  // 营销部·类型空白：上述客户的营销部订单中，到访类型空白（未填写）的子集。
+  else if(key === 'yx_chuzhen') list = orders.filter(r => (chanHas(r,'营销部') || isRecToYingxiao(r)) && mktFirstKeysCached().has(mktFirstClientKey(r)));
   else if(key === 'yx_blank')   list = orders.filter(r => (chanHas(r,'营销部') || isRecToYingxiao(r)) && !(r.visitType||'').trim() && mktFirstKeysCached().has(mktFirstClientKey(r)));
   // 推荐页签：渠道分类=推荐 的订单（用于核对新归类逻辑落位：一级含营销部→营销部，含商务部→商务部，未匹配→其他）
   else if(key === 'recommend') list = orders.filter(r => (r.channelClass||'').trim() === '推荐');
@@ -2106,8 +2108,6 @@ function filterOrdersByTab(key){
   ['channelClass','channelL1','channelL2','visitType','consultant','cashier'].forEach(k=>{
     if(f[k]) list=list.filter(r=>String(r[k]||'').trim()===f[k]);
   });
-  if(f.cashPay) list=list.filter(r=>fmt(r.cashPay)===f.cashPay);
-  if(f.assetDeduct) list=list.filter(r=>fmt(r.assetDeduct)===f.assetDeduct);
   if(f.dept) list=list.filter(r=>effectiveDept(r)===f.dept);
   if(f.vab==='hit') list=list.filter(r=>isVabMember(r.memberNo));
   else if(f.vab==='miss') list=list.filter(r=>!isVabMember(r.memberNo));
@@ -2239,10 +2239,6 @@ function renderImportDetails(){
   const vtVals = [...new Set(distinct('visitType').concat(
     ['初诊','复诊'].filter(v=>!distinct('visitType').includes(v))))].sort((a,b)=>a.localeCompare(b,'zh-CN'));
   const vtOptions = vtVals.map(v=>`<option value="${esc(v)}"></option>`).join('');
-  const cashVals = [...new Set(orders.map(r=>fmt(r.cashPay)))]
-    .sort((a,b)=>(Number(String(a).replace(/,/g,''))||0)-(Number(String(b).replace(/,/g,''))||0));
-  const assetVals = [...new Set(orders.map(r=>fmt(r.assetDeduct)))]
-    .sort((a,b)=>(Number(String(a).replace(/,/g,''))||0)-(Number(String(b).replace(/,/g,''))||0));
   const fText = (key,label) => `<label class="detail-filter">${label}`
     + `<input type="text" class="detail-select" data-dfilter-text="${key}" value="${esc(detailFilters[key]||'')}" `
     + `placeholder="含…" style="min-width:88px;"></label>`;
@@ -2273,8 +2269,6 @@ function renderImportDetails(){
       ${fSel('visitType','到访类型',distinct('visitType'))}
       ${fSel('consultant','咨询师',distinct('consultant'))}
       ${fSel('cashier','收款员工',distinct('cashier'))}
-      ${fSel('cashPay','现款支付',cashVals)}
-      ${fSel('assetDeduct','资产抵扣金额',assetVals)}
       ${fSel('dept','报表归属',DEPT_OPTIONS)}
       <label class="detail-filter">VAB
         <select class="detail-select" data-dfilter="vab">
