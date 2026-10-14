@@ -339,6 +339,14 @@
   .cloud-err{color:var(--c-error);}
   /* 登录浮层（复用 .modal-mask/.modal-box 体系，单独抬高层级避免被其它浮层遮挡） */
 </style>
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#123c73">
+<link rel="apple-touch-icon" href="/icons/icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="海蓓医管">
+<script>if('serviceWorker' in navigator){ window.addEventListener('load', function(){ navigator.serviceWorker.register('/sw.js').catch(function(){}); }); }</script>
 </head>
 <body data-page-node-id="WKMgpaWQmsfgWtxyKz9iJd">
 

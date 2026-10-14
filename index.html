@@ -7,6 +7,14 @@
   <!-- SITE_VER 为唯一权威版本号；每次重新发布时同步修改此处与 app.js 的消费逻辑，用于穿透浏览器启发式缓存 -->
   <script>window.SITE_VER = '20261012a';</script>
   <link rel="stylesheet" href="style.css?v=20261012a" />
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#123c73">
+<link rel="apple-touch-icon" href="/icons/icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="海蓓医管">
+<script>if('serviceWorker' in navigator){ window.addEventListener('load', function(){ navigator.serviceWorker.register('/sw.js').catch(function(){}); }); }</script>
 </head>
 <body>
   <div class="app">
