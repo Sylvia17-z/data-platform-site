@@ -384,14 +384,13 @@ async function syncFromCloud(){
   if(!session){
     _cloudUser = null;
     // 不自动弹窗（避免每次刷新都打断）；把状态条变为可点击的登录入口，用户需要时再登录
-    setCloudStatus('未登录 · 点击此处登录同步云端', 'warn');
+    setCloudStatus('未登录 · 未同步云端', 'warn');
     return;
   }
   _cloudUser = session.user || null;
   backupAuthSession(session);   // 保持登录：每次拿到有效会话都刷新本地备份
   startCloudKeepalive();        // 页面打开期间定时续期，避免长期闲置后 refreshToken 失效
-  hideLoginOverlay();
-  setCloudStatus('已登录 · 同步云端（点击可修改密码/退出）', 'ok');
+  setCloudStatus('已登录 · 同步云端', 'ok');
   try{
     const { data, error } = await cloud.database.from('dp_orders')
       .select('id, payload, updated_at').order('updated_at', { ascending:false }).limit(1);
@@ -423,13 +422,13 @@ async function syncFromCloud(){
         state.ordersTs = cloudTs || Date.now();
         try{ localStorage.setItem(ORDERS_STORAGE_KEY, JSON.stringify(data2.payload)); }catch(e){}
         if(typeof runRestoredRecompute === 'function') runRestoredRecompute();
-        setCloudStatus('已同步云端（' + cloudCnt + ' 条）· 点击可修改密码/退出', 'ok');
+        setCloudStatus('已同步云端（' + cloudCnt + ' 条）', 'ok');
       }else{
         // 本地更新 → 覆盖云端，避免云端长期停留在旧数据导致下次刷新又倒退
         if(localCnt > 0){
           await saveOrdersToCloud(true);
         }else{
-          setCloudStatus('已同步云端（' + cloudCnt + ' 条）· 点击可修改密码/退出', 'ok');
+          setCloudStatus('已同步云端（' + cloudCnt + ' 条）', 'ok');
         }
       }
     }else if(state.orders.length > 0){
@@ -485,7 +484,7 @@ async function saveOrdersToCloud(force){
         if(error){ setCloudStatus('云端保存失败：' + (error.message || ''), 'err'); return; }
       }
       state.ordersTs = Number(payload.ts) || Date.now();
-      setCloudStatus('已同步云端（' + payload.orders.length + ' 条）· 点击可修改密码/退出', 'ok');
+      setCloudStatus('已同步云端（' + payload.orders.length + ' 条）', 'ok');
     }catch(e){
       setCloudStatus('云端保存异常：' + (e && e.message ? e.message : '网络错误'), 'err');
     }
@@ -505,151 +504,7 @@ async function clearOrdersInCloud(){
   }catch(e){}
 }
 
-/* ---- 登录浮层 ---- */
-function showLoginOverlay(){
-  const el = $('login-overlay'); if(el) el.style.display = 'flex';
-  const lo = $('login-logout'); if(lo) lo.style.display = _cloudUser ? '' : 'none';
-  // 修改密码区始终显示（2026-10-13：未登录也显示入口；未登录点击会提示先登录）
-  // 修改密码区：仅登录后显示；未登录显示「忘记密码？」重置入口（2026-10-13 口径）
-  const cpBtn = $('login-change-pwd'); if(cpBtn) cpBtn.style.display = _cloudUser ? '' : 'none';
-  const cpRow = $('login-pwdchange-row'); if(cpRow) cpRow.style.display = _cloudUser ? '' : 'none';
-  // 忘记密码（重置）入口：仅未登录显示；重置流程区随 _pwdReset 状态显隐
-  const fg = $('login-forgot'); if(fg) fg.style.display = _cloudUser ? 'none' : '';
-  const rbtn = $('login-reset-btn'); if(rbtn) rbtn.style.display = (!_cloudUser && _pwdReset) ? '' : 'none';
-  const rrow = $('login-reset-row'); if(rrow) rrow.style.display = (!_cloudUser && _pwdReset) ? '' : 'none';
-}
-function hideLoginOverlay(){ const el = $('login-overlay'); if(el) el.style.display = 'none'; }
-
-// 忘记密码（重置）流程状态：{ email, updateUser }，由 cloud.auth.resetPasswordForEmail 返回
-let _pwdReset = null;
-// 测试钩子（仅供 E2E 注入模拟 updateUser；不影响正常流程）
-if(typeof window !== 'undefined'){ window.__PWD_RESET = { get: () => _pwdReset, set: v => { _pwdReset = v; } }; }
-
-// 修改密码：SDK 流程 = 旧密码换 sudo_token → PATCH 新密码（cloud.auth.resetPasswordForOld）
-async function handleChangePassword(){
-  const oldPwd = ($('login-old-pwd') || {}).value || '';
-  const p1 = ($('login-new-pwd') || {}).value || '';
-  const p2 = ($('login-new-pwd2') || {}).value || '';
-  if(!_cloudUser){ showToast('请先登录后再修改密码', 'warn'); return; }
-  if(!oldPwd){ showToast('请输入当前密码', 'warn'); return; }
-  if(!p1 || p1.length < 6){ showToast('新密码至少 6 位', 'warn'); return; }
-  if(p1 !== p2){ showToast('两次输入的新密码不一致', 'err'); return; }
-  if(p1 === oldPwd){ showToast('新密码不能与当前密码相同', 'warn'); return; }
-  const cloud = getCloud();
-  if(!cloud){ showToast('云端组件尚未加载完成，请稍候重试', 'err'); return; }
-  const btn = $('login-change-pwd');
-  if(btn){ btn.disabled = true; btn.textContent = '提交中…'; }
-  try{
-    const r = await cloud.auth.resetPasswordForOld({ oldPassword: oldPwd, newPassword: p1 });
-    if(r && r.error){ showToast('修改失败：' + (r.error.message || '请检查当前密码是否正确'), 'err', 6000); return; }
-    ['login-old-pwd','login-new-pwd','login-new-pwd2'].forEach(id=>{ const el2=$(id); if(el2) el2.value=''; });
-    showToast('密码修改成功，下次登录请使用新密码', 'ok', 6000);
-    hideLoginOverlay();
-  }catch(e){
-    showToast('修改失败：' + ((e && e.message) || '未知错误'), 'err', 6000);
-  }finally{
-    if(btn){ btn.disabled = false; btn.textContent = '🔑 修改密码'; }
-  }
-}
-// 忘记密码：发送重置验证码（SDK resetPasswordForEmail，usage=PASSWORD_RESET）
-async function handleForgotPassword(){
-  const email = ($('login-email') || {}).value || '';
-  if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)){ showToast('请输入有效的邮箱', 'err'); return; }
-  const cloud = getCloud();
-  if(!cloud){ showToast('云端组件尚未加载完成，请稍候重试', 'err', 6000); return; }
-  const btn = $('login-forgot');
-  if(btn){ btn.disabled = true; btn.textContent = '发送中…'; }
-  try{
-    const r = await cloud.auth.resetPasswordForEmail(email);
-    if(r && r.error){ showToast('重置验证码发送失败：' + (r.error.message || ''), 'err', 6000); return; }
-    if(r && r.data && typeof r.data.updateUser === 'function'){
-      _pwdReset = { email, updateUser: r.data.updateUser };
-      const rrow = $('login-reset-row'); if(rrow) rrow.style.display = '';
-      const rbtn = $('login-reset-btn'); if(rbtn) rbtn.style.display = '';
-      showToast('重置验证码已发送至 ' + email + '，请查收邮箱', 'ok', 6000);
-    } else {
-      showToast('重置流程返回异常，请稍候重试', 'err', 6000);
-    }
-  }catch(e){
-    showToast('重置验证码发送失败：' + ((e && e.message) || '未知错误'), 'err', 6000);
-  }finally{
-    if(btn){ btn.disabled = false; btn.textContent = '忘记密码？'; }
-  }
-}
-// 重置密码：验证码 + 新密码 → updateUser（成功后自动登录）
-async function handleResetPassword(){
-  if(!_pwdReset){ showToast('请先点击「忘记密码？」获取验证码', 'warn'); return; }
-  const code = ($('login-reset-code') || {}).value || '';
-  const pwd = ($('login-reset-pwd') || {}).value || '';
-  if(!code.trim()){ showToast('请输入邮箱验证码', 'warn'); return; }
-  if(!pwd || pwd.length < 6){ showToast('新密码至少 6 位', 'warn'); return; }
-  const btn = $('login-reset-btn');
-  if(btn){ btn.disabled = true; btn.textContent = '提交中…'; }
-  try{
-    const r = await _pwdReset.updateUser({ nonce: code.trim(), password: pwd });
-    if(r && r.error){ showToast('密码重置失败：' + (r.error.message || '请检查验证码'), 'err', 6000); return; }
-    _pwdReset = null;
-    ['login-reset-code','login-reset-pwd'].forEach(id=>{ const el2=$(id); if(el2) el2.value=''; });
-    showToast('密码已重置，已自动登录', 'ok', 6000);
-    hideLoginOverlay();
-    syncFromCloud();
-  }catch(e){
-    showToast('密码重置失败：' + ((e && e.message) || '未知错误'), 'err', 6000);
-  }finally{
-    if(btn){ btn.disabled = false; btn.textContent = '✅ 重置密码'; }
-  }
-}
-async function handleSendCode(){
-  const email = ($('login-email') || {}).value || '';
-  if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)){ showToast('请输入有效的邮箱', 'err'); return; }
-  const cloud = getCloud();
-  if(!cloud){ showToast('云端组件尚未加载完成（网络不佳时会自动切换备用源），请稍候几秒后重试或刷新页面', 'err', 6000); return; }
-  const sent = await cloud.auth.sendOtp({ email });
-  if(sent.error){ showToast('验证码发送失败：' + (sent.error.message || ''), 'err'); return; }
-  _pendingOtp = { email, verificationId: sent.data && sent.data.verificationId, isExistingUser: sent.data && sent.data.isExistingUser };
-  showToast('验证码已发送至 ' + email, 'ok');
-  const row = $('login-code-row'); if(row) row.style.display = '';
-}
-async function handleVerify(){
-  const code = ($('login-code') || {}).value || '';
-  if(!_pendingOtp){ showToast('请先获取验证码', 'err'); return; }
-  const cloud = getCloud();
-  if(!cloud){ showToast('云端组件尚未加载完成，请稍候几秒后重试或刷新页面', 'err', 6000); return; }
-  const pwd = ($('login-pwd') || {}).value || '';
-  const params = {
-    email: _pendingOtp.email,
-    verificationId: _pendingOtp.verificationId,
-    isExistingUser: _pendingOtp.isExistingUser,
-    token: code,
-  };
-  // 新账号注册需填密码；已注册用户仅凭验证码即可登录
-  if(!_pendingOtp.isExistingUser) params.password = pwd;
-  const done = await cloud.auth.verifyOtp(params);
-  if(done.error){
-    showToast('验证失败：' + (done.error.message || (pwd ? '验证码或密码错误' : '新账号请同时填写密码')), 'err');
-    return;
-  }
-  _pendingOtp = null;
-  await syncFromCloud();
-}
-async function handlePasswordLogin(){
-  const email = ($('login-email') || {}).value || '';
-  const pwd = ($('login-pwd') || {}).value || '';
-  if(!email || !pwd){ showToast('请输入邮箱与密码', 'err'); return; }
-  const cloud = getCloud();
-  if(!cloud){ showToast('云端组件尚未加载完成，请稍候几秒后重试或刷新页面', 'err', 6000); return; }
-  const { error } = await cloud.auth.signInWithPassword({ email, password: pwd });
-  if(error){ showToast('登录失败：' + (error.message || '账号或密码错误'), 'err'); return; }
-  await syncFromCloud();
-}
-async function handleLogout(){
-  const cloud = getCloud(); if(cloud){ try{ await cloud.auth.signOut(); }catch(e){} }
-  clearAuthBackup();   // 主动退出 → 清除会话备份，防止下次启动被静默恢复
-  _cloudUser = null;
-  setCloudStatus('未登录 · 数据仅存本机', 'warn');
-  showLoginOverlay();
-}
-function handleLoginLater(){ hideLoginOverlay(); }
+/* 登录浮层已移除（2026-10-14）：登录/改密/退出统一走整站登录页 + 右下角账号面板（shared/auth-gate.js） */
 
 function clearManualOverrides(){
   state.manual = { month:{}, daily:{} };
@@ -3659,16 +3514,7 @@ function initApp(){
   // 调试条已按需求下线（2026-09-29），仅保持横幅隐藏
   refreshDebug();
 
-  // ---- 云端：绑定登录浮层按钮；未登录时点击状态条也可打开浮层 ----
-  const lb1 = $('login-send-code'); if(lb1) lb1.addEventListener('click', handleSendCode);
-  const lb2 = $('login-verify'); if(lb2) lb2.addEventListener('click', handleVerify);
-  const lb3 = $('login-pwd-login'); if(lb3) lb3.addEventListener('click', handlePasswordLogin);
-  const lb4 = $('login-later'); if(lb4) lb4.addEventListener('click', handleLoginLater);
-  const lb5 = $('login-logout'); if(lb5) lb5.addEventListener('click', handleLogout);
-  const lb6 = $('login-change-pwd'); if(lb6) lb6.addEventListener('click', handleChangePassword);
-  const lb7 = $('login-forgot'); if(lb7) lb7.addEventListener('click', handleForgotPassword);
-  const lb8 = $('login-reset-btn'); if(lb8) lb8.addEventListener('click', handleResetPassword);
-  const csEl = $('cloud-status'); if(csEl) csEl.addEventListener('click', () => showLoginOverlay());
+  // ---- 云端：登录/改密/退出已统一至整站登录页与账号面板，页内不再提供登录入口 ----
   // 首次进入：已登录则拉取云端订单；未登录则把状态条变为登录入口（不强制弹窗打断）
   syncFromCloud();
   // SDK 多源回退晚于首帧加载完成时：加载成功→重试云端同步刷新状态条；全部失败→明确提示

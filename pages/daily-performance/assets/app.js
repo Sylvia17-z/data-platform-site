@@ -317,11 +317,10 @@ async function syncFromCloud(){
   if(!session){
     _cloudUser = null;
     // 不自动弹窗（避免每次刷新都打断）；把状态条变为可点击的登录入口，用户需要时再登录
-    setCloudStatus('未登录 · 点击此处登录同步云端', 'warn');
+    setCloudStatus('未登录 · 未同步云端', 'warn');
     return;
   }
   _cloudUser = session.user || null;
-  hideLoginOverlay();
   setCloudStatus('已登录 · 同步云端…', 'ok');
   try{
     const { data, error } = await cloud.database.from('dp_orders')
@@ -436,62 +435,7 @@ async function clearOrdersInCloud(){
   }catch(e){}
 }
 
-/* ---- 登录浮层 ---- */
-function showLoginOverlay(){
-  const el = $('login-overlay'); if(el) el.style.display = 'flex';
-  const lo = $('login-logout'); if(lo) lo.style.display = _cloudUser ? '' : 'none';
-}
-function hideLoginOverlay(){ const el = $('login-overlay'); if(el) el.style.display = 'none'; }
-async function handleSendCode(){
-  const email = ($('login-email') || {}).value || '';
-  if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)){ showToast('请输入有效的邮箱', 'err'); return; }
-  const cloud = getCloud();
-  if(!cloud){ showToast('云端组件尚未加载完成（网络不佳时会自动切换备用源），请稍候几秒后重试或刷新页面', 'err', 6000); return; }
-  const sent = await cloud.auth.sendOtp({ email });
-  if(sent.error){ showToast('验证码发送失败：' + (sent.error.message || ''), 'err'); return; }
-  _pendingOtp = { email, verificationId: sent.data && sent.data.verificationId, isExistingUser: sent.data && sent.data.isExistingUser };
-  showToast('验证码已发送至 ' + email, 'ok');
-  const row = $('login-code-row'); if(row) row.style.display = '';
-}
-async function handleVerify(){
-  const code = ($('login-code') || {}).value || '';
-  if(!_pendingOtp){ showToast('请先获取验证码', 'err'); return; }
-  const cloud = getCloud();
-  if(!cloud){ showToast('云端组件尚未加载完成，请稍候几秒后重试或刷新页面', 'err', 6000); return; }
-  const pwd = ($('login-pwd') || {}).value || '';
-  const params = {
-    email: _pendingOtp.email,
-    verificationId: _pendingOtp.verificationId,
-    isExistingUser: _pendingOtp.isExistingUser,
-    token: code,
-  };
-  // 新账号注册需填密码；已注册用户仅凭验证码即可登录
-  if(!_pendingOtp.isExistingUser) params.password = pwd;
-  const done = await cloud.auth.verifyOtp(params);
-  if(done.error){
-    showToast('验证失败：' + (done.error.message || (pwd ? '验证码或密码错误' : '新账号请同时填写密码')), 'err');
-    return;
-  }
-  _pendingOtp = null;
-  await syncFromCloud();
-}
-async function handlePasswordLogin(){
-  const email = ($('login-email') || {}).value || '';
-  const pwd = ($('login-pwd') || {}).value || '';
-  if(!email || !pwd){ showToast('请输入邮箱与密码', 'err'); return; }
-  const cloud = getCloud();
-  if(!cloud){ showToast('云端组件尚未加载完成，请稍候几秒后重试或刷新页面', 'err', 6000); return; }
-  const { error } = await cloud.auth.signInWithPassword({ email, password: pwd });
-  if(error){ showToast('登录失败：' + (error.message || '账号或密码错误'), 'err'); return; }
-  await syncFromCloud();
-}
-async function handleLogout(){
-  const cloud = getCloud(); if(cloud){ try{ await cloud.auth.signOut(); }catch(e){} }
-  _cloudUser = null;
-  setCloudStatus('未登录 · 数据仅存本机', 'warn');
-  showLoginOverlay();
-}
-function handleLoginLater(){ hideLoginOverlay(); }
+/* 登录浮层已移除（2026-10-14）：登录/退出统一走整站登录页 + 右下角账号面板（shared/auth-gate.js） */
 
 function clearManualOverrides(){
   state.manual = { month:{}, daily:{} };
@@ -2927,12 +2871,7 @@ function initApp(){
   refreshDebug();
 
   // ---- 云端：绑定登录浮层按钮；未登录时点击状态条也可打开浮层 ----
-  const lb1 = $('login-send-code'); if(lb1) lb1.addEventListener('click', handleSendCode);
-  const lb2 = $('login-verify'); if(lb2) lb2.addEventListener('click', handleVerify);
-  const lb3 = $('login-pwd-login'); if(lb3) lb3.addEventListener('click', handlePasswordLogin);
-  const lb4 = $('login-later'); if(lb4) lb4.addEventListener('click', handleLoginLater);
-  const lb5 = $('login-logout'); if(lb5) lb5.addEventListener('click', handleLogout);
-  const csEl = $('cloud-status'); if(csEl) csEl.addEventListener('click', () => { if(!_cloudUser) showLoginOverlay(); });
+  // ---- 云端：登录/退出已统一至整站登录页与账号面板，页内不再提供登录入口 ----
   // 首次进入：已登录则拉取云端订单；未登录则把状态条变为登录入口（不强制弹窗打断）
   syncFromCloud();
   // SDK 多源回退晚于首帧加载完成时：加载成功→重试云端同步刷新状态条；全部失败→明确提示

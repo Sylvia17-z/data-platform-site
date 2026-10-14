@@ -335,13 +335,9 @@
 
   /* ============ 云端同步状态条 ============ */
   .cloud-ok{color:var(--c-success);}
-  .cloud-warn{color:var(--c-warn);cursor:pointer;}
+  .cloud-warn{color:var(--c-warn);}
   .cloud-err{color:var(--c-error);}
   /* 登录浮层（复用 .modal-mask/.modal-box 体系，单独抬高层级避免被其它浮层遮挡） */
-  #login-overlay{z-index:2000;}
-  #login-overlay .modal-box{width:min(420px,94vw);}
-  #login-overlay .modal-title{margin-bottom:10px;}
-  #login-overlay .modal-actions{margin-top:14px;}
 </style>
 </head>
 <body data-page-node-id="WKMgpaWQmsfgWtxyKz9iJd">
@@ -360,7 +356,7 @@
         <label for="file-orders" class="btn btn-primary" data-page-node-id="BQzpkj18KygQmHmAUfLIfE">📁 上传订单表</label>
         <span id="orders-meta" class="file-meta" data-page-node-id="WXC1BHVp6u6ppPQsqfxqkH">未导入</span>
         <span id="save-status" class="file-meta" style="color:#1f8a4a;"></span>
-        <span id="cloud-status" class="file-meta" title="点击可登录并同步云端"></span>
+        <span id="cloud-status" class="file-meta"></span>
         <label style="font-size:12px;margin-left:6px;color:var(--c-muted);" data-page-node-id="3bjnFxlhUdGSfQY30HRnDq">
           <input type="checkbox" id="merge-mode" checked data-page-node-id="HM0RpqKy2mrDSwFwMCFHUO" /> 合并到历史数据（重叠日期覆盖，其它日期保留）
         </label>
@@ -534,49 +530,6 @@
   tryNext();
 })();
 </script>
-
-<!-- 云端登录浮层：未登录时点击状态条打开；登录后订单落地云端，刷新 / 换设备不丢 -->
-<div id="login-overlay" class="modal-mask" style="display:none;">
-  <div class="modal-box" role="dialog" aria-modal="true">
-    <div class="modal-title">🔐 登录以同步云端（刷新 / 换设备不丢数据）</div>
-    <div class="modal-fields">
-      <div class="modal-field">
-        <label>邮箱</label>
-        <input id="login-email" class="modal-input" type="email" placeholder="you@example.com" autocomplete="username" />
-      </div>
-      <div class="modal-field" id="login-code-row" style="display:none;">
-        <label>验证码（获取后填写）</label>
-        <input id="login-code" class="modal-input" type="text" inputmode="numeric" placeholder="6 位验证码" />
-      </div>
-      <div class="modal-field">
-        <label>密码（已注册用户）</label>
-        <input id="login-pwd" class="modal-input" type="password" placeholder="密码" autocomplete="current-password" />
-      </div>
-      <div class="modal-field" id="login-pwdchange-row" style="display:none;">
-        <label>修改密码（登录后可用）</label>
-        <input id="login-old-pwd" class="modal-input" type="password" placeholder="当前密码" autocomplete="current-password" />
-        <input id="login-new-pwd" class="modal-input" type="password" placeholder="新密码（至少 6 位）" autocomplete="new-password" style="margin-top:6px;" />
-        <input id="login-new-pwd2" class="modal-input" type="password" placeholder="确认新密码" autocomplete="new-password" style="margin-top:6px;" />
-      </div>
-      <div class="modal-field" id="login-reset-row" style="display:none;">
-        <label>重置密码（验证码已发送至上方邮箱）</label>
-        <input id="login-reset-code" class="modal-input" type="text" inputmode="numeric" placeholder="6 位验证码" />
-        <input id="login-reset-pwd" class="modal-input" type="password" placeholder="新密码（至少 6 位）" autocomplete="new-password" style="margin-top:6px;" />
-      </div>
-    </div>
-    <div class="modal-actions" style="flex-wrap:wrap;gap:8px;">
-      <button class="btn btn-primary" id="login-send-code" type="button">📧 获取验证码</button>
-      <button class="btn btn-primary" id="login-verify" type="button">✅ 验证并登录</button>
-      <button class="btn" id="login-pwd-login" type="button">🔑 密码登录</button>
-      <button class="btn" id="login-forgot" type="button">忘记密码？</button>
-      <button class="btn" id="login-reset-btn" type="button" style="display:none;">✅ 重置密码</button>
-      <button class="btn" id="login-change-pwd" type="button" style="display:none;">🔑 修改密码</button>
-      <button class="btn" id="login-later" type="button">稍后再说</button>
-      <button class="btn btn-danger" id="login-logout" type="button" style="display:none;margin-left:auto;">退出登录</button>
-    </div>
-    <div class="file-meta" style="margin-top:12px;color:var(--c-muted);">首次使用邮箱即自动注册（新账号请同时填写密码）；数据按账号隔离，仅本人可读取。</div>
-  </div>
-</div>
 
 <!-- 缓存穿透：每次加载追加唯一戳，强制浏览器重新拉取最新 app.js，彻底规避「刷新后仍跑旧脚本导致丢数据」 -->
 <script>document.write('<script src="assets/app.js?v=20260929-06_' + Date.now() + '"><\/script>');</script><script src="/shared/auth-gate.js?v=20261013c"></script>
