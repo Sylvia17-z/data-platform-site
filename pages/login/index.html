@@ -26,6 +26,12 @@
   .brand h1{font-size:19px;color:#123c73;font-weight:700;letter-spacing:.5px;}
   .brand .sub{font-size:12px;color:#8a97a8;margin-top:2px;}
   .divider{height:1px;background:#e4ebf3;margin:16px 0 4px;}
+  .tabs{display:flex;gap:8px;margin:14px 0 2px;}
+  .tab{
+    flex:1;border:1px solid #d5dde7;background:#f4f7fb;color:#5a6b80;border-radius:8px;
+    padding:9px 0;font-size:14px;font-family:inherit;cursor:pointer;text-align:center;transition:all .15s;
+  }
+  .tab.active{background:#123c73;border-color:#123c73;color:#fff;font-weight:600;}
   h3{margin:14px 0 4px;font-size:15px;color:#123c73;}
   label{display:block;font-size:12px;color:#5a6b80;margin:12px 0 4px;}
   input{
@@ -33,6 +39,9 @@
     font-size:14px;font-family:inherit;outline:none;transition:border .15s;
   }
   input:focus{border-color:#2a5da8;}
+  .code-line{display:flex;gap:8px;}
+  .code-line input{flex:1;min-width:0;}
+  .code-line button{flex:none;white-space:nowrap;}
   .row{display:flex;flex-wrap:wrap;gap:10px;margin-top:18px;}
   button{
     border:1px solid #123c73;background:#fff;color:#123c73;border-radius:8px;
@@ -44,7 +53,7 @@
   button:disabled{opacity:.55;cursor:default;}
   .sa-danger{border-color:#c0392b;color:#c0392b;}
   .sa-danger:hover{background:#fdf2f0;}
-  #sa-msg{margin-top:10px;font-size:13px;min-height:18px;color:#c0392b;}
+  #sa-msg,#s-msg{margin-top:10px;font-size:13px;min-height:18px;color:#c0392b;}
   #sa-tip{margin-top:14px;font-size:11px;color:#8a97a8;line-height:1.7;border-top:1px dashed #e4ebf3;padding-top:12px;}
   .foot{margin-top:16px;text-align:center;font-size:11px;color:#a8b4c4;}
 </style>
@@ -55,36 +64,64 @@
     <div class="logo">🏥</div>
     <div>
       <h1>海蓓医管考核数据平台</h1>
-      <div class="sub">登录后可多端同步数据 · 请使用邮箱登录</div>
+      <div class="sub">登录后可多端同步数据 · 请使用邮箱账号</div>
     </div>
   </div>
   <div class="divider"></div>
 
-  <h3>账号登录</h3>
-  <label>邮箱</label>
-  <input id="sa-email" type="email" placeholder="you@example.com" autocomplete="username">
-  <div id="sa-code-wrap" style="display:none;">
-    <label>验证码</label>
-    <input id="sa-code" type="text" inputmode="numeric" placeholder="6 位邮箱验证码">
+  <div class="tabs">
+    <button type="button" class="tab active" id="tab-login">登 录</button>
+    <button type="button" class="tab" id="tab-signup">📝 注册新账号</button>
   </div>
-  <div id="sa-pwd-wrap">
-    <label>密码（已注册用户 / 新用户注册需设置）</label>
-    <input id="sa-pwd" type="password" placeholder="密码（至少 6 位）" autocomplete="current-password">
+
+  <!-- ============ 登录页签 ============ -->
+  <div id="pane-login">
+    <label>邮箱</label>
+    <input id="sa-email" type="email" placeholder="you@example.com" autocomplete="username">
+    <div id="sa-code-wrap" style="display:none;">
+      <label>验证码</label>
+      <input id="sa-code" type="text" inputmode="numeric" placeholder="6 位邮箱验证码">
+    </div>
+    <div id="sa-pwd-wrap">
+      <label>密码（已注册用户 / 新用户注册需设置）</label>
+      <input id="sa-pwd" type="password" placeholder="密码（至少 6 位）" autocomplete="current-password">
+    </div>
+    <div id="sa-reset-wrap" style="display:none;">
+      <label>重置密码（验证码已发送至上方邮箱）</label>
+      <input id="sa-reset-code" type="text" inputmode="numeric" placeholder="6 位邮箱验证码">
+      <input id="sa-reset-pwd" type="password" placeholder="新密码（至少 6 位）" style="margin-top:8px;" autocomplete="new-password">
+    </div>
+    <div id="sa-msg"></div>
+    <div class="row">
+      <button class="sa-pri" id="sa-send">📧 获取验证码</button>
+      <button class="sa-pri" id="sa-verify">✅ 验证并登录</button>
+      <button id="sa-pwdlogin">🔑 密码登录</button>
+      <button id="sa-forgot">忘记密码？</button>
+      <button class="sa-pri" id="sa-reset" style="display:none;">✅ 重置密码</button>
+    </div>
   </div>
-  <div id="sa-reset-wrap" style="display:none;">
-    <label>重置密码（验证码已发送至上方邮箱）</label>
-    <input id="sa-reset-code" type="text" inputmode="numeric" placeholder="6 位邮箱验证码">
-    <input id="sa-reset-pwd" type="password" placeholder="新密码（至少 6 位）" style="margin-top:8px;" autocomplete="new-password">
+
+  <!-- ============ 注册页签 ============ -->
+  <div id="pane-signup" style="display:none;">
+    <label>邮箱（即登录账号）</label>
+    <input id="s-email" type="email" placeholder="you@example.com" autocomplete="username">
+    <label>邮箱验证码（用于验证邮箱真实有效）</label>
+    <div class="code-line">
+      <input id="s-code" type="text" inputmode="numeric" placeholder="6 位邮箱验证码">
+      <button id="s-send" type="button">📧 获取验证码</button>
+    </div>
+    <label>设置密码（至少 6 位）</label>
+    <input id="s-pwd" type="password" placeholder="设置登录密码" autocomplete="new-password">
+    <label>确认密码</label>
+    <input id="s-pwd2" type="password" placeholder="再次输入密码" autocomplete="new-password">
+    <div id="s-msg"></div>
+    <div class="row">
+      <button class="sa-pri" id="s-signup">📝 注册并登录</button>
+    </div>
+    <div class="file-meta" style="margin-top:10px;font-size:11px;color:#8a97a8;line-height:1.7;">注册成功后即自动登录；以后各设备均用「邮箱 + 密码」登录，数据自动多端同步。</div>
   </div>
-  <div id="sa-msg"></div>
-  <div class="row">
-    <button class="sa-pri" id="sa-send">📧 获取验证码</button>
-    <button class="sa-pri" id="sa-verify">✅ 验证并登录</button>
-    <button id="sa-pwdlogin">🔑 密码登录</button>
-    <button id="sa-forgot">忘记密码？</button>
-    <button class="sa-pri" id="sa-reset" style="display:none;">✅ 重置密码</button>
-  </div>
-  <div id="sa-tip">首次使用邮箱即自动注册（新账号请同时填写密码）；数据按账号隔离，仅本人可读取；登录后各页面数据自动云端同步。<br>默认管理员：账号 <b>admin</b> / 密码 <b>123</b>（本地账号，数据存本机）</div>
+
+  <div id="sa-tip">默认管理员：账号 <b>admin</b> / 密码 <b>123</b>（本地账号，数据存本机不同步）；邮箱账号数据按账号隔离，仅本人可读取，登录后各页面数据自动云端同步。</div>
   <div class="foot">海蓓 · 医管考核数据统计</div>
 </div>
 
@@ -121,7 +158,7 @@
     })();
   }
 
-  var cloud = null, pendingOtp = null, pwdReset = null;
+  var cloud = null, pendingOtp = null, pwdReset = null, pendingSignup = null;
   function getCloud(){
     if(cloud) return cloud;
     if(typeof window.WorkBuddyCloud === 'undefined') return null;
@@ -132,10 +169,19 @@
 
   function $(id){ return document.getElementById(id); }
   function msg(t, isErr){ var el = $('sa-msg'); if(el){ el.textContent = t || ''; el.style.color = isErr ? '#c0392b' : '#1a7a3a'; } }
+  function smsg(t, isErr){ var el = $('s-msg'); if(el){ el.textContent = t || ''; el.style.color = isErr ? '#c0392b' : '#1a7a3a'; } }
   function show(el, on){ if(el) el.style.display = on ? '' : 'none'; }
 
+  /* ---------- 页签切换 ---------- */
+  function switchTab(tab){
+    var login = tab === 'login';
+    $('tab-login').className = 'tab' + (login ? ' active' : '');
+    $('tab-signup').className = 'tab' + (login ? '' : ' active');
+    show($('pane-login'), login);
+    show($('pane-signup'), !login);
+  }
+
   function renderMode(){
-    var logged = false;   // 登录页只在未登录态展示表单
     show($('sa-code-wrap'), !!pendingOtp);
     show($('sa-send'), true); show($('sa-verify'), true); show($('sa-pwdlogin'), true);
     show($('sa-forgot'), !pwdReset);
@@ -171,7 +217,7 @@
     }catch(e){}
   }
 
-  /* ---------- 动作 ---------- */
+  /* ---------- 登录动作 ---------- */
   async function actSend(){
     var email = ($('sa-email')||{}).value || '';
     if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)){ msg('请输入有效的邮箱', true); return; }
@@ -245,11 +291,55 @@
     goNext();   // updateUser 成功后 SDK 已自动登录
   }
 
+  /* ---------- 注册动作（邮箱 + 验证码 + 密码） ---------- */
+  async function actSignupSend(){
+    var email = ($('s-email')||{}).value || '';
+    if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)){ smsg('请输入有效的邮箱', true); return; }
+    var c = getCloud(); if(!c){ smsg('云端组件加载中，请稍候重试', true); return; }
+    var b = $('s-send'); b.disabled = true; var old = b.textContent; b.textContent = '发送中…';
+    var sent = await c.auth.sendOtp({ email: email });
+    b.disabled = false; b.textContent = old;
+    if(sent.error){ smsg('验证码发送失败：' + (sent.error.message || ''), true); return; }
+    var isExisting = !!(sent.data && sent.data.isExistingUser);
+    pendingSignup = { email: email, verificationId: sent.data && sent.data.verificationId, isExistingUser: isExisting };
+    smsg(isExisting
+      ? '该邮箱已注册过账号，请切回「登 录」页签用密码或验证码登录'
+      : '验证码已发送至 ' + email + '，请查收邮箱后填写', isExisting);
+  }
+  async function actSignup(){
+    var email = ($('s-email')||{}).value || '';
+    var code = ($('s-code')||{}).value || '';
+    var p1 = ($('s-pwd')||{}).value || '';
+    var p2 = ($('s-pwd2')||{}).value || '';
+    if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)){ smsg('请输入有效的邮箱', true); return; }
+    if(!pendingSignup || pendingSignup.email !== email.trim()){ smsg('请先点击「获取验证码」', true); return; }
+    if(!code.trim()){ smsg('请输入邮箱验证码', true); return; }
+    if(!p1 || p1.length < 6){ smsg('密码至少 6 位', true); return; }
+    if(p1 !== p2){ smsg('两次输入的密码不一致', true); return; }
+    if(pendingSignup.isExistingUser){ smsg('该邮箱已注册过，请切回「登 录」页签', true); return; }
+    var c = getCloud(); if(!c){ smsg('云端组件加载中，请稍候重试', true); return; }
+    var b = $('s-signup'); b.disabled = true; var old = b.textContent; b.textContent = '注册中…';
+    var done = await c.auth.verifyOtp({
+      email: pendingSignup.email, verificationId: pendingSignup.verificationId,
+      isExistingUser: false, token: code.trim(), password: p1
+    });
+    b.disabled = false; b.textContent = old;
+    if(done.error){ smsg('注册失败：' + (done.error.message || '请检查验证码'), true); return; }
+    pendingSignup = null;
+    smsg('注册成功，正在跳转…', false);
+    goNext();   // 注册即自动登录
+  }
+
+  /* ---------- 事件绑定 ---------- */
+  $('tab-login').addEventListener('click', function(){ switchTab('login'); });
+  $('tab-signup').addEventListener('click', function(){ switchTab('signup'); });
   $('sa-send').addEventListener('click', actSend);
   $('sa-verify').addEventListener('click', actVerify);
   $('sa-pwdlogin').addEventListener('click', actPwdLogin);
   $('sa-forgot').addEventListener('click', actForgot);
   $('sa-reset').addEventListener('click', actReset);
+  $('s-send').addEventListener('click', actSignupSend);
+  $('s-signup').addEventListener('click', actSignup);
 
   loadSdk(function(){ renderMode(); checkSession(); });
 })();
