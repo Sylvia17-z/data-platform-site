@@ -38,6 +38,8 @@
   }
   .topbar h1{font-size:20px;margin:0;color:#fff;letter-spacing:.5px;}
   .topbar .sub{color:rgba(255,255,255,.78);font-size:12.5px;}
+  .topbar .home-link{margin-left:auto;color:#fff;opacity:.92;text-decoration:none;font-size:13px;border:1px solid rgba(255,255,255,.45);border-radius:8px;padding:5px 12px;white-space:nowrap;}
+  .topbar .home-link:hover{background:rgba(255,255,255,.14);opacity:1;}
 
   /* 二级子功能面板：同一页面内按 mod 切换（由父框架 postMessage 控制） */
   .mod-panel{display:none;}
@@ -214,6 +216,7 @@
     <div class="topbar">
       <h1>🏥 医管考核数据统计</h1>
       <span class="sub" id="crumbSub">VAB 会员清单 · 收退款明细 · 收费明细三类报表</span>
+      <a class="home-link" href="/" target="_top" title="返回平台首页，查看全部模块">🏠 全部模块</a>
     </div>
 
     <!-- ============ 面板 1：VAB 会员清单 ============ -->
@@ -3452,7 +3455,7 @@ const PROJ_EXCLUDE = {
     refreshStats();               // 基于已恢复的数据生成统计表
   })();
   </script>
-<script src="/shared/auth-gate.js?v=20261014a"></script>
+<script src="/shared/auth-gate.js?v=20261014b"></script>
 <script src="/shared/ma-cloud-sync.js?v=20261013c"></script>
 </body>
 </html>

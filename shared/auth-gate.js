@@ -107,6 +107,7 @@
     + '<div class="sa-row">'
     + '<button class="sa-pri" id="sa-chg">🔑 修改密码</button>'
     + '<button class="sa-danger" id="sa-logout">退出登录</button>'
+    + '<a href="/" target="_top" title="返回平台首页，查看全部模块" style="display:inline-flex;align-items:center;text-decoration:none;border:1px solid #123c73;color:#123c73;border-radius:8px;padding:8px 12px;font-size:13px;">🏠 平台首页</a>'
     + '</div>';
 
   var _uiAppended = false;
