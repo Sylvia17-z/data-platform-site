@@ -131,13 +131,8 @@
   var ENDPOINT = location.origin;
 
   /* ---------- 回跳目标 ---------- */
-  function nextUrl(){
-    var n = '';
-    try{ n = new URLSearchParams(location.search).get('next') || ''; }catch(e){}
-    if(!n || n.charAt(0) !== '/' || n.charAt(1) === '/') n = '/';
-    return n;
-  }
-  function goNext(){ location.replace(nextUrl()); }
+  /* 2026-10-14 口径：登录/注册/重置成功后一律进入平台首页（全部模块入口） */
+  function goNext(){ location.replace('/'); }
 
   /* ---------- SDK 加载 ---------- */
   function loadSdk(cb){
