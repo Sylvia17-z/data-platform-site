@@ -124,7 +124,8 @@
   function msg(t, isErr){ var el = $('sa-msg'); if(el){ el.textContent = t || ''; el.style.color = isErr ? '#c0392b' : '#1a7a3a'; } }
   function fillInfo(){
     var e = $('sa-info-email'), u = $('sa-info-uid'), n = $('sa-badge-name');
-    var email = (user && (user.email || user.name)) || '—';
+    // 服务端用户模型以 username 承载邮箱（验证码登录返回的 user 可能无 email 字段）
+    var email = (user && (user.email || user.username || user.phone || user.name)) || '—';
     if(e) e.textContent = email;
     if(u) u.textContent = (user && user.id) || '—';
     if(n) n.textContent = email;
@@ -170,7 +171,15 @@
     var b = $('sa-chg'); b.disabled = true;
     var r = await c.auth.resetPasswordForOld({ oldPassword: o, newPassword: p1 });
     b.disabled = false;
-    if(r.error){ msg('修改失败：' + (r.error.message || '请检查当前密码'), true); return; }
+    if(r.error){
+      var em = (r.error.message || '') + '';
+      // 「verification failed」= 服务端验当前密码失败：最常见原因是该账号从未设置过密码（仅验证码登录创建）
+      if(/verification/i.test(em) || /验证失败/.test(em)){
+        msg('当前密码验证失败。若该账号从未设置过密码（此前仅用验证码登录），请先退出登录，在登录页点「忘记密码？」通过邮箱验证码设置密码', true);
+        return;
+      }
+      msg('修改失败：' + (em || '请检查当前密码'), true); return;
+    }
     ['sa-old-pwd','sa-new-pwd','sa-new-pwd2'].forEach(function(id){ var el = $(id); if(el) el.value = ''; });
     msg('密码修改成功', false);
   }
