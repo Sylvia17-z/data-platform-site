@@ -995,12 +995,12 @@ function inDateRange(d, cutoff){
 }
 
 // 「营销部初诊客户」键集合（会员号优先，无会员号按姓名）——营销部各类别业绩仅计入这些客户的消费。
-// 窗口：截止日起往前 30 天（含两端，可跨月）——初诊订单落在此窗口内即认定为初诊客户（2026-10-12 需求）。
+// 窗口：滚动 30 天（含两端，可跨月）——起点=截止日往前推 29 天：9.30 → 9.1~9.30，10.1 → 9.2~10.1（2026-10-15 需求）。
 function buildMktFirstKeys(list, cutoff){
   const s = new Set();
   if(!cutoff || isNaN(cutoff.getTime())) return s;
   const end = fmtDate(cutoff);
-  const start = fmtDate(new Date(cutoff.getTime() - 30*86400000));
+  const start = fmtDate(new Date(cutoff.getTime() - 29*86400000));
   (list||[]).forEach(r => {
     if(!r.payTime) return;
     const d = fmtDate(r.payTime);
@@ -2810,11 +2810,11 @@ function latestOrderDate(){
 // ===== ⑤ 营销部初诊客户（近30天）=====
 // 口径：来源渠道=营销部（与「营销部」页签一致，含推荐→营销部落位）且 到访类型=初诊；
 // 近30天 = 截止日起往前30天（含两端，可跨月）；按客户去重（会员号优先，无会员号按姓名）。
-// 近30天窗口（截止日起往前30天，含两端，可跨月）：⑤清单 / ③报表门槛 / ⑥营销部页签 统一口径
+// 近30天滚动窗口（截止日往前推29天，含两端共30天，可跨月）：⑤清单 / ③报表门槛 / ⑥营销部页签 统一口径
 function mktWindow(cutoffOverride){
   const cutoff = cutoffOverride || (state.cutoffDate ? new Date(state.cutoffDate) : new Date());
   if(isNaN(cutoff.getTime())) return { start:'', end:'' };
-  return { start: fmtDate(new Date(cutoff.getTime() - 30*86400000)), end: fmtDate(cutoff) };
+  return { start: fmtDate(new Date(cutoff.getTime() - 29*86400000)), end: fmtDate(cutoff) };
 }
 function mktFirstClientKey(r){
   return String(r.memberNo||'').trim() || ('name:'+String(r.name||'').trim());
@@ -2841,9 +2841,9 @@ function renderMktFirstClients(){
     return;
   }
   const cutoff = state.cutoffDate ? new Date(state.cutoffDate) : new Date();
-  // 近30天滚动窗口（与业绩归属口径一致）：截止日起往前30天，含两端，可跨月
+  // 近30天滚动窗口（与业绩归属口径一致）：截止日往前推29天，含两端共30天，可跨月
   const winEnd = fmtDate(cutoff);
-  const winStart = fmtDate(new Date(cutoff.getTime() - 30*86400000));
+  const winStart = fmtDate(new Date(cutoff.getTime() - 29*86400000));
   const winLabel = '近30天（' + winStart + ' ~ ' + winEnd + '）';
   const inWin = r => { if(!r.payTime) return false; const d = fmtDate(r.payTime); return d >= winStart && d <= winEnd; };
   // 按客户分组（仅营销部初诊订单用于定位客户；消费明细在弹窗内按客户全量口径重新取）
@@ -3088,7 +3088,7 @@ function onMktFirstClick(e){
   const key = tr.dataset.key;
   const cutoff = state.cutoffDate ? new Date(state.cutoffDate) : new Date();
   const winEnd = fmtDate(cutoff);
-  const winStart = fmtDate(new Date(cutoff.getTime() - 30*86400000));
+  const winStart = fmtDate(new Date(cutoff.getTime() - 29*86400000));
   const inWin = r => { if(!r.payTime) return false; const d = fmtDate(r.payTime); return d >= winStart && d <= winEnd; };
   const rows = state.orders.filter(r=>inWin(r) && mktFirstClientKey(r)===key);
   if(!rows.length){ showToast('未找到该客户近30天数据', 'warn'); return; }
