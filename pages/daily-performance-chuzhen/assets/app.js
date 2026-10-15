@@ -2051,7 +2051,7 @@ let detailSort = { key:'', dir:1 }; // 列排序：''=未排序；dir 1=升序 -
 let detailFilters = {}; // 字段筛选：key -> 选中值数组（[]=全部；'__blank__'=该字段为空白）；name/memberNo 模糊字符串；cashPay/assetDeduct 数值字符串（配 *Op）；vab 为 ['hit']/['miss']
 // 多选下拉（msel）运行态：当前展开的 key + 各 key 的候选项缓存（供「全选」用）
 const MS_BLANK = '__blank__';
-const mselRuntime = { open: null, options: {} };
+const mselRuntime = { open: null, options: {}, search: null };  // search={key,q}：面板内关键词（重渲染后恢复）
 
 // 数值比较（2026-10-13 需求：笔数/金额筛选改为「运算符+数值」形式，参考 Excel 筛选）
 // op ∈ eq(等于)/ne(不等于)/gt(大于)/ge(大于或等于)/lt(小于)/le(小于或等于)，''/缺省 = 等于
@@ -2320,15 +2320,32 @@ function mselHTML(key, label, arr){
     items.push('<label class="msel-item"><input type="checkbox" value="'+esc(v)+'" '+(set.includes(v)?'checked':'')+'><span>'+esc(t)+'</span></label>');
   });
   return '<span class="detail-filter"><span class="msel" data-mskey="'+key+'">'
-    + '<button type="button" class="msel-btn detail-select" title="'+esc(label)+'（可多选）">'+esc(mselBtnText(label,key,set))+'<span class="msel-caret">▾</span></button>'
-    + '<span class="msel-panel"><span class="msel-actions">'
+    + '<button type="button" class="msel-btn detail-select" title="'+esc(label)+'（可多选、可搜索）">'+esc(mselBtnText(label,key,set))+'<span class="msel-caret">▾</span></button>'
+    + '<span class="msel-panel"><span class="msel-top">'
+    + '<input type="text" class="msel-search" placeholder="输入关键词筛选选项">'
+    + '<span class="msel-actions">'
     + '<button type="button" class="msel-act" data-msact="all">全选</button>'
     + '<button type="button" class="msel-act" data-msact="none">清空</button>'
-    + '</span>' + items.join('') + '</span></span></span>';
+    + '</span></span>' + items.join('') + '</span></span></span>';
+}
+// 面板内关键词过滤：仅控制候选项显隐，不触发重渲染
+function applyMselSearchFilter(box, q){
+  q = (q || '').toLowerCase();
+  box.querySelectorAll('label.msel-item').forEach(it=>{
+    it.style.display = (!q || it.textContent.toLowerCase().includes(q)) ? '' : 'none';
+  });
 }
 function applyMselOpenState(){
   document.querySelectorAll('.msel').forEach(b=>{
-    b.classList.toggle('open', b.dataset.mskey === mselRuntime.open);
+    const key = b.dataset.mskey;
+    const open = key === mselRuntime.open;
+    b.classList.toggle('open', open);
+    if(open){
+      // 恢复面板内搜索词（勾选触发的重渲染后不丢关键词）
+      const q = (mselRuntime.search && mselRuntime.search.key === key) ? (mselRuntime.search.q || '') : '';
+      const inp = b.querySelector('.msel-search');
+      if(inp){ inp.value = q; applyMselSearchFilter(b, q); }
+    }
   });
 }
 
@@ -2338,6 +2355,27 @@ function renderImportDetails(){
   if(!el) return;
   const orders = state.orders || [];
   if(orders.length === 0){ el.innerHTML = '<div class="file-meta" style="padding:12px 0;">尚未导入订单数据</div>'; return; }
+  // 级联收敛（渠道 分类→一级→二级）：上游选择变化后，裁剪下游已选但候选中不再存在的值
+  const hitPool = (set, raw) => {
+    if(!set || !set.length) return true;
+    const v = String(raw==null?'':raw).trim();
+    if(set.includes(MS_BLANK)) return v==='' || set.includes(v);
+    return set.includes(v);
+  };
+  const poolC = orders.filter(r => hitPool(detailFilters.channelClass, r.channelClass));
+  if(detailFilters.channelL1 && detailFilters.channelL1.length){
+    const l1Has = new Set(poolC.map(r=>String(r.channelL1||'').trim()).filter(Boolean));
+    detailFilters.channelL1 = detailFilters.channelL1.filter(v => v===MS_BLANK
+      ? poolC.some(r=>!String(r.channelL1||'').trim())
+      : l1Has.has(v));
+  }
+  const poolL1 = poolC.filter(r => hitPool(detailFilters.channelL1, r.channelL1));
+  if(detailFilters.channelL2 && detailFilters.channelL2.length){
+    const l2Has = new Set(poolL1.map(r=>String(r.channelL2||'').trim()).filter(Boolean));
+    detailFilters.channelL2 = detailFilters.channelL2.filter(v => v===MS_BLANK
+      ? poolL1.some(r=>!String(r.channelL2||'').trim())
+      : l2Has.has(v));
+  }
   const listRaw = filterOrdersByTab(detailTab);
   const list = applyDetailSort(listRaw);
   const vabCount = list.filter(r=>isVabMember(r.memberNo)).length;
@@ -2361,6 +2399,11 @@ function renderImportDetails(){
   // 字段筛选下拉选项（取自全部订单，与页签无关，保证跨页签稳定）
   const distinct = key => [...new Set(orders.map(r=>String(r[key]||'').trim()).filter(Boolean))]
     .sort((a,b)=>a.localeCompare(b,'zh-CN'));
+  // 级联候选：一级渠道随「渠道分类」收敛；二级渠道随「渠道分类+一级渠道」收敛
+  const distinctPool = (key, pool) => [...new Set(pool.map(r=>String(r[key]||'').trim()).filter(Boolean))]
+    .sort((a,b)=>a.localeCompare(b,'zh-CN'));
+  const l1Candidates = distinctPool('channelL1', poolC);
+  const l2Candidates = distinctPool('channelL2', poolL1);
   // 到访类型候选（datalist）：数据中已出现的值 + 常用「初诊/复诊」兜底，允许自由输入
   const vtVals = [...new Set(distinct('visitType').concat(
     ['初诊','复诊'].filter(v=>!distinct('visitType').includes(v))))].sort((a,b)=>a.localeCompare(b,'zh-CN'));
@@ -2394,8 +2437,8 @@ function renderImportDetails(){
       ${fText('name','姓名')}
       ${fText('memberNo','会员号')}
       ${mselHTML('channelClass','渠道分类',distinct('channelClass'))}
-      ${mselHTML('channelL1','一级渠道',distinct('channelL1'))}
-      ${mselHTML('channelL2','二级渠道',distinct('channelL2'))}
+      ${mselHTML('channelL1','一级渠道',l1Candidates)}
+      ${mselHTML('channelL2','二级渠道',l2Candidates)}
       ${mselHTML('visitType','到访类型',distinct('visitType'))}
       ${mselHTML('consultant','咨询师',distinct('consultant'))}
       ${mselHTML('cashier','收款员工',distinct('cashier'))}
@@ -2478,6 +2521,7 @@ function renderImportDetails(){
     document.addEventListener('click', (ev)=>{
       if(mselRuntime.open && !(ev.target.closest && ev.target.closest('.msel'))){
         mselRuntime.open = null;
+        mselRuntime.search = null;
         applyMselOpenState();
       }
     }, true);
@@ -2519,25 +2563,31 @@ function onImportDetailsClick(e){
   const reset = e.target.closest && e.target.closest('#detail-filter-reset');
   if(reset){
     detailMonth = []; detailDate = '__latest__'; detailFilters = {}; detailPage = 1;
-    mselRuntime.open = null;
+    mselRuntime.open = null; mselRuntime.search = null;
     renderImportDetails();
     return;
   }
-  // 多选下拉：开合按钮
+  // 多选下拉：开合按钮（换面板/新开面板时清空搜索词）
   const mb = e.target.closest && e.target.closest('.msel-btn');
   if(mb){
     const key = mb.closest('.msel').dataset.mskey;
+    if(mselRuntime.open !== key) mselRuntime.search = null;
     mselRuntime.open = mselRuntime.open === key ? null : key;
     applyMselOpenState();
     return;
   }
-  // 多选下拉：全选 / 清空
+  // 多选下拉：全选（当前可见候选值，不含「空白」）/ 清空（含「空白」一并清除）
   const act = e.target.closest && e.target.closest('.msel-act');
   if(act){
     const box = act.closest('.msel');
     const key = box.dataset.mskey;
-    const arr = mselRuntime.options[key] || [];
-    mselSet(key, act.dataset.msact === 'all' ? arr.map(x=>Array.isArray(x)?x[0]:x) : []);
+    if(act.dataset.msact === 'all'){
+      const vals = [...box.querySelectorAll('label.msel-item')]
+        .filter(it => it.style.display !== 'none')
+        .map(it => it.querySelector('input').value)
+        .filter(v => v !== MS_BLANK);
+      mselSet(key, vals);
+    } else mselSet(key, []);
     detailPage = 1;
     mselRuntime.open = key;
     renderImportDetails();
@@ -2608,6 +2658,14 @@ function onImportDetailsChange(e){
 // 字段文本筛选（姓名/会员号模糊包含）：防抖 300ms 后重渲染，并恢复焦点与光标到行尾
 let _dfilterTimer = null;
 function onImportDetailsInput(e){
+  // msel 面板搜索：仅本地过滤候选项显隐，不重渲染
+  const sr = e.target.closest && e.target.closest('.msel-search');
+  if(sr){
+    const box = sr.closest('.msel');
+    mselRuntime.search = { key: box.dataset.mskey, q: sr.value };
+    applyMselSearchFilter(box, sr.value);
+    return;
+  }
   const ft = e.target.closest && e.target.closest('input[data-dfilter-text]');
   if(!ft) return;
   const key = ft.dataset.dfilterText;
@@ -2952,10 +3010,11 @@ function onMktFirstFilterClick(e){
     renderMktFirstClients();
     return;
   }
-  // 多选下拉：开合按钮 / 全选 / 清空
+  // 多选下拉：开合按钮 / 全选（可见候选）/ 清空
   const mb = e.target.closest && e.target.closest('.msel-btn');
   if(mb){
     const key = mb.closest('.msel').dataset.mskey;
+    if(mselRuntime.open !== key) mselRuntime.search = null;
     mselRuntime.open = mselRuntime.open === key ? null : key;
     applyMselOpenState();
     return;
@@ -2964,8 +3023,13 @@ function onMktFirstFilterClick(e){
   if(act){
     const box = act.closest('.msel');
     const key = box.dataset.mskey;
-    const arr = mselRuntime.options[key] || [];
-    mselSet(key, act.dataset.msact === 'all' ? arr.map(x=>Array.isArray(x)?x[0]:x) : []);
+    if(act.dataset.msact === 'all'){
+      const vals = [...box.querySelectorAll('label.msel-item')]
+        .filter(it => it.style.display !== 'none')
+        .map(it => it.querySelector('input').value)
+        .filter(v => v !== MS_BLANK);
+      mselSet(key, vals);
+    } else mselSet(key, []);
     mktPage = 1;
     mselRuntime.open = key;
     renderMktFirstClients();
@@ -2995,6 +3059,14 @@ function onMktFirstFilterChange(e){
   if(sel){ mktFilters[sel.dataset.mktFilter] = sel.value || ''; mktPage = 1; renderMktFirstClients(); }
 }
 function onMktFirstFilterInput(e){
+  // msel 面板搜索：仅本地过滤候选项显隐，不重渲染
+  const sr = e.target.closest && e.target.closest('.msel-search');
+  if(sr){
+    const box = sr.closest('.msel');
+    mselRuntime.search = { key: box.dataset.mskey, q: sr.value };
+    applyMselSearchFilter(box, sr.value);
+    return;
+  }
   const inp = e.target.closest && e.target.closest('input[data-mkt-filter]');
   if(!inp || inp.type === 'date') return; // 日期控件由 change 事件承担，避免防抖打断选择
   const key = inp.dataset.mktFilter;
