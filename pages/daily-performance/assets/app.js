@@ -2054,7 +2054,7 @@ function renderPager(page, pageCount){
   return `<div class="detail-pager">
     ${parts.join('')}
     <span class="pg-info">第 ${page}/${pageCount} 页</span>
-    <label class="detail-filter" style="margin:0 0 0 14px;">每页
+    <label class="detail-filter pager-size">每页
       <select id="detail-pagesize-filter" class="detail-select" style="min-width:auto;">${sizeOpts}</select>
     </label>
   </div>`;
@@ -2079,9 +2079,10 @@ function mselLabelOf(key, val){
   return it ? (Array.isArray(it)?it[1]:it) : val;
 }
 function mselBtnText(label, key, set){
-  if(!set || !set.length) return label + '：全部';
+  // 标签由 .df-label 单独呈现，按钮内不重复标签，只显示当前取值状态
+  if(!set || !set.length) return '全部';
   if(set.length === 1) return set[0] === MS_BLANK ? '（空白）' : mselLabelOf(key, set[0]);
-  return label + ' · 已选' + set.length + '项';
+  return '已选' + set.length + '项';
 }
 function mselHTML(key, label, arr){
   mselRuntime.options[key] = arr;
@@ -2093,7 +2094,7 @@ function mselHTML(key, label, arr){
     const v = Array.isArray(x)?x[0]:x, t = Array.isArray(x)?x[1]:x;
     items.push('<label class="msel-item"><input type="checkbox" value="'+esc(v)+'" '+(set.includes(v)?'checked':'')+'><span>'+esc(t)+'</span></label>');
   });
-  return '<span class="detail-filter"><span class="msel" data-mskey="'+key+'">'
+  return '<span class="detail-filter"><span class="df-label">'+esc(label)+'</span><span class="msel" data-mskey="'+key+'">'
     + '<button type="button" class="msel-btn detail-select" title="'+esc(label)+'（可多选、可搜索）">'+esc(mselBtnText(label,key,set))+'<span class="msel-caret">▾</span></button>'
     + '<span class="msel-panel"><span class="msel-top">'
     + '<input type="text" class="msel-search" placeholder="输入关键词筛选选项">'
@@ -2174,9 +2175,9 @@ function renderImportDetails(){
   const l2Candidates = distinctPool('channelL2', poolL1);
   const cashVals = [...new Set(orders.map(r=>fmt(r.cashPay)))]
     .sort((a,b)=>(Number(String(a).replace(/,/g,''))||0)-(Number(String(b).replace(/,/g,''))||0));
-  const fText = (key,label) => `<span class="detail-filter">${label}`
+  const fText = (key,label) => `<label class="detail-filter"><span class="df-label">${label}</span>`
     + `<input type="text" class="detail-select" data-dfilter-text="${key}" value="${esc(detailFilters[key]||'')}" `
-    + `placeholder="含…" style="min-width:88px;"></span>`;
+    + `placeholder="含…"></label>`;
   const anyDetailFilter = !!(detailMonth.length||detailDate.length
     ||Object.values(detailFilters||{}).some(v=>Array.isArray(v)?v.length:!!v));
   const filterBar = `
@@ -2191,7 +2192,7 @@ function renderImportDetails(){
       ${mselHTML('consultant','咨询师',distinct('consultant'))}
       ${mselHTML('cashier','收款员工',distinct('cashier'))}
       ${mselHTML('cashPay','现款支付',cashVals)}
-      ${mselHTML('vab','VAB',[['hit','✔ 命中'],['miss','— 未命中']])}
+      ${mselHTML('vab','VAB',[['hit','✔ 命中'],['miss','— 未命中']],'span2')}
       ${anyDetailFilter?'<button type="button" id="detail-filter-reset" class="detail-reset" title="清除全部筛选">清除筛选</button>':''}
     </div>`;
   const tabs = DETAIL_TABS.map(t=>`<button class="detail-tab ${t.key===detailTab?'active':''}" data-tab="${t.key}">${t.label}</button>`).join('');

@@ -2301,7 +2301,7 @@ function renderPager(page, pageCount){
   return `<div class="detail-pager">
     ${parts.join('')}
     <span class="pg-info">第 ${page}/${pageCount} 页</span>
-    <label class="detail-filter" style="margin:0 0 0 14px;">每页
+    <label class="detail-filter pager-size">每页
       <select id="detail-pagesize-filter" class="detail-select" style="min-width:auto;">${sizeOpts}</select>
     </label>
   </div>`;
@@ -2326,11 +2326,12 @@ function mselLabelOf(key, val){
   return it ? (Array.isArray(it)?it[1]:it) : val;
 }
 function mselBtnText(label, key, set){
-  if(!set || !set.length) return label + '：全部';
+  // 标签由 .df-label 单独呈现，按钮内不重复标签，只显示当前取值状态
+  if(!set || !set.length) return '全部';
   if(set.length === 1) return set[0] === MS_BLANK ? '（空白）' : mselLabelOf(key, set[0]);
-  return label + ' · 已选' + set.length + '项';
+  return '已选' + set.length + '项';
 }
-function mselHTML(key, label, arr){
+function mselHTML(key, label, arr, extraCls){
   mselRuntime.options[key] = arr;
   const set = mselGet(key);
   const items = [];
@@ -2340,7 +2341,7 @@ function mselHTML(key, label, arr){
     const v = Array.isArray(x)?x[0]:x, t = Array.isArray(x)?x[1]:x;
     items.push('<label class="msel-item"><input type="checkbox" value="'+esc(v)+'" '+(set.includes(v)?'checked':'')+'><span>'+esc(t)+'</span></label>');
   });
-  return '<span class="detail-filter"><span class="msel" data-mskey="'+key+'">'
+  return '<span class="detail-filter'+(extraCls?' '+extraCls:'')+'"><span class="df-label">'+esc(label)+'</span><span class="msel" data-mskey="'+key+'">'
     + '<button type="button" class="msel-btn detail-select" title="'+esc(label)+'（可多选、可搜索）">'+esc(mselBtnText(label,key,set))+'<span class="msel-caret">▾</span></button>'
     + '<span class="msel-panel"><span class="msel-top">'
     + '<input type="text" class="msel-search" placeholder="输入关键词筛选选项">'
@@ -2429,16 +2430,17 @@ function renderImportDetails(){
   const vtVals = [...new Set(distinct('visitType').concat(
     ['初诊','复诊'].filter(v=>!distinct('visitType').includes(v))))].sort((a,b)=>a.localeCompare(b,'zh-CN'));
   const vtOptions = vtVals.map(v=>`<option value="${esc(v)}"></option>`).join('');
-  const fText = (key,label) => `<label class="detail-filter">${label}`
+  const fText = (key,label) => `<label class="detail-filter"><span class="df-label">${label}</span>`
     + `<input type="text" class="detail-select" data-dfilter-text="${key}" value="${esc(detailFilters[key]||'')}" `
-    + `placeholder="含…" style="min-width:88px;"></label>`;
+    + `placeholder="含…"></label>`;
   // 数值筛选（运算符+数值，2026-10-13 需求）：op 存 <key>Op（''=等于），数值存 <key>；数值为空=不筛选
-  const fNum = (key,label) => `<label class="detail-filter">${label}`
-    + `<select class="detail-select" data-dfilter="${key}Op" style="min-width:auto;" title="选择比较方式">`
+  const fNum = (key,label) => `<span class="detail-filter num-filter"><span class="df-label">${label}</span>`
+    + `<span class="num-line">`
+    + `<select class="detail-select op-sel" data-dfilter="${key}Op" title="选择比较方式">`
     + NUM_OPS.map(([v,l])=>`<option value="${v}" ${String(detailFilters[key+'Op']||'')===v?'selected':''}>${l}</option>`).join('')
     + '</select>'
     + `<input type="number" step="any" class="detail-select" data-dfilter-text="${key}" value="${esc(detailFilters[key]||'')}" `
-    + `placeholder="数值" style="width:96px;min-width:auto;"></label>`;
+    + `placeholder="数值"></span></span>`;
   const effDateOn = !!detailDate && detailDate !== '__latest__';
   // 运算符键（*Op，''=等于）不计入「已激活筛选」，避免仅选运算符未填数值时出现清除按钮/计数虚高
   const activeFilterEntries = Object.entries(detailFilters||{}).filter(([k,v]) => (Array.isArray(v)?v.length:!!v) && !k.endsWith('Op'));
@@ -2448,13 +2450,15 @@ function renderImportDetails(){
       <button type="button" id="detail-filter-toggle" class="detail-reset ftoggle" title="展开/收起筛选区">⚙ 筛选${activeFilterEntries.length?`（${activeFilterEntries.length}）`:''} ${detailFiltersCollapsed?'▸':'▴'}</button>
       <div class="filters-body">
       ${mselHTML('__month__','月度',months)}
-      <label class="detail-filter">日期
-        <input type="date" id="detail-date-filter" class="detail-select" style="min-width:auto;"
-          min="${dateMin}" max="${dateMax}"
-          value="${detailDate==='__latest__'?latest:(detailDate||'')}"
-          title="选择筛选日期；清空=全部日期">
+      <label class="detail-filter date-filter"><span class="df-label">日期</span>
+        <span class="date-line">
+          <input type="date" id="detail-date-filter" class="detail-select"
+            min="${dateMin}" max="${dateMax}"
+            value="${detailDate==='__latest__'?latest:(detailDate||'')}"
+            title="选择筛选日期；清空=全部日期">
+          <button type="button" id="detail-date-today" class="detail-reset" title="回到当日（最新日期 ${latest}）">当日</button>
+        </span>
       </label>
-      <button type="button" id="detail-date-today" class="detail-reset" title="回到当日（最新日期 ${latest}）">当日</button>
       ${fText('name','姓名')}
       ${fText('memberNo','会员号')}
       ${mselHTML('channelClass','渠道分类',distinct('channelClass'))}
@@ -2466,7 +2470,7 @@ function renderImportDetails(){
       ${fNum('cashPay','现款支付')}
       ${fNum('assetDeduct','资产抵扣金额')}
       ${mselHTML('dept','报表归属',DEPT_OPTIONS)}
-      ${mselHTML('vab','VAB',[['hit','✔ 命中'],['miss','— 未命中']])}
+      ${mselHTML('vab','VAB',[['hit','✔ 命中'],['miss','— 未命中']],'span2')}
       ${anyDetailFilter?'<button type="button" id="detail-filter-reset" class="detail-reset" title="清除全部筛选">清除筛选</button>':''}
       </div>
     </div>`;
@@ -2914,27 +2918,33 @@ function renderMktFirstClients(){
     <div class="detail-filters ${mktFiltersCollapsed?'collapsed':''}" style="margin:0 0 8px;">
       <button type="button" id="mkt-filter-toggle" class="detail-reset ftoggle" title="展开/收起筛选区">⚙ 筛选 ${mktFiltersCollapsed?'▸':'▴'}</button>
       <div class="filters-body">
-      <label class="detail-filter">姓名
-        <input type="text" class="detail-select" data-mkt-filter="name" value="${esc(f.name||'')}" placeholder="含…" style="min-width:88px;">
+      <label class="detail-filter"><span class="df-label">姓名</span>
+        <input type="text" class="detail-select" data-mkt-filter="name" value="${esc(f.name||'')}" placeholder="含…">
       </label>
-      <label class="detail-filter">会员号
-        <input type="text" class="detail-select" data-mkt-filter="memberNo" value="${esc(f.memberNo||'')}" placeholder="含…" style="min-width:88px;">
+      <label class="detail-filter"><span class="df-label">会员号</span>
+        <input type="text" class="detail-select" data-mkt-filter="memberNo" value="${esc(f.memberNo||'')}" placeholder="含…">
       </label>
-      ${mselHTML('mkt:channel','来源渠道',channelOpts)}
-      <label class="detail-filter">初诊日期
-        <input type="date" class="detail-select" data-mkt-filter="date" style="min-width:auto;"
-          min="${dateOpts[0]||''}" max="${dateOpts[dateOpts.length-1]||''}" value="${esc(f.date||'')}"
-          title="按初诊日期筛选；清空=全部">
+      ${mselHTML('mkt:channel','来源渠道',channelOpts,'span2')}
+      <label class="detail-filter date-filter"><span class="df-label">初诊日期</span>
+        <span class="date-line">
+          <input type="date" class="detail-select" data-mkt-filter="date"
+            min="${dateOpts[0]||''}" max="${dateOpts[dateOpts.length-1]||''}" value="${esc(f.date||'')}"
+            title="按初诊日期筛选；清空=全部">
+        </span>
       </label>
-      <label class="detail-filter">消费笔数
-        <select class="detail-select" data-mkt-filter="cntOp" style="min-width:auto;" title="选择比较方式">
-          ${NUM_OPS.map(([v,l])=>`<option value="${v}" ${String(f.cntOp||'')===v?'selected':''}>${l}</option>`).join('')}
-        </select>
-        <input type="number" step="any" class="detail-select" data-mkt-filter="cnt" value="${esc(f.cnt||'')}"
-          placeholder="笔数" style="width:76px;min-width:auto;" title="输入笔数；清空=全部">
-      </label>
-      ${anyF?'<button type="button" id="mkt-filter-reset" class="detail-reset" title="清除全部筛选">清除筛选</button>':''}
-      <span style="color:var(--c-muted);font-size:12px;">${clients.length}/${allClients.length} 位</span>
+      <span class="detail-filter num-filter"><span class="df-label">消费笔数</span>
+        <span class="num-line">
+          <select class="detail-select op-sel" data-mkt-filter="cntOp" title="选择比较方式">
+            ${NUM_OPS.map(([v,l])=>`<option value="${v}" ${String(f.cntOp||'')===v?'selected':''}>${l}</option>`).join('')}
+          </select>
+          <input type="number" step="any" class="detail-select" data-mkt-filter="cnt" value="${esc(f.cnt||'')}"
+            placeholder="笔数" title="输入笔数；清空=全部">
+        </span>
+      </span>
+      <span class="filters-foot">
+        ${anyF?'<button type="button" id="mkt-filter-reset" class="detail-reset" title="清除全部筛选">清除筛选</button>':''}
+        <span>${clients.length}/${allClients.length} 位</span>
+      </span>
       </div>
     </div>`;
   clients.sort((a,b)=> String(a.firstDate).localeCompare(String(b.firstDate)) || String(a.name).localeCompare(String(b.name),'zh-CN'));
@@ -2959,7 +2969,7 @@ function renderMktFirstClients(){
     <div class="detail-pager">
       ${pagerParts.join('')}
       <span class="pg-info">第 ${mktPage}/${pageCount} 页</span>
-      <label class="detail-filter" style="margin:0 0 0 14px;">每页
+      <label class="detail-filter pager-size">每页
         <select id="mkt-pagesize" class="detail-select" style="min-width:auto;">${sizeOpts}</select>
       </label>
     </div>`;
