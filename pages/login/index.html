@@ -5,152 +5,409 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>登录 · 数据统计平台</title>
 <style>
-  *{box-sizing:border-box;margin:0;padding:0;}
-  html,body{height:100%;}
-  body{
-    font-family:"Microsoft YaHei","PingFang SC",sans-serif;
-    background:
-      linear-gradient(rgba(255,255,255,.52), rgba(255,255,255,.64)),
-      url('login-bg.jpg') center / cover no-repeat fixed;
-    display:flex;align-items:center;justify-content:center;
-    min-height:100vh;padding:24px 16px;color:#1c2b3a;
-    position:relative;overflow:hidden;
-  }
-  .login-card{
-    background:rgba(255,255,255,.92);backdrop-filter:blur(8px);
-    border:1px solid rgba(255,255,255,.7);
-    border-radius:20px;box-shadow:0 20px 50px rgba(60,90,140,.13);
-    width:min(420px,94vw);padding:34px 32px 26px;
-    position:relative;z-index:1;
-    animation:cardIn .5s cubic-bezier(.22,.8,.36,1) both;
-  }
-  @keyframes cardIn{from{opacity:0;transform:translateY(14px);}to{opacity:1;transform:none;}}
-  .brand{display:flex;align-items:center;gap:13px;margin-bottom:6px;}
-  .brand .logo{
-    width:46px;height:46px;border-radius:14px;flex:none;
-    background:linear-gradient(135deg,#123c73,#2f66b0);
-    box-shadow:0 6px 16px rgba(18,60,115,.28);
-    display:flex;align-items:center;justify-content:center;font-size:23px;color:#fff;
-  }
-  .brand h1{font-size:20px;color:#123c73;font-weight:700;letter-spacing:.5px;}
-  .brand .sub{font-size:12px;color:#8a97a8;margin-top:3px;}
-  .divider{height:1px;background:linear-gradient(90deg,transparent,#dfe8f2 20%,#dfe8f2 80%,transparent);margin:18px 0 2px;}
-  /* 胶囊分段页签 */
-  .tabs{
-    display:flex;gap:4px;margin:16px 0 2px;
-    background:#eef3f9;border-radius:12px;padding:4px;
-  }
-  .tab{
-    flex:1;border:none;background:transparent;color:#5a6b80;border-radius:9px;
-    padding:9px 0;font-size:14px;font-family:inherit;cursor:pointer;text-align:center;
-    transition:all .18s;
-  }
-  .tab:hover{color:#123c73;}
-  .tab.active{
-    background:#fff;color:#123c73;font-weight:600;
-    box-shadow:0 2px 8px rgba(60,90,140,.14);
-  }
-  h3{margin:14px 0 4px;font-size:15px;color:#123c73;}
-  label{display:block;font-size:12px;color:#5a6b80;margin:12px 0 5px;}
-  input{
-    width:100%;border:1px solid #d9e2ec;border-radius:10px;padding:10px 13px;
-    font-size:14px;font-family:inherit;outline:none;
-    transition:border .15s,box-shadow .15s;background:#fbfdff;
-  }
-  input::placeholder{color:#b3bfce;}
-  input:focus{border-color:#2a5da8;background:#fff;box-shadow:0 0 0 3px rgba(42,93,168,.12);}
-  .code-line{display:flex;gap:8px;}
-  .code-line input{flex:1;min-width:0;}
-  .code-line button{flex:none;white-space:nowrap;}
-  .row{display:flex;flex-wrap:wrap;gap:10px;margin-top:20px;}
-  button{
-    border:1px solid #cfdae6;background:#fff;color:#123c73;border-radius:10px;
-    padding:10px 18px;font-size:14px;font-family:inherit;cursor:pointer;
-    transition:all .18s;
-  }
-  button:hover{background:#f2f7fd;border-color:#2a5da8;transform:translateY(-1px);}
-  button.sa-pri{
-    background:linear-gradient(135deg,#123c73,#2a5da8);border-color:transparent;color:#fff;
-    box-shadow:0 4px 12px rgba(18,60,115,.24);
-  }
-  button.sa-pri:hover{background:linear-gradient(135deg,#1a4d8f,#33689f);box-shadow:0 6px 16px rgba(18,60,115,.32);}
-  button:disabled{opacity:.55;cursor:default;transform:none;}
-  .sa-danger{border-color:#c0392b;color:#c0392b;}
-  .sa-danger:hover{background:#fdf2f0;border-color:#c0392b;}
-  #sa-msg,#s-msg{margin-top:10px;font-size:13px;min-height:18px;color:#c0392b;transition:opacity .2s;}
-  .file-meta{margin-top:10px;font-size:11px;color:#8a97a8;line-height:1.7;}
-  .foot{margin-top:18px;text-align:center;font-size:11px;color:#a8b4c4;}
-  @media (max-width:420px){
-    .login-card{padding:26px 20px 22px;}
-    .brand h1{font-size:18px;}
-  }
+/* ============================================================
+   登录页 · 藏蓝玻璃拟态（对齐 public/style.css 设计体系）
+   主色 #002060 + #1e3a8a + #4a7bb5；纯色平涂按钮，全站无渐变
+   ============================================================ */
+
+/* ---------- 1. 变量 ---------- */
+:root{
+  --navy:#002060;            /* 主色 藏蓝（外壳 + 日报两页同款） */
+  --navy-2:#1e3a8a;          /* 次色 */
+  --navy-3:#4a7bb5;          /* 浅蓝 */
+  --bg:#F5F7FA;
+  --panel:#FFFFFF;
+  --border:#E2E8F0;
+  --border-strong:#C7D3E6;
+  --text:#1A202C;
+  --muted:#64748B;
+  --muted-2:#94A3B8;
+  --success:#2E7D5B;
+  --danger:#C0392B;
+
+  --r-card:16px;             /* 玻璃拟态，介于内页 card 8px 与 topbar 12px 之间 */
+  --r-box:8px;               /* 内页输入/按钮 7-9px */
+  --r-pill:10px;
+
+  --sh-1:0 1px 2px rgba(0,32,96,.06);
+  --sh-2:0 1px 3px rgba(0,32,96,.10);
+  --sh-3:0 10px 26px rgba(0,32,96,.10);
+  --sh-4:0 28px 64px rgba(0,32,96,.16);
+  --sh-btn:0 1px 2px rgba(0,32,96,.18);
+
+  --fs:13px;                 /* 全站基准 */
+  --fs-in:14px;              /* 输入框（桌面） */
+  --h-in:40px;               /* 输入框/按钮统一高度，保证 code-line 对齐 */
+  --h-cta:44px;              /* 主 CTA */
+}
+
+/* ---------- 2. 重置 & 背景 ---------- */
+*{box-sizing:border-box;margin:0;padding:0;}
+html,body{height:100%;}
+body{
+  font-family:"PingFang SC","Microsoft YaHei","Segoe UI",system-ui,-apple-system,sans-serif;
+  font-size:var(--fs);
+  color:var(--text);
+  -webkit-font-smoothing:antialiased;
+  min-height:100vh;
+  padding:28px 16px;
+  display:flex;justify-content:center;
+  align-items:flex-start;     /* 配合卡片 margin:auto，超高时不裁顶部 */
+  overflow-y:auto;
+  position:relative;
+  background:
+    linear-gradient(158deg, rgba(0,32,96,.36) 0%, rgba(30,58,138,.24) 52%, rgba(0,32,96,.42) 100%),
+    url('login-bg.jpg') center / cover no-repeat fixed,
+    #0f2557;                  /* 底色：背景图缺失时兜底 */
+}
+.bg-veil{                     /* 纯氛围层，装饰性，指针事件穿透 */
+  position:fixed;inset:0;pointer-events:none;
+  background:radial-gradient(120% 80% at 50% 0%, rgba(156,192,232,.14), transparent 60%);
+}
+:focus-visible{outline:none;} /* 焦点环由各组件自绘 */
+
+/* ---------- 3. 卡片（保留玻璃拟态 + 背景图） ---------- */
+.login-card{
+  width:min(420px,94vw);
+  margin:auto;                /* 垂直居中 + 超高时不裁切 */
+  padding:30px 30px 22px;
+  position:relative;z-index:1;
+  border-radius:var(--r-card);
+  background:rgba(255,255,255,.92);
+  border:1px solid rgba(255,255,255,.72);
+  -webkit-backdrop-filter:blur(10px) saturate(1.06);
+  backdrop-filter:blur(10px) saturate(1.06);
+  box-shadow:var(--sh-1),var(--sh-2),var(--sh-3),var(--sh-4);
+  animation:cardIn .5s cubic-bezier(.22,.8,.36,1) both;
+}
+@keyframes cardIn{from{opacity:0;transform:translateY(14px);}to{opacity:1;transform:none;}}
+@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){
+  .login-card{background:rgba(255,255,255,.97);}   /* 老浏览器兜底 */
+}
+
+/* ---------- 4. 品牌 ---------- */
+.brand{display:flex;align-items:center;gap:12px;}
+.brand-logo{
+  width:44px;height:44px;border-radius:12px;flex:none;
+  background:var(--navy);                        /* 纯色平涂，替换原渐变 */
+  box-shadow:0 4px 12px rgba(0,32,96,.28), inset 0 1px 0 rgba(255,255,255,.16);
+  display:flex;align-items:center;justify-content:center;
+  font-size:22px;line-height:1;color:#fff;
+}
+.brand-title{font-size:19px;font-weight:700;color:var(--navy);letter-spacing:.3px;line-height:1.3;}
+.brand-sub{font-size:12px;color:var(--muted-2);margin-top:3px;line-height:1.5;}
+.divider{
+  height:1px;margin:18px 0 0;
+  background:linear-gradient(90deg,transparent,#E2E8F0 18%,#E2E8F0 82%,transparent);
+}
+
+/* ---------- 5. 分段页签 ---------- */
+.seg{
+  display:flex;gap:3px;margin-top:18px;
+  padding:3px;border-radius:var(--r-pill);
+  background:rgba(0,32,96,.06);
+  box-shadow:inset 0 0 0 1px rgba(0,32,96,.05);
+}
+.seg-btn{
+  flex:1;border:none;background:transparent;cursor:pointer;
+  font-family:inherit;font-size:13.5px;color:var(--muted);
+  padding:8px 0;border-radius:7px;min-height:34px;
+  transition:background .18s,color .18s,box-shadow .18s;
+}
+.seg-btn:hover{color:var(--navy-2);}
+.seg-btn.is-active{
+  background:var(--panel);color:var(--navy);font-weight:600;
+  box-shadow:0 1px 3px rgba(0,32,96,.14);
+}
+.seg-btn:focus-visible{box-shadow:0 0 0 3px rgba(0,32,96,.18);}
+
+/* ---------- 6. 表单（垂直节奏：4 的倍数阶梯） ---------- */
+.pane{padding-top:18px;}
+.field{margin-top:14px;}
+.pane > .field:first-child{margin-top:0;}   /* 首个字段贴顶，避免与页签叠加空洞 */
+.field-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:5px;}
+.field-label{display:block;font-size:12px;color:var(--muted);font-weight:500;letter-spacing:.2px;}
+.field-head .field-label{margin-bottom:0;}
+.field-tag{
+  font-size:11px;color:var(--navy-2);background:rgba(30,58,138,.10);
+  border-radius:var(--r-pill);padding:1px 8px;font-weight:600;
+}
+.field-reset{
+  margin-top:14px;padding:12px;border-radius:var(--r-box);
+  background:rgba(0,32,96,.035);
+  box-shadow:inset 0 0 0 1px rgba(0,32,96,.09);
+}
+
+.input{
+  display:block;width:100%;height:var(--h-in);
+  padding:0 12px;
+  font-family:inherit;font-size:var(--fs-in);color:var(--text);
+  background:rgba(255,255,255,.9);
+  border:1px solid var(--border);border-radius:var(--r-box);
+  outline:none;
+  font-variant-numeric:tabular-nums;   /* 数字对齐；不使用 monospace */
+  transition:border-color .15s,box-shadow .15s,background .15s;
+}
+.input::placeholder{color:#B6C2D2;}
+.input:hover{border-color:var(--border-strong);}
+.input:focus{
+  background:var(--panel);
+  border-color:var(--navy-3);
+  box-shadow:0 0 0 3px rgba(0,32,96,.16);
+}
+.input-gap{margin-top:8px;}
+.field-reset .input{background:rgba(255,255,255,.96);}
+
+.code-line{display:flex;gap:8px;}
+.code-line .input{flex:1;min-width:0;}
+.code-line .btn-code{flex:none;width:106px;padding:0 10px;}
+
+.hint{margin-top:6px;font-size:11.5px;color:var(--muted-2);line-height:1.6;}
+.hint-foot{margin-top:12px;text-align:center;}
+
+/* ---------- 7. 按钮（纯色平涂，无渐变；圆角 8px） ---------- */
+.btn{
+  display:inline-flex;align-items:center;justify-content:center;
+  height:var(--h-in);padding:0 16px;
+  font-family:inherit;font-size:13px;font-weight:500;line-height:1;
+  color:var(--navy);background:var(--panel);
+  border:1px solid var(--border-strong);border-radius:var(--r-box);
+  cursor:pointer;white-space:nowrap;
+  transition:background .16s,border-color .16s,color .16s,box-shadow .16s;
+}
+.btn:hover{background:#F2F6FC;border-color:var(--navy-3);}
+.btn:active{transform:translateY(1px);}
+.btn:focus-visible{box-shadow:0 0 0 3px rgba(0,32,96,.18);}
+.btn:disabled{opacity:.55;cursor:not-allowed;transform:none;box-shadow:none;}
+
+.btn-primary{
+  background:var(--navy);border-color:var(--navy);color:#fff;font-weight:600;
+  box-shadow:var(--sh-btn);
+}
+.btn-primary:hover{background:var(--navy-2);border-color:var(--navy-2);}
+.btn-primary:disabled{background:var(--navy);}
+
+.btn-block{display:flex;width:100%;}            /* 全宽主按钮 */
+.cta{margin-top:16px;height:var(--h-cta);font-size:14px;}  /* 主行动按钮：隐藏时无幽灵间隙 */
+.btn-gap{margin-top:8px;}
+
+.linkbtn{                                        /* 文字链（忘记密码 / 取消重置） */
+  border:none;background:none;cursor:pointer;
+  font-family:inherit;font-size:12px;color:var(--navy-2);
+  padding:2px 0;line-height:1.4;
+  transition:color .15s;
+}
+.linkbtn:hover{color:var(--navy);text-decoration:underline;}
+.linkbtn:focus-visible{outline:none;box-shadow:0 0 0 3px rgba(0,32,96,.18);border-radius:4px;}
+.linkbtn:disabled{opacity:.55;cursor:not-allowed;text-decoration:none;}
+
+/* ---------- 8. 折叠区（其他登录方式） ---------- */
+.alt{
+  margin-top:14px;
+  border:1px solid var(--border);border-radius:var(--r-box);
+  background:rgba(255,255,255,.6);
+  overflow:hidden;
+}
+.alt-head{
+  list-style:none;                              /* Firefox */
+  cursor:pointer;
+  display:flex;align-items:center;gap:8px;
+  padding:10px 12px;
+  font-size:12.5px;color:var(--navy-2);
+  user-select:none;
+  transition:background .15s;
+}
+.alt-head::-webkit-details-marker{display:none;}  /* Chrome/Safari */
+.alt-head::-moz-details-marker{display:none;}       /* Firefox 旧版 */
+.alt-head:hover{background:rgba(0,32,96,.045);}
+.alt-head:focus-visible{outline:none;box-shadow:inset 0 0 0 3px rgba(0,32,96,.18);}
+.alt-title{font-weight:600;color:var(--navy);}
+.alt-note{color:var(--muted-2);font-size:11.5px;margin-left:auto;}
+.alt-caret{
+  width:0;height:0;flex:none;
+  border-left:5px solid var(--navy-3);
+  border-top:4px solid transparent;border-bottom:4px solid transparent;
+  transition:transform .18s ease;
+}
+.alt[open] .alt-caret{transform:rotate(90deg);}
+.alt-body{
+  padding:2px 12px 12px;
+  border-top:1px solid var(--border);
+  animation:altIn .18s ease both;                /* 收起→展开的淡入 */
+}
+@keyframes altIn{from{opacity:0;transform:translateY(-4px);}to{opacity:1;transform:none;}}
+.alt-body .btn-block{width:100%;display:flex;}
+.alt-tip{margin-top:8px;font-size:11px;color:var(--muted-2);line-height:1.6;}
+
+/* ---------- 9. 消息区（解决垂直节奏断裂的核心） ---------- */
+.msg{
+  font-size:12.5px;line-height:18px;color:var(--danger);
+  margin-top:10px;
+  transition:opacity .2s;
+}
+.msg:empty{display:none;}                       /* 无消息时完全退出布局流 */
+.msg.ok{color:var(--success);}
+
+/* ---------- 10. 页脚 ---------- */
+.foot{
+  margin-top:18px;padding-top:14px;
+  border-top:1px solid rgba(0,32,96,.07);
+  text-align:center;font-size:11px;color:var(--muted-2);letter-spacing:.3px;
+}
+
+/* ---------- 11. 响应式 ---------- */
+@media (max-width:420px){
+  body{padding:16px 12px;}
+  .login-card{padding:24px 18px 18px;border-radius:14px;}
+  .brand-logo{width:40px;height:40px;border-radius:11px;font-size:20px;}
+  .brand-title{font-size:17px;}
+  .brand-sub{font-size:11.5px;}
+  .input{font-size:16px;height:44px;}            /* 16px 防 iOS 聚焦时页面自动放大 */
+  .btn{height:44px;font-size:13.5px;}
+  .actions .btn{font-size:15px;}
+  .code-line{flex-direction:column;align-items:stretch;}
+  .code-line .btn-code{width:100%;}
+  .seg-btn{font-size:13px;min-height:36px;}
+  .alt-head{padding:11px 12px;}
+}
+@media (max-width:360px){
+  .login-card{padding:20px 14px 16px;}
+  .brand{gap:10px;}
+}
+/* 矮屏（笔记本 / 横屏手机）：压缩纵向留白，防滚动 */
+@media (max-height:680px){
+  body{padding:16px 12px;}
+  .login-card{padding:22px 26px 18px;}
+  .brand-logo{width:38px;height:38px;font-size:19px;}
+  .brand-title{font-size:17px;}
+  .divider{margin-top:12px;}
+  .seg{margin-top:12px;}
+  .pane{padding-top:14px;}
+  .foot{margin-top:12px;padding-top:10px;}
+}
+/* 无障碍：尊重减少动效偏好 */
+@media (prefers-reduced-motion:reduce){
+  *{animation:none !important;transition:none !important;}
+  .login-card{opacity:1;transform:none;}
+}
 </style>
 </head>
 <body>
-<div class="login-card">
+<!-- 背景氛围层：纯装饰，指针事件穿透 -->
+<div class="bg-veil" aria-hidden="true"></div>
+
+<main class="login-card" role="main">
+
+  <!-- ============ 品牌 ============ -->
   <div class="brand">
-    <div class="logo">📊</div>
+    <div class="brand-logo" aria-hidden="true">📊</div>
     <div>
-      <h1>数据统计平台</h1>
-      <div class="sub">登录后可多端同步数据 · 请使用邮箱账号</div>
+      <h1 class="brand-title">数据统计平台</h1>
+      <p class="brand-sub">登录后多端数据自动同步 · 请使用邮箱账号</p>
     </div>
   </div>
-  <div class="divider"></div>
 
-  <div class="tabs">
-    <button type="button" class="tab active" id="tab-login">登 录</button>
-    <button type="button" class="tab" id="tab-signup">注册新账号</button>
+  <div class="divider" role="presentation"></div>
+
+  <!-- ============ 分段页签 ============ -->
+  <div class="seg" role="tablist" aria-label="登录或注册">
+    <button type="button" class="seg-btn is-active" id="tab-login" role="tab" aria-selected="true" aria-controls="pane-login">登 录</button>
+    <button type="button" class="seg-btn" id="tab-signup" role="tab" aria-selected="false" aria-controls="pane-signup">注册新账号</button>
   </div>
 
   <!-- ============ 登录页签 ============ -->
-  <div id="pane-login">
-    <label>邮箱</label>
-    <input id="sa-email" type="email" placeholder="you@example.com" autocomplete="username">
-    <div id="sa-code-wrap" style="display:none;">
-      <label>验证码</label>
-      <input id="sa-code" type="text" inputmode="numeric" placeholder="6 位邮箱验证码">
+  <section id="pane-login" class="pane" role="tabpanel" aria-labelledby="tab-login">
+
+    <div class="field">
+      <label class="field-label" for="sa-email">邮箱</label>
+      <input id="sa-email" class="input" type="email" placeholder="you@example.com" autocomplete="username" spellcheck="false" autocapitalize="none">
     </div>
-    <div id="sa-pwd-wrap">
-      <label>密码（已注册用户 / 新用户注册需设置）</label>
-      <input id="sa-pwd" type="password" placeholder="密码（至少 6 位）" autocomplete="current-password">
+
+    <div class="field" id="sa-pwd-wrap">
+      <div class="field-head">
+        <label class="field-label" for="sa-pwd">密码</label>
+        <button type="button" class="linkbtn" id="sa-forgot">忘记密码？</button>
+      </div>
+      <input id="sa-pwd" class="input" type="password" placeholder="密码（至少 6 位）" autocomplete="current-password">
     </div>
-    <div id="sa-reset-wrap" style="display:none;">
-      <label>重置密码（验证码已发送至上方邮箱）</label>
-      <input id="sa-reset-code" type="text" inputmode="numeric" placeholder="6 位邮箱验证码">
-      <input id="sa-reset-pwd" type="password" placeholder="新密码（至少 6 位）" style="margin-top:8px;" autocomplete="new-password">
+
+    <!-- 注意：必须单行写法，标签内不得有换行/空格，否则 .msg:empty 永不匹配、空洞复现 -->
+    <div id="sa-msg" class="msg" role="status" aria-live="polite"></div>
+
+    <button type="button" class="btn btn-primary btn-block cta" id="sa-pwdlogin">用密码登录</button>
+
+    <details class="alt" id="alt-login">
+      <summary class="alt-head">
+        <span class="alt-caret" aria-hidden="true"></span>
+        <span class="alt-title">用验证码登录</span>
+        <span class="alt-note">邮箱验证码登录</span>
+      </summary>
+      <div class="alt-body">
+        <div class="field" id="sa-code-wrap">
+          <label class="field-label" for="sa-code">邮箱验证码</label>
+          <div class="code-line">
+            <input id="sa-code" class="input" type="text" inputmode="numeric" placeholder="6 位验证码" autocomplete="one-time-code">
+            <button type="button" class="btn btn-code" id="sa-send">获取验证码</button>
+          </div>
+          <p class="hint">未注册过的邮箱首次验证后将自动创建账号。</p>
+        </div>
+        <button type="button" class="btn btn-block btn-gap" id="sa-verify">验证并登录</button>
+        <p class="alt-tip">不想输密码？可用邮箱验证码登录；未注册邮箱首次验证后自动创建账号。</p>
+      </div>
+    </details>
+
+    <div class="field field-reset" id="sa-reset-wrap" style="display:none;">
+      <div class="field-head">
+        <label class="field-label" for="sa-reset-code">设置新密码</label>
+        <button type="button" class="linkbtn" id="sa-reset-cancel">取消重置</button>
+      </div>
+      <input id="sa-reset-code" class="input" type="text" inputmode="numeric" placeholder="邮箱验证码" autocomplete="one-time-code">
+      <input id="sa-reset-pwd" class="input input-gap" type="password" placeholder="新密码（至少 6 位）" autocomplete="new-password">
+      <p class="hint">验证码已发送至上方邮箱，收到后填入并设置新密码。</p>
     </div>
-    <div id="sa-msg"></div>
-    <div class="row">
-      <button class="sa-pri" id="sa-send">获取验证码</button>
-      <button class="sa-pri" id="sa-verify">验证并登录</button>
-      <button id="sa-pwdlogin">密码登录</button>
-      <button id="sa-forgot">忘记密码？</button>
-      <button class="sa-pri" id="sa-reset" style="display:none;">重置密码</button>
-    </div>
-  </div>
+
+    <button type="button" class="btn btn-primary btn-block cta" id="sa-reset" style="display:none;">重置密码并登录</button>
+
+  </section>
 
   <!-- ============ 注册页签 ============ -->
-  <div id="pane-signup" style="display:none;">
-    <label>邮箱（即登录账号）</label>
-    <input id="s-email" type="email" placeholder="you@example.com" autocomplete="username">
-    <label>邮箱验证码（用于验证邮箱真实有效）</label>
-    <div class="code-line">
-      <input id="s-code" type="text" inputmode="numeric" placeholder="6 位邮箱验证码">
-      <button id="s-send" type="button">获取验证码</button>
+  <section id="pane-signup" class="pane" role="tabpanel" aria-labelledby="tab-signup" style="display:none;">
+
+    <div class="field">
+      <label class="field-label" for="s-email">邮箱</label>
+      <input id="s-email" class="input" type="email" placeholder="you@example.com" autocomplete="username" spellcheck="false" autocapitalize="none">
     </div>
-    <label>设置密码（至少 6 位）</label>
-    <input id="s-pwd" type="password" placeholder="设置登录密码" autocomplete="new-password">
-    <label>确认密码</label>
-    <input id="s-pwd2" type="password" placeholder="再次输入密码" autocomplete="new-password">
-    <div id="s-msg"></div>
-    <div class="row">
-      <button class="sa-pri" id="s-signup">注册并登录</button>
+
+    <div class="field">
+      <label class="field-label" for="s-code">邮箱验证码</label>
+      <div class="code-line">
+        <input id="s-code" class="input" type="text" inputmode="numeric" placeholder="6 位验证码" autocomplete="one-time-code">
+        <button type="button" class="btn btn-code" id="s-send">获取验证码</button>
+      </div>
+      <p class="hint">用于验证邮箱真实有效；已注册过的邮箱请切回「登 录」页签。</p>
     </div>
-    <div class="file-meta">注册成功后即自动登录；以后各设备均用「邮箱 + 密码」登录，数据自动多端同步。</div>
-  </div>
+
+    <div class="field">
+      <label class="field-label" for="s-pwd">设置密码</label>
+      <input id="s-pwd" class="input" type="password" placeholder="至少 6 位" autocomplete="new-password">
+    </div>
+
+    <div class="field">
+      <label class="field-label" for="s-pwd2">确认密码</label>
+      <input id="s-pwd2" class="input" type="password" placeholder="再次输入密码" autocomplete="new-password">
+    </div>
+
+    <!-- 注意：必须单行写法，标签内不得有换行/空格，否则 .msg:empty 永不匹配、空洞复现 -->
+    <div id="s-msg" class="msg" role="status" aria-live="polite"></div>
+
+    <button type="button" class="btn btn-primary btn-block cta" id="s-signup">注册并登录</button>
+
+    <p class="hint hint-foot">注册成功后即自动登录；以后各设备均用「邮箱 + 密码」登录，数据自动多端同步。</p>
+
+  </section>
 
   <div class="foot">海蓓 · 医管考核数据统计</div>
-</div>
+</main>
 
 <script>
 (function(){
@@ -158,7 +415,7 @@
   var ENDPOINT = location.origin;
 
   /* ---------- 回跳目标 ---------- */
-  /* 2026-10-14 口径：登录/注册/重置成功后一律进入平台首页（全部模块入口） */
+  /* 2026-10-14 口径（用户明确要求，继续生效）：登录/注册/重置成功后一律进入平台首页（全部模块入口） */
   function goNext(){ location.replace('/'); }
 
   /* ---------- SDK 加载 ---------- */
@@ -190,26 +447,45 @@
   }
 
   function $(id){ return document.getElementById(id); }
-  function msg(t, isErr){ var el = $('sa-msg'); if(el){ el.textContent = t || ''; el.style.color = isErr ? '#c0392b' : '#1a7a3a'; } }
-  function smsg(t, isErr){ var el = $('s-msg'); if(el){ el.textContent = t || ''; el.style.color = isErr ? '#c0392b' : '#1a7a3a'; } }
+  function msg(t, isErr){ var el = $('sa-msg'); if(el){ el.textContent = t || ''; el.style.color = isErr ? '#C0392B' : '#2E7D5B'; } }
+  function smsg(t, isErr){ var el = $('s-msg'); if(el){ el.textContent = t || ''; el.style.color = isErr ? '#C0392B' : '#2E7D5B'; } }
   function show(el, on){ if(el) el.style.display = on ? '' : 'none'; }
 
   /* ---------- 页签切换 ---------- */
   function switchTab(tab){
     var login = tab === 'login';
-    $('tab-login').className = 'tab' + (login ? ' active' : '');
-    $('tab-signup').className = 'tab' + (login ? '' : ' active');
+    $('tab-login').classList.toggle('is-active', login);
+    $('tab-signup').classList.toggle('is-active', !login);
+    $('tab-login').setAttribute('aria-selected', login ? 'true' : 'false');
+    $('tab-signup').setAttribute('aria-selected', login ? 'false' : 'true');
     show($('pane-login'), login);
     show($('pane-signup'), !login);
+    /* 切回登录页签时收起折叠区：否则首屏变长、垂直节奏被打乱。
+       只重置 UI 展开态，绝不重置 pendingOtp / pwdReset / pendingSignup 等业务变量。
+       重置态下折叠区已 display:none，open 无意义，但加 !pwdReset 守卫避免回登录时被误收 */
+    var altBox = $('alt-login');
+    if(altBox && !pwdReset) altBox.open = false;
   }
 
   function renderMode(){
-    show($('sa-code-wrap'), !!pendingOtp);
-    show($('sa-send'), true); show($('sa-verify'), true); show($('sa-pwdlogin'), true);
-    show($('sa-forgot'), !pwdReset);
-    show($('sa-reset'), !!pwdReset);
-    show($('sa-reset-wrap'), !!pwdReset);
-    show($('sa-pwd-wrap'), !pwdReset);
+    /* 默认用密码登录：密码框/忘记密码/用密码登录主按钮/验证码折叠区 为常态；
+       重置流程下整体隐藏它们，显示「设置新密码」区块与「重置密码并登录」按钮。
+       业务动作函数一行未改，仅此处翻转显隐契约。 */
+    show($('sa-pwd-wrap'), !pwdReset);    // 密码框：重置时隐藏
+    show($('sa-forgot'), !pwdReset);      // 忘记密码?：重置时隐藏
+    show($('sa-pwdlogin'), !pwdReset);    // 用密码登录主按钮：重置时隐藏
+    show($('alt-login'), !pwdReset);      // 验证码折叠区：重置时整体隐藏（含「验证并登录」）
+    show($('sa-reset-wrap'), !!pwdReset); // 设置新密码：重置时显示
+    show($('sa-reset'), !!pwdReset);      // 重置密码并登录：重置时显示
+  }
+
+  /* ---------- 取消重置流程 ---------- */
+  function actCancelReset(){
+    if(!pwdReset) return;                       /* 幂等：重复点击无副作用 */
+    pwdReset = null;
+    ['sa-reset-code','sa-reset-pwd'].forEach(function(id){ var el = $(id); if(el) el.value = ''; });
+    msg('', false);
+    renderMode();                               /* 完整回到正常登录态 */
   }
 
   /* ---------- 默认管理员（本地内置账号 admin/123） ---------- */
@@ -353,6 +629,8 @@
   }
 
   /* ---------- 事件绑定 ---------- */
+  /* 注意：登录页刻意不加载 shared/auth-gate.js —— 它注入的账号面板含同名 id="sa-msg"，
+     若将来引入需改用 data-msg 属性查询，避免 getElementById 撞车 */
   $('tab-login').addEventListener('click', function(){ switchTab('login'); });
   $('tab-signup').addEventListener('click', function(){ switchTab('signup'); });
   $('sa-send').addEventListener('click', actSend);
@@ -360,6 +638,7 @@
   $('sa-pwdlogin').addEventListener('click', actPwdLogin);
   $('sa-forgot').addEventListener('click', actForgot);
   $('sa-reset').addEventListener('click', actReset);
+  $('sa-reset-cancel').addEventListener('click', actCancelReset);
   $('s-send').addEventListener('click', actSignupSend);
   $('s-signup').addEventListener('click', actSignup);
 
