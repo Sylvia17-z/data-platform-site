@@ -1187,11 +1187,17 @@ function computeMonthValues(dateList, dailyResults, monthKey){
   return m;
 }
 
-// 默认隐藏除最新日期外的所有日期列（仅保留截止日那列可见）
+// 无数据的每日日期集合（renderReportInner 内按订单日期填充）：这些列默认隐藏，「+展开」也不展开
+let emptyDailyDates = new Set();
+
+// 默认隐藏：无数据日期列一律隐藏，其余仅保留「最新有数据的日期」列（2026-10-15 需求）
 function defaultHideOldDates(tableEl, dateList){
-  const lastIdx = dateList.length - 1;
-  if(lastIdx < 1) return; // 仅1列时不隐藏
-  for(let idx=0; idx<lastIdx; idx++){
+  let lastWithData = -1;
+  for(let i=dateList.length-1; i>=0; i--){
+    if(!emptyDailyDates.has(dateList[i])){ lastWithData = i; break; }
+  }
+  for(let idx=0; idx<dateList.length; idx++){
+    if(idx === lastWithData) continue;   // 最新有数据的列保持可见
     tableEl.querySelectorAll(`[data-idx="${idx}"]`).forEach(el=>el.classList.add('col-hidden'));
   }
   if(tableEl.id === 'store-table') updateStoreTitleColspan(tableEl);
@@ -1208,13 +1214,18 @@ function captureHiddenDates(tableEl){
   els.forEach(th => { if(th.classList.contains('col-hidden') && th.dataset && th.dataset.date) set.add(th.dataset.date); });
   return set;
 }
-// 渲染后恢复用户可见性：仅隐藏"之前就隐藏"的日期列；首次渲染(null)则默认仅显最新
+// 渲染后恢复用户可见性：仅隐藏"之前就隐藏"的日期列；首次渲染(null)则按默认规则。
+// 无数据日期列始终强制隐藏（即使此前被展开过）——「+展开」也会跳过这些列。
 function applyHiddenState(tableEl, dateList, prevHidden){
   if(prevHidden === null){ defaultHideOldDates(tableEl, dateList); return; }
-  if(prevHidden.size){
+  const needScan = (prevHidden && prevHidden.size) || emptyDailyDates.size;
+  if(needScan){
     // 单次扫描替代「每个隐藏日期各扫一遍全表」，避免 O(隐藏列数 × 单元格数) 的重复查询
     const cells = tableEl.querySelectorAll('td[data-idx],th[data-idx]');
-    cells.forEach(el => { const i = +el.dataset.idx; if(prevHidden.has(dateList[i])) el.classList.add('col-hidden'); });
+    cells.forEach(el => {
+      const d = dateList[+el.dataset.idx];
+      if((prevHidden && prevHidden.has(d)) || emptyDailyDates.has(d)) el.classList.add('col-hidden');
+    });
   }
   if(tableEl.id === 'store-table') updateStoreTitleColspan(tableEl);
   else updateMainTitleColspan(tableEl);
@@ -1250,6 +1261,8 @@ function renderReportInner(){
     if(!byDate.has(k)) byDate.set(k, []);
     byDate.get(k).push(r);
   }
+  // 无数据日期列集合：当日无任何订单的日期列默认隐藏，「+展开」也不展开（2026-10-15 需求）
+  emptyDailyDates = new Set(dateList.filter(d => !byDate.has(d)));
   const dailyResults = dateList.map(d => {
     const g = byDate.get(d);
     return (g && g.length) ? calculate(g, state.vabSet, new Date(d)) : null;
@@ -1590,7 +1603,11 @@ function bindStoreBatchExpandButtons(tableEl){
   if(expandBtn && !expandBtn.dataset.bound){
     expandBtn.dataset.bound = '1';
     expandBtn.addEventListener('click', ()=>{
-      tableEl.querySelectorAll('.col-hidden').forEach(el=>el.classList.remove('col-hidden'));
+      // 「+展开」跳过无数据日期列（这些列保持隐藏，2026-10-15 需求）
+      tableEl.querySelectorAll('th.daily-col.col-hidden').forEach(th=>{
+        if(emptyDailyDates.has(th.dataset.date)) return;
+        tableEl.querySelectorAll(`[data-idx="${th.dataset.idx}"]`).forEach(el=>el.classList.remove('col-hidden'));
+      });
       if(storeBatchMode) exitBatch();
       updateStoreTitleColspan(tableEl);
     });
@@ -1806,7 +1823,11 @@ function bindBatchExpandButtons(tableEl){
   if(expandBtn && !expandBtn.dataset.bound){
     expandBtn.dataset.bound = '1';
     expandBtn.addEventListener('click', ()=>{
-      tableEl.querySelectorAll('.col-hidden').forEach(el=>el.classList.remove('col-hidden'));
+      // 「+展开」跳过无数据日期列（这些列保持隐藏，2026-10-15 需求）
+      tableEl.querySelectorAll('th.daily-col.col-hidden').forEach(th=>{
+        if(emptyDailyDates.has(th.dataset.date)) return;
+        tableEl.querySelectorAll(`[data-idx="${th.dataset.idx}"]`).forEach(el=>el.classList.remove('col-hidden'));
+      });
       if(batchMode) exitBatch();
       updateMainTitleColspan(tableEl);
     });
