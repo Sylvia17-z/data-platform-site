@@ -2045,10 +2045,13 @@ const DETAIL_TABS = [
   {key:'steward',       label:'管家部'},
 ];
 let detailTab = 'all';
-let detailMonth = ''; // 月度筛选：''=全部，'YYYY-MM'
-let detailDate = '__latest__';  // 日期筛选三态：'__latest__'=默认显示当日（最新日期）；''=全部日期；'YYYY-MM-DD'=指定日期
+let detailMonth = []; // 月度筛选：选中月份数组（[]=全部；'__blank__'=收款时间为空白的行）
+let detailDate = '__latest__';  // 日期筛选三态：'__latest__'=默认显示当日（最新日期）；''=全部日期；'YYYY-MM-DD'=指定日期（日期控件为点选式非下拉，保持单选）
 let detailSort = { key:'', dir:1 }; // 列排序：''=未排序；dir 1=升序 -1=降序（再次点击同列切换）
-let detailFilters = {}; // 字段筛选：key -> 值（''=全部）；name/memberNo 为模糊包含；vab 为 hit/miss；cashPay/assetDeduct 为数值（配 *Op 运算符）
+let detailFilters = {}; // 字段筛选：key -> 选中值数组（[]=全部；'__blank__'=该字段为空白）；name/memberNo 模糊字符串；cashPay/assetDeduct 数值字符串（配 *Op）；vab 为 ['hit']/['miss']
+// 多选下拉（msel）运行态：当前展开的 key + 各 key 的候选项缓存（供「全选」用）
+const MS_BLANK = '__blank__';
+const mselRuntime = { open: null, options: {} };
 
 // 数值比较（2026-10-13 需求：笔数/金额筛选改为「运算符+数值」形式，参考 Excel 筛选）
 // op ∈ eq(等于)/ne(不等于)/gt(大于)/ge(大于或等于)/lt(小于)/le(小于或等于)，''/缺省 = 等于
@@ -2145,16 +2148,27 @@ function filterOrdersByTab(key){
   else if(key === 'steward')  list = orders.filter(r => isSteward(r)); // 管家部：开单咨询师口径 + 渠道兜底（全月审计，不限于当日）
   else list = orders.slice();
   // 月度 / 日期 筛选叠加（与标签取交集）。effDate 已在函数开头算出（供 yx_chuzhen 集合门控复用）
-  if(detailMonth) list = list.filter(r => r.payTime && fmtMonth(r.payTime) === detailMonth);
+  // 月度筛选叠加（与标签取交集）：多选数组命中；'__blank__' 匹配收款时间为空白的行
+  if(detailMonth.length) list = list.filter(r => {
+    const m = r.payTime ? fmtMonth(r.payTime) : '';
+    if(m) return detailMonth.includes(m);
+    return detailMonth.includes(MS_BLANK);
+  });
   if(effDate) list = list.filter(r => r.payTime && fmtDate(r.payTime) === effDate);
-  // 字段筛选叠加（展示的全部字段）：姓名/会员号模糊包含，其余精确匹配；收款时间用月度/日期承担，VAB 按命中状态
+  // 字段筛选叠加（展示的全部字段）：姓名/会员号模糊包含，其余多选精确命中；收款时间用月度/日期承担，VAB 按命中状态
   const f = detailFilters || {};
   if(f.name){ const q=String(f.name).toLowerCase(); list=list.filter(r=>String(r.name||'').toLowerCase().includes(q)); }
   if(f.memberNo){ const q=String(f.memberNo).toLowerCase(); list=list.filter(r=>String(r.memberNo||'').toLowerCase().includes(q)); }
+  // 多选命中：空数组=不过滤；'__blank__' 匹配「字段值为空白」的行，其余按 trim 后精确匹配
+  const multiHit = (set, raw) => {
+    const v = String(raw==null?'':raw).trim();
+    if(set.includes(MS_BLANK) && v==='') return true;
+    return set.includes(v);
+  };
   ['channelClass','channelL1','channelL2','visitType','consultant','cashier'].forEach(k=>{
-    if(f[k]) list=list.filter(r=>String(r[k]||'').trim()===f[k]);
+    if(f[k] && f[k].length) list=list.filter(r=>multiHit(f[k], r[k]));
   });
-  if(f.dept) list=list.filter(r=>effectiveDept(r)===f.dept);
+  if(f.dept && f.dept.length) list=list.filter(r=>multiHit(f.dept, effectiveDept(r)));
   // 金额筛选（运算符+数值）：数值非空才生效；op 存于 <key>Op（''=等于）
   const applyAmt = (field) => {
     const raw = String(f[field]||'').trim();
@@ -2164,8 +2178,11 @@ function filterOrdersByTab(key){
   };
   applyAmt('cashPay');
   applyAmt('assetDeduct');
-  if(f.vab==='hit') list=list.filter(r=>isVabMember(r.memberNo));
-  else if(f.vab==='miss') list=list.filter(r=>!isVabMember(r.memberNo));
+  if(f.vab && f.vab.length){
+    const hit=f.vab.includes('hit'), miss=f.vab.includes('miss');
+    if(hit && !miss) list=list.filter(r=>isVabMember(r.memberNo));
+    else if(miss && !hit) list=list.filter(r=>!isVabMember(r.memberNo));
+  }
   return list;
 }
 
@@ -2269,6 +2286,52 @@ function renderPager(page, pageCount){
   </div>`;
 }
 
+// —— 多选下拉组件（msel）：按钮 + 复选面板；支持多选、（空白）筛选、全选/清空 ——
+// 展开态存 mselRuntime.open（key），重渲染后由 applyMselOpenState 恢复，勾选后面板不闪没
+function mselGet(key){
+  if(key === '__month__') return detailMonth;
+  if(key === 'mkt:channel') return Array.isArray(mktFilters.channel) ? mktFilters.channel : [];
+  const v = detailFilters[key];
+  return Array.isArray(v) ? v : [];
+}
+function mselSet(key, arr){
+  if(key === '__month__'){ detailMonth = arr; return; }
+  if(key === 'mkt:channel'){ mktFilters.channel = arr; return; }
+  detailFilters[key] = arr;
+}
+function mselLabelOf(key, val){
+  const arr = mselRuntime.options[key] || [];
+  const it = arr.find(x => (Array.isArray(x)?x[0]:x) === val);
+  return it ? (Array.isArray(it)?it[1]:it) : val;
+}
+function mselBtnText(label, key, set){
+  if(!set || !set.length) return label + '：全部';
+  if(set.length === 1) return set[0] === MS_BLANK ? '（空白）' : mselLabelOf(key, set[0]);
+  return label + ' · 已选' + set.length + '项';
+}
+function mselHTML(key, label, arr){
+  mselRuntime.options[key] = arr;
+  const set = mselGet(key);
+  const items = [];
+  if(key !== 'vab' && key !== 'mkt:channel')   // VAB 仅命中/未命中两态；营销渠道候选里「—」即空白行，无额外空白概念
+    items.push('<label class="msel-item"><input type="checkbox" value="'+MS_BLANK+'" '+(set.includes(MS_BLANK)?'checked':'')+'><span>（空白）</span></label>');
+  arr.forEach(x=>{
+    const v = Array.isArray(x)?x[0]:x, t = Array.isArray(x)?x[1]:x;
+    items.push('<label class="msel-item"><input type="checkbox" value="'+esc(v)+'" '+(set.includes(v)?'checked':'')+'><span>'+esc(t)+'</span></label>');
+  });
+  return '<span class="detail-filter"><span class="msel" data-mskey="'+key+'">'
+    + '<button type="button" class="msel-btn detail-select" title="'+esc(label)+'（可多选）">'+esc(mselBtnText(label,key,set))+'<span class="msel-caret">▾</span></button>'
+    + '<span class="msel-panel"><span class="msel-actions">'
+    + '<button type="button" class="msel-act" data-msact="all">全选</button>'
+    + '<button type="button" class="msel-act" data-msact="none">清空</button>'
+    + '</span>' + items.join('') + '</span></span></span>';
+}
+function applyMselOpenState(){
+  document.querySelectorAll('.msel').forEach(b=>{
+    b.classList.toggle('open', b.dataset.mskey === mselRuntime.open);
+  });
+}
+
 // 6c. 导入数据明细（扁平展示全部导入订单 + 标签筛选，便于核对原始数据 / VAB 命中）
 function renderImportDetails(){
   const el = $('import-details');
@@ -2287,12 +2350,10 @@ function renderImportDetails(){
   const start = (detailPage-1) * detailPageSize;
   const pageItems = list.slice(start, start + detailPageSize);
   const isMobile = isMobileView();
-  // 月度 / 日期 筛选下拉（选项来自当前导入订单中实际出现的月份/日期，按时间升序）
+  // 月度候选（多选下拉）；日期保持点选式日期控件（单选三态）
   const latest = latestOrderDate();
   const months = [...new Set(orders.map(r=>r.payTime?fmtMonth(r.payTime):null).filter(Boolean))].sort();
   const dates  = [...new Set(orders.map(r=>r.payTime?fmtDate(r.payTime):null).filter(Boolean))].sort();
-  const monthOpts = ['<option value="">全部月份</option>']
-    .concat(months.map(m=>`<option value="${m}" ${m===detailMonth?'selected':''}>${m}</option>`)).join('');
   // 日期筛选改为日期控件（type=date）：值='' 表示全部日期；默认显示当日（最新日期）；
   // 「当日」按钮可随时回到默认口径。min/max 限定在数据实际日期范围内，便于控件选择。
   const dateMin = dates[0] || '';
@@ -2307,11 +2368,6 @@ function renderImportDetails(){
   const fText = (key,label) => `<label class="detail-filter">${label}`
     + `<input type="text" class="detail-select" data-dfilter-text="${key}" value="${esc(detailFilters[key]||'')}" `
     + `placeholder="含…" style="min-width:88px;"></label>`;
-  const fSel = (key,label,arr) => `<label class="detail-filter">${label}`
-    + `<select class="detail-select" data-dfilter="${key}">`
-    + ['<option value="">'+label+'：全部</option>']
-        .concat(arr.map(v=>`<option value="${esc(v)}" ${String(detailFilters[key]||'')===v?'selected':''}>${esc(v)}</option>`)).join('')
-    + '</select></label>';
   // 数值筛选（运算符+数值，2026-10-13 需求）：op 存 <key>Op（''=等于），数值存 <key>；数值为空=不筛选
   const fNum = (key,label) => `<label class="detail-filter">${label}`
     + `<select class="detail-select" data-dfilter="${key}Op" style="min-width:auto;" title="选择比较方式">`
@@ -2321,15 +2377,13 @@ function renderImportDetails(){
     + `placeholder="数值" style="width:96px;min-width:auto;"></label>`;
   const effDateOn = !!detailDate && detailDate !== '__latest__';
   // 运算符键（*Op，''=等于）不计入「已激活筛选」，避免仅选运算符未填数值时出现清除按钮/计数虚高
-  const activeFilterEntries = Object.entries(detailFilters||{}).filter(([k,v]) => v && !k.endsWith('Op'));
-  const anyDetailFilter = !!(detailMonth||effDateOn||activeFilterEntries.length);
+  const activeFilterEntries = Object.entries(detailFilters||{}).filter(([k,v]) => (Array.isArray(v)?v.length:!!v) && !k.endsWith('Op'));
+  const anyDetailFilter = !!(detailMonth.length||effDateOn||activeFilterEntries.length);
   const filterBar = `
     <div class="detail-filters ${detailFiltersCollapsed?'collapsed':''}">
       <button type="button" id="detail-filter-toggle" class="detail-reset ftoggle" title="展开/收起筛选区">⚙ 筛选${activeFilterEntries.length?`（${activeFilterEntries.length}）`:''} ${detailFiltersCollapsed?'▸':'▴'}</button>
       <div class="filters-body">
-      <label class="detail-filter">月度
-        <select id="detail-month-filter" class="detail-select">${monthOpts}</select>
-      </label>
+      ${mselHTML('__month__','月度',months)}
       <label class="detail-filter">日期
         <input type="date" id="detail-date-filter" class="detail-select" style="min-width:auto;"
           min="${dateMin}" max="${dateMax}"
@@ -2339,22 +2393,16 @@ function renderImportDetails(){
       <button type="button" id="detail-date-today" class="detail-reset" title="回到当日（最新日期 ${latest}）">当日</button>
       ${fText('name','姓名')}
       ${fText('memberNo','会员号')}
-      ${fSel('channelClass','渠道分类',distinct('channelClass'))}
-      ${fSel('channelL1','一级渠道',distinct('channelL1'))}
-      ${fSel('channelL2','二级渠道',distinct('channelL2'))}
-      ${fSel('visitType','到访类型',distinct('visitType'))}
-      ${fSel('consultant','咨询师',distinct('consultant'))}
-      ${fSel('cashier','收款员工',distinct('cashier'))}
+      ${mselHTML('channelClass','渠道分类',distinct('channelClass'))}
+      ${mselHTML('channelL1','一级渠道',distinct('channelL1'))}
+      ${mselHTML('channelL2','二级渠道',distinct('channelL2'))}
+      ${mselHTML('visitType','到访类型',distinct('visitType'))}
+      ${mselHTML('consultant','咨询师',distinct('consultant'))}
+      ${mselHTML('cashier','收款员工',distinct('cashier'))}
       ${fNum('cashPay','现款支付')}
       ${fNum('assetDeduct','资产抵扣金额')}
-      ${fSel('dept','报表归属',DEPT_OPTIONS)}
-      <label class="detail-filter">VAB
-        <select class="detail-select" data-dfilter="vab">
-          <option value="">VAB：全部</option>
-          <option value="hit" ${detailFilters.vab==='hit'?'selected':''}>✔ 命中</option>
-          <option value="miss" ${detailFilters.vab==='miss'?'selected':''}>— 未命中</option>
-        </select>
-      </label>
+      ${mselHTML('dept','报表归属',DEPT_OPTIONS)}
+      ${mselHTML('vab','VAB',[['hit','✔ 命中'],['miss','— 未命中']])}
       ${anyDetailFilter?'<button type="button" id="detail-filter-reset" class="detail-reset" title="清除全部筛选">清除筛选</button>':''}
       </div>
     </div>`;
@@ -2371,7 +2419,7 @@ function renderImportDetails(){
   const tabLabel = DETAIL_TABS.find(t=>t.key===detailTab).label;
   const dateNote = detailDate === '__latest__' ? ('当日 '+latest+' · ') : (detailDate ? ('日期 '+detailDate+' · ') : '');
   const activeFieldCount = activeFilterEntries.length;
-  const filterNote = (detailMonth?('月度 '+detailMonth+' · '):'')+dateNote
+  const filterNote = (detailMonth.length?('月度选'+detailMonth.length+'项 · '):'')+dateNote
     +(activeFieldCount?('字段筛选 '+activeFieldCount+' 项 · '):'');
   // 营销部两类页签的口径说明：初诊=30天内初诊客户（窗口随筛选日期联动，与③报表每日列一致）；
   // 类型空白=审计视图（全部空白类型订单）
@@ -2421,13 +2469,22 @@ function renderImportDetails(){
     ${content}
     ${renderPager(detailPage, pageCount)}
     <datalist id="vt-options">${vtOptions}</datalist>`;
-  // 事件委托（绑定一次）：标签切换 + 删除某条数据（删除后全表同步更新）+ 月度/日期/字段筛选
+  // 事件委托（绑定一次）：标签切换 + 删除某条数据（删除后全表同步更新）+ 筛选交互
   if(!el.dataset.bound){
     el.addEventListener('click', onImportDetailsClick);
     el.addEventListener('change', onImportDetailsChange);
     el.addEventListener('input', onImportDetailsInput);
+    // 点击面板外部收起多选下拉（捕获阶段，避免与其他点击逻辑竞争）
+    document.addEventListener('click', (ev)=>{
+      if(mselRuntime.open && !(ev.target.closest && ev.target.closest('.msel'))){
+        mselRuntime.open = null;
+        applyMselOpenState();
+      }
+    }, true);
     el.dataset.bound = '1';
   }
+  // 恢复多选下拉展开态（重渲染后面板不闪没）
+  applyMselOpenState();
 }
 
 // 导入明细点击：切换标签 / 删除某条订单 / 清除筛选（data-uid 精确删除，删除后各统计表联动重算）
@@ -2461,8 +2518,30 @@ function onImportDetailsClick(e){
   if(dtBtn){ detailDate='__latest__'; detailPage=1; renderImportDetails(); return; }
   const reset = e.target.closest && e.target.closest('#detail-filter-reset');
   if(reset){
-    detailMonth = ''; detailDate = '__latest__'; detailFilters = {}; detailPage = 1;
+    detailMonth = []; detailDate = '__latest__'; detailFilters = {}; detailPage = 1;
+    mselRuntime.open = null;
     renderImportDetails();
+    return;
+  }
+  // 多选下拉：开合按钮
+  const mb = e.target.closest && e.target.closest('.msel-btn');
+  if(mb){
+    const key = mb.closest('.msel').dataset.mskey;
+    mselRuntime.open = mselRuntime.open === key ? null : key;
+    applyMselOpenState();
+    return;
+  }
+  // 多选下拉：全选 / 清空
+  const act = e.target.closest && e.target.closest('.msel-act');
+  if(act){
+    const box = act.closest('.msel');
+    const key = box.dataset.mskey;
+    const arr = mselRuntime.options[key] || [];
+    mselSet(key, act.dataset.msact === 'all' ? arr.map(x=>Array.isArray(x)?x[0]:x) : []);
+    detailPage = 1;
+    mselRuntime.open = key;
+    renderImportDetails();
+    return;
   }
 }
 
@@ -2497,12 +2576,24 @@ function onImportDetailsChange(e){
     }
     return;
   }
-  const m = e.target.closest && e.target.closest('#detail-month-filter');
-  if(m){ detailMonth = m.value || ''; detailPage = 1; renderImportDetails(); return; }
   const d = e.target.closest && e.target.closest('#detail-date-filter');
   if(d){ detailDate = d.value || ''; detailPage = 1; renderImportDetails(); return; }
-  const fs = e.target.closest && e.target.closest('select[data-dfilter]');
-  if(fs){ detailFilters[fs.dataset.dfilter] = fs.value || ''; detailPage = 1; renderImportDetails(); return; }
+  // 数值筛选运算符下拉（cashPayOp / assetDeductOp；值筛选下拉已改为 msel 多选，不再走此分支）
+  const op = e.target.closest && e.target.closest('select[data-dfilter]');
+  if(op){ detailFilters[op.dataset.dfilter] = op.value || ''; detailPage = 1; renderImportDetails(); return; }
+  // 多选下拉复选框：更新选中集合后重渲染（展开态由 mselRuntime.open 恢复，面板不闪没）
+  const cb = e.target.closest && e.target.closest('.msel-panel input[type="checkbox"]');
+  if(cb){
+    const box = cb.closest('.msel');
+    const key = box.dataset.mskey;
+    const set = new Set(mselGet(key));
+    if(cb.checked) set.add(cb.value); else set.delete(cb.value);
+    mselSet(key, [...set]);
+    detailPage = 1;
+    mselRuntime.open = key;
+    renderImportDetails();
+    return;
+  }
   const ps = e.target.closest && e.target.closest('#detail-pagesize-filter');
   if(ps){ detailPageSize = parseInt(ps.value, 10) || 10; detailPage = 1; renderImportDetails(); return; }
   const ms = e.target.closest && e.target.closest('#detail-mobile-sort');
@@ -2674,7 +2765,7 @@ function isMktChuzhenOrder(r){
   return (chanHas(r,'营销部') || isRecToYingxiao(r)) && (r.visitType||'').trim() === '初诊';
 }
 // ⑤ 筛选状态：姓名/会员号模糊包含，来源渠道/初诊日期精确，消费笔数=运算符(cntOp)+数值(cnt)
-let mktFilters = { name:'', memberNo:'', channel:'', date:'', cnt:'', cntOp:'' };
+let mktFilters = { name:'', memberNo:'', channel:[], date:'', cnt:'', cntOp:'' }; // channel 为多选数组（[]=全部）
 let _mktFilterTimer = null;
 let mktPage = 1;      // ⑤清单分页：当前页（1 基）
 let mktPageSize = 10; // ⑤清单分页：每页条数
@@ -2729,7 +2820,7 @@ function renderMktFirstClients(){
   let clients = allClients;
   if(f.name){ const q=String(f.name).toLowerCase(); clients=clients.filter(c=>String(c.name).toLowerCase().includes(q)); }
   if(f.memberNo){ const q=String(f.memberNo).toLowerCase(); clients=clients.filter(c=>String(c.memberNo).toLowerCase().includes(q)); }
-  if(f.channel) clients=clients.filter(c=>c.channel===f.channel);
+  if(f.channel && f.channel.length) clients=clients.filter(c=>f.channel.includes(c.channel));
   if(f.date) clients=clients.filter(c=>c.firstDate===f.date);
   // 消费笔数（运算符+数值，2026-10-13 需求）：数值非空才生效；op 存 cntOp（''=等于）
   {
@@ -2739,7 +2830,7 @@ function renderMktFirstClients(){
       clients = clients.filter(c => cmpNum(c.cnt, op, t));
     }
   }
-  const anyF = !!(f.name||f.memberNo||f.channel||f.date||f.cnt);
+  const anyF = !!(f.name||f.memberNo||(f.channel&&f.channel.length)||f.date||f.cnt);
   const filterBar = `
     <div class="detail-filters ${mktFiltersCollapsed?'collapsed':''}" style="margin:0 0 8px;">
       <button type="button" id="mkt-filter-toggle" class="detail-reset ftoggle" title="展开/收起筛选区">⚙ 筛选 ${mktFiltersCollapsed?'▸':'▴'}</button>
@@ -2750,12 +2841,7 @@ function renderMktFirstClients(){
       <label class="detail-filter">会员号
         <input type="text" class="detail-select" data-mkt-filter="memberNo" value="${esc(f.memberNo||'')}" placeholder="含…" style="min-width:88px;">
       </label>
-      <label class="detail-filter">来源渠道
-        <select class="detail-select" data-mkt-filter="channel">
-          <option value="">全部</option>
-          ${channelOpts.map(v=>`<option value="${esc(v)}" ${f.channel===v?'selected':''}>${esc(v)}</option>`).join('')}
-        </select>
-      </label>
+      ${mselHTML('mkt:channel','来源渠道',channelOpts)}
       <label class="detail-filter">初诊日期
         <input type="date" class="detail-select" data-mkt-filter="date" style="min-width:auto;"
           min="${dateOpts[0]||''}" max="${dateOpts[dateOpts.length-1]||''}" value="${esc(f.date||'')}"
@@ -2850,9 +2936,11 @@ function renderMktFirstClients(){
     el.addEventListener('input', onMktFirstFilterInput);
     el.dataset.bound = '1';
   }
+  // 恢复多选下拉展开态（重渲染后面板不闪没）
+  applyMselOpenState();
 }
 
-// ⑤ 筛选/分页交互：翻页按钮 + 下拉/重置 + 文本防抖（保持焦点）
+// ⑤ 筛选/分页交互：翻页按钮 + 下拉/重置 + 文本防抖（保持焦点）+ 多选渠道
 function onMktFirstFilterClick(e){
   const pg = e.target.closest && e.target.closest('[data-mpage]');
   if(pg){ mktPage = parseInt(pg.dataset.mpage, 10) || 1; renderMktFirstClients(); return; }
@@ -2864,10 +2952,42 @@ function onMktFirstFilterClick(e){
     renderMktFirstClients();
     return;
   }
+  // 多选下拉：开合按钮 / 全选 / 清空
+  const mb = e.target.closest && e.target.closest('.msel-btn');
+  if(mb){
+    const key = mb.closest('.msel').dataset.mskey;
+    mselRuntime.open = mselRuntime.open === key ? null : key;
+    applyMselOpenState();
+    return;
+  }
+  const act = e.target.closest && e.target.closest('.msel-act');
+  if(act){
+    const box = act.closest('.msel');
+    const key = box.dataset.mskey;
+    const arr = mselRuntime.options[key] || [];
+    mselSet(key, act.dataset.msact === 'all' ? arr.map(x=>Array.isArray(x)?x[0]:x) : []);
+    mktPage = 1;
+    mselRuntime.open = key;
+    renderMktFirstClients();
+    return;
+  }
   const rst = e.target.closest && e.target.closest('#mkt-filter-reset');
-  if(rst){ mktFilters = { name:'', memberNo:'', channel:'', date:'', cnt:'', cntOp:'' }; mktPage = 1; renderMktFirstClients(); }
+  if(rst){ mktFilters = { name:'', memberNo:'', channel:[], date:'', cnt:'', cntOp:'' }; mktPage = 1; mselRuntime.open = null; renderMktFirstClients(); }
 }
 function onMktFirstFilterChange(e){
+  // 多选下拉复选框：更新选中集合后重渲染（展开态由 mselRuntime.open 恢复）
+  const cb = e.target.closest && e.target.closest('.msel-panel input[type="checkbox"]');
+  if(cb){
+    const box = cb.closest('.msel');
+    const key = box.dataset.mskey;
+    const set = new Set(mselGet(key));
+    if(cb.checked) set.add(cb.value); else set.delete(cb.value);
+    mselSet(key, [...set]);
+    mktPage = 1;
+    mselRuntime.open = key;
+    renderMktFirstClients();
+    return;
+  }
   const ps = e.target.closest && e.target.closest('#mkt-pagesize');
   if(ps){ mktPageSize = parseInt(ps.value, 10) || 10; mktPage = 1; renderMktFirstClients(); return; }
   // 下拉与日期控件（type=date）统一走 change：清空=全部

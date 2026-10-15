@@ -269,6 +269,20 @@
   .detail-select:focus{outline:none;border-color:var(--c-head);box-shadow:0 0 0 2px rgba(0,32,96,.12);}
   .detail-reset{margin:0;border:1px solid var(--c-border);background:#fff;color:var(--c-head);cursor:pointer;font-size:12px;line-height:1;border-radius:8px;padding:5px 12px;font-family:inherit;font-weight:500;}
   .detail-reset:hover{background:var(--c-head);color:#fff;border-color:var(--c-head);}
+  /* 多选下拉（msel）：按钮 + 复选面板，支持多选 /（空白）/ 全选 / 清空 */
+  .msel{position:relative;display:inline-flex;}
+  .msel-btn{display:inline-flex;align-items:center;gap:6px;text-align:left;min-width:120px;}
+  .msel-btn .msel-caret{margin-left:auto;font-size:10px;color:var(--c-muted);transition:transform .15s;}
+  .msel.open .msel-btn{border-color:var(--c-head);box-shadow:0 0 0 2px rgba(0,32,96,.12);}
+  .msel.open .msel-caret{transform:rotate(180deg);}
+  .msel-panel{display:none;position:absolute;top:calc(100% + 4px);left:0;z-index:40;min-width:170px;max-width:300px;max-height:260px;overflow:auto;background:#fff;border:1px solid var(--c-border);border-radius:10px;box-shadow:0 10px 28px rgba(0,32,96,.16);padding:4px 0;}
+  .msel.open .msel-panel{display:block;}
+  .msel-actions{display:flex;gap:6px;padding:6px 8px;position:sticky;top:0;background:#fff;border-bottom:1px solid #eef2f8;z-index:1;}
+  .msel-act{flex:1;border:1px solid var(--c-border);background:#fff;color:var(--c-head);font-size:11px;line-height:1;padding:4px 0;border-radius:6px;cursor:pointer;font-family:inherit;}
+  .msel-act:hover{background:var(--c-head);color:#fff;border-color:var(--c-head);}
+  label.msel-item{display:flex;align-items:center;gap:7px;padding:5px 10px;font-size:12px;color:var(--c-text);cursor:pointer;white-space:nowrap;font-weight:400;}
+  label.msel-item:hover{background:#f2f6fc;}
+  label.msel-item input{margin:0;accent-color:var(--c-head);flex:none;}
   .table-wrap{max-height:300px;overflow:auto;border:1px solid var(--c-border);border-radius:var(--radius-sm);background:#fff;}
   table.data{width:100%;border-collapse:collapse;font-size:12px;}
   table.data th,table.data td{border:1px solid #e5ecf6;padding:6px 9px;white-space:nowrap;}

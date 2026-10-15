@@ -40,21 +40,16 @@ const MODULES = [
   },
   {
     id: 'daily-performance',
-    name: '每日业绩日报表',
+    name: '日业绩统计',
     icon: '📈',
     group: '数据统计',
     type: 'embed',
     src: '/pages/daily-performance/index.html',
-    desc: '各部门业绩完成情况跟踪日报表（订单 / VAB / 月目标 / 导出）',
-  },
-  {
-    id: 'daily-performance-chuzhen',
-    name: '每日业绩日报表·初诊版',
-    icon: '📈',
-    group: '数据统计',
-    type: 'embed',
-    src: '/pages/daily-performance-chuzhen/index.html',
-    desc: '各部门业绩完成情况跟踪日报表·初诊版（订单 / VAB / 月目标 / 导出）',
+    desc: '每日业绩统计（标准版 / 初诊版）：订单 / VAB / 月目标 / 导出',
+    children: [
+      { id: 'dp-std', name: '日业绩报表', icon: '📊', src: '/pages/daily-performance/index.html' },
+      { id: 'dp-chuzhen', name: '日业绩报表·初诊', icon: '🩺', src: '/pages/daily-performance-chuzhen/index.html' },
+    ],
   },
   {
     id: 'monthly-analysis',
@@ -166,6 +161,9 @@ function renderNav() {
 
 /* ---------- 二级子功能解析与打开 ---------- */
 function resolveTarget(id) {
+  /* 旧版 hash 兼容：合并模块前的一级菜单 id → 新的子功能 id */
+  if (id === 'daily-performance') id = 'dp-std';
+  if (id === 'daily-performance-chuzhen') id = 'dp-chuzhen';
   const mod = state.modules.find((m) => m.id === id);
   if (mod) return { kind: 'module', mod };
   for (const m of state.modules) {
