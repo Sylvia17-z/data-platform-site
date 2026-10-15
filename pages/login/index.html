@@ -3,67 +3,99 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>登录 · 海蓓医管考核数据平台</title>
+<title>登录 · 数据统计平台</title>
 <style>
   *{box-sizing:border-box;margin:0;padding:0;}
   html,body{height:100%;}
   body{
     font-family:"Microsoft YaHei","PingFang SC",sans-serif;
-    background:linear-gradient(160deg,#eef3f9 0%,#dce7f3 55%,#cddcec 100%);
+    background:linear-gradient(165deg,#f4f8fd 0%,#e6eef8 50%,#d8e6f4 100%);
     display:flex;align-items:center;justify-content:center;
     min-height:100vh;padding:24px 16px;color:#1c2b3a;
+    position:relative;overflow:hidden;
   }
+  /* 背景柔和光斑装饰 */
+  body::before,body::after{
+    content:"";position:absolute;border-radius:50%;pointer-events:none;filter:blur(60px);
+  }
+  body::before{width:420px;height:420px;left:-120px;top:-140px;background:rgba(42,93,168,.14);}
+  body::after{width:360px;height:360px;right:-100px;bottom:-120px;background:rgba(96,150,220,.16);}
   .login-card{
-    background:#fff;border-radius:16px;box-shadow:0 18px 60px rgba(15,35,64,.22);
-    width:min(420px,94vw);padding:32px 30px 24px;
+    background:rgba(255,255,255,.92);backdrop-filter:blur(8px);
+    border:1px solid rgba(255,255,255,.7);
+    border-radius:20px;box-shadow:0 20px 50px rgba(60,90,140,.13);
+    width:min(420px,94vw);padding:34px 32px 26px;
+    position:relative;z-index:1;
+    animation:cardIn .5s cubic-bezier(.22,.8,.36,1) both;
   }
-  .brand{display:flex;align-items:center;gap:12px;margin-bottom:6px;}
+  @keyframes cardIn{from{opacity:0;transform:translateY(14px);}to{opacity:1;transform:none;}}
+  .brand{display:flex;align-items:center;gap:13px;margin-bottom:6px;}
   .brand .logo{
-    width:44px;height:44px;border-radius:12px;flex:none;
-    background:linear-gradient(135deg,#123c73,#2a5da8);
-    display:flex;align-items:center;justify-content:center;font-size:24px;color:#fff;
+    width:46px;height:46px;border-radius:14px;flex:none;
+    background:linear-gradient(135deg,#123c73,#2f66b0);
+    box-shadow:0 6px 16px rgba(18,60,115,.28);
+    display:flex;align-items:center;justify-content:center;font-size:23px;color:#fff;
   }
-  .brand h1{font-size:19px;color:#123c73;font-weight:700;letter-spacing:.5px;}
-  .brand .sub{font-size:12px;color:#8a97a8;margin-top:2px;}
-  .divider{height:1px;background:#e4ebf3;margin:16px 0 4px;}
-  .tabs{display:flex;gap:8px;margin:14px 0 2px;}
+  .brand h1{font-size:20px;color:#123c73;font-weight:700;letter-spacing:.5px;}
+  .brand .sub{font-size:12px;color:#8a97a8;margin-top:3px;}
+  .divider{height:1px;background:linear-gradient(90deg,transparent,#dfe8f2 20%,#dfe8f2 80%,transparent);margin:18px 0 2px;}
+  /* 胶囊分段页签 */
+  .tabs{
+    display:flex;gap:4px;margin:16px 0 2px;
+    background:#eef3f9;border-radius:12px;padding:4px;
+  }
   .tab{
-    flex:1;border:1px solid #d5dde7;background:#f4f7fb;color:#5a6b80;border-radius:8px;
-    padding:9px 0;font-size:14px;font-family:inherit;cursor:pointer;text-align:center;transition:all .15s;
+    flex:1;border:none;background:transparent;color:#5a6b80;border-radius:9px;
+    padding:9px 0;font-size:14px;font-family:inherit;cursor:pointer;text-align:center;
+    transition:all .18s;
   }
-  .tab.active{background:#123c73;border-color:#123c73;color:#fff;font-weight:600;}
+  .tab:hover{color:#123c73;}
+  .tab.active{
+    background:#fff;color:#123c73;font-weight:600;
+    box-shadow:0 2px 8px rgba(60,90,140,.14);
+  }
   h3{margin:14px 0 4px;font-size:15px;color:#123c73;}
-  label{display:block;font-size:12px;color:#5a6b80;margin:12px 0 4px;}
+  label{display:block;font-size:12px;color:#5a6b80;margin:12px 0 5px;}
   input{
-    width:100%;border:1px solid #d5dde7;border-radius:8px;padding:10px 12px;
-    font-size:14px;font-family:inherit;outline:none;transition:border .15s;
+    width:100%;border:1px solid #d9e2ec;border-radius:10px;padding:10px 13px;
+    font-size:14px;font-family:inherit;outline:none;
+    transition:border .15s,box-shadow .15s;background:#fbfdff;
   }
-  input:focus{border-color:#2a5da8;}
+  input::placeholder{color:#b3bfce;}
+  input:focus{border-color:#2a5da8;background:#fff;box-shadow:0 0 0 3px rgba(42,93,168,.12);}
   .code-line{display:flex;gap:8px;}
   .code-line input{flex:1;min-width:0;}
   .code-line button{flex:none;white-space:nowrap;}
-  .row{display:flex;flex-wrap:wrap;gap:10px;margin-top:18px;}
+  .row{display:flex;flex-wrap:wrap;gap:10px;margin-top:20px;}
   button{
-    border:1px solid #123c73;background:#fff;color:#123c73;border-radius:8px;
-    padding:10px 16px;font-size:14px;font-family:inherit;cursor:pointer;transition:all .15s;
+    border:1px solid #cfdae6;background:#fff;color:#123c73;border-radius:10px;
+    padding:10px 18px;font-size:14px;font-family:inherit;cursor:pointer;
+    transition:all .18s;
   }
-  button:hover{background:#f0f5fb;}
-  button.sa-pri{background:#123c73;color:#fff;}
-  button.sa-pri:hover{background:#1a4d8f;}
-  button:disabled{opacity:.55;cursor:default;}
+  button:hover{background:#f2f7fd;border-color:#2a5da8;transform:translateY(-1px);}
+  button.sa-pri{
+    background:linear-gradient(135deg,#123c73,#2a5da8);border-color:transparent;color:#fff;
+    box-shadow:0 4px 12px rgba(18,60,115,.24);
+  }
+  button.sa-pri:hover{background:linear-gradient(135deg,#1a4d8f,#33689f);box-shadow:0 6px 16px rgba(18,60,115,.32);}
+  button:disabled{opacity:.55;cursor:default;transform:none;}
   .sa-danger{border-color:#c0392b;color:#c0392b;}
-  .sa-danger:hover{background:#fdf2f0;}
-  #sa-msg,#s-msg{margin-top:10px;font-size:13px;min-height:18px;color:#c0392b;}
-  #sa-tip{margin-top:14px;font-size:11px;color:#8a97a8;line-height:1.7;border-top:1px dashed #e4ebf3;padding-top:12px;}
-  .foot{margin-top:16px;text-align:center;font-size:11px;color:#a8b4c4;}
+  .sa-danger:hover{background:#fdf2f0;border-color:#c0392b;}
+  #sa-msg,#s-msg{margin-top:10px;font-size:13px;min-height:18px;color:#c0392b;transition:opacity .2s;}
+  .file-meta{margin-top:10px;font-size:11px;color:#8a97a8;line-height:1.7;}
+  .foot{margin-top:18px;text-align:center;font-size:11px;color:#a8b4c4;}
+  @media (max-width:420px){
+    .login-card{padding:26px 20px 22px;}
+    .brand h1{font-size:18px;}
+  }
 </style>
 </head>
 <body>
 <div class="login-card">
   <div class="brand">
-    <div class="logo">🏥</div>
+    <div class="logo">📊</div>
     <div>
-      <h1>海蓓医管考核数据平台</h1>
+      <h1>数据统计平台</h1>
       <div class="sub">登录后可多端同步数据 · 请使用邮箱账号</div>
     </div>
   </div>
@@ -71,7 +103,7 @@
 
   <div class="tabs">
     <button type="button" class="tab active" id="tab-login">登 录</button>
-    <button type="button" class="tab" id="tab-signup">📝 注册新账号</button>
+    <button type="button" class="tab" id="tab-signup">注册新账号</button>
   </div>
 
   <!-- ============ 登录页签 ============ -->
@@ -93,11 +125,11 @@
     </div>
     <div id="sa-msg"></div>
     <div class="row">
-      <button class="sa-pri" id="sa-send">📧 获取验证码</button>
-      <button class="sa-pri" id="sa-verify">✅ 验证并登录</button>
-      <button id="sa-pwdlogin">🔑 密码登录</button>
+      <button class="sa-pri" id="sa-send">获取验证码</button>
+      <button class="sa-pri" id="sa-verify">验证并登录</button>
+      <button id="sa-pwdlogin">密码登录</button>
       <button id="sa-forgot">忘记密码？</button>
-      <button class="sa-pri" id="sa-reset" style="display:none;">✅ 重置密码</button>
+      <button class="sa-pri" id="sa-reset" style="display:none;">重置密码</button>
     </div>
   </div>
 
@@ -108,7 +140,7 @@
     <label>邮箱验证码（用于验证邮箱真实有效）</label>
     <div class="code-line">
       <input id="s-code" type="text" inputmode="numeric" placeholder="6 位邮箱验证码">
-      <button id="s-send" type="button">📧 获取验证码</button>
+      <button id="s-send" type="button">获取验证码</button>
     </div>
     <label>设置密码（至少 6 位）</label>
     <input id="s-pwd" type="password" placeholder="设置登录密码" autocomplete="new-password">
@@ -116,12 +148,11 @@
     <input id="s-pwd2" type="password" placeholder="再次输入密码" autocomplete="new-password">
     <div id="s-msg"></div>
     <div class="row">
-      <button class="sa-pri" id="s-signup">📝 注册并登录</button>
+      <button class="sa-pri" id="s-signup">注册并登录</button>
     </div>
-    <div class="file-meta" style="margin-top:10px;font-size:11px;color:#8a97a8;line-height:1.7;">注册成功后即自动登录；以后各设备均用「邮箱 + 密码」登录，数据自动多端同步。</div>
+    <div class="file-meta">注册成功后即自动登录；以后各设备均用「邮箱 + 密码」登录，数据自动多端同步。</div>
   </div>
 
-  <div id="sa-tip">默认管理员：账号 <b>admin</b> / 密码 <b>123</b>（本地账号，数据存本机不同步）；邮箱账号数据按账号隔离，仅本人可读取，登录后各页面数据自动云端同步。</div>
   <div class="foot">海蓓 · 医管考核数据统计</div>
 </div>
 
