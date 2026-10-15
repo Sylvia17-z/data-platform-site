@@ -9,17 +9,13 @@
   html,body{height:100%;}
   body{
     font-family:"Microsoft YaHei","PingFang SC",sans-serif;
-    background:linear-gradient(165deg,#f4f8fd 0%,#e6eef8 50%,#d8e6f4 100%);
+    background:
+      linear-gradient(rgba(255,255,255,.52), rgba(255,255,255,.64)),
+      url('login-bg.jpg') center / cover no-repeat fixed;
     display:flex;align-items:center;justify-content:center;
     min-height:100vh;padding:24px 16px;color:#1c2b3a;
     position:relative;overflow:hidden;
   }
-  /* 背景柔和光斑装饰 */
-  body::before,body::after{
-    content:"";position:fixed;border-radius:50%;pointer-events:none;filter:blur(60px);z-index:0;
-  }
-  body::before{width:420px;height:420px;left:-120px;top:-140px;background:rgba(42,93,168,.14);}
-  body::after{width:360px;height:360px;right:-100px;bottom:-120px;background:rgba(96,150,220,.16);}
   .login-card{
     background:rgba(255,255,255,.92);backdrop-filter:blur(8px);
     border:1px solid rgba(255,255,255,.7);
