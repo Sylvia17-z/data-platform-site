@@ -2447,7 +2447,7 @@ function renderImportDetails(){
   const anyDetailFilter = !!(detailMonth.length||effDateOn||activeFilterEntries.length);
   const filterBar = `
     <div class="detail-filters ${detailFiltersCollapsed?'collapsed':''}">
-      <button type="button" id="detail-filter-toggle" class="detail-reset ftoggle" title="展开/收起筛选区">⚙ 筛选${activeFilterEntries.length?`（${activeFilterEntries.length}）`:''} ${detailFiltersCollapsed?'▸':'▴'}</button>
+      <button type="button" id="detail-filter-toggle" class="ftoggle" title="展开/收起筛选区"><span>⚙</span><span>筛选</span>${activeFilterEntries.length?`<span class="ft-count">${activeFilterEntries.length}</span>`:''}<span class="ft-caret">${detailFiltersCollapsed?'▸':'▴'}</span></button>
       <div class="filters-body">
       ${mselHTML('__month__','月度',months)}
       <label class="detail-filter date-filter"><span class="df-label">日期</span>
@@ -2916,7 +2916,7 @@ function renderMktFirstClients(){
   const anyF = !!(f.name||f.memberNo||(f.channel&&f.channel.length)||f.date||f.cnt);
   const filterBar = `
     <div class="detail-filters ${mktFiltersCollapsed?'collapsed':''}" style="margin:0 0 8px;">
-      <button type="button" id="mkt-filter-toggle" class="detail-reset ftoggle" title="展开/收起筛选区">⚙ 筛选 ${mktFiltersCollapsed?'▸':'▴'}</button>
+      <button type="button" id="mkt-filter-toggle" class="ftoggle" title="展开/收起筛选区"><span>⚙</span><span>筛选</span>${anyF?'<span class="ft-count">生效</span>':''}<span class="ft-caret">${mktFiltersCollapsed?'▸':'▴'}</span></button>
       <div class="filters-body">
       <label class="detail-filter"><span class="df-label">姓名</span>
         <input type="text" class="detail-select" data-mkt-filter="name" value="${esc(f.name||'')}" placeholder="含…">

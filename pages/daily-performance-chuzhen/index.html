@@ -264,11 +264,12 @@
   .detail-tab.active{background:var(--c-head);color:#fff;border-color:var(--c-head);font-weight:600;}
   .detail-del{margin:0 2px;border:1px solid var(--c-border);background:#fff;color:var(--c-error);cursor:pointer;font-size:13px;line-height:1;border-radius:5px;padding:2px 8px;font-family:inherit;}
   .detail-del:hover{background:var(--c-error);color:#fff;border-color:var(--c-error);}
-  /* ===== 筛选区：统一网格（标签在上、控件等宽对齐），规整协调 ===== */
+  /* ===== 筛选区：统一网格（标签在上、控件等宽对齐）+ 轻卡片分组，规整协调 ===== */
   .detail-filters{display:flex;flex-wrap:wrap;align-items:flex-start;gap:10px;margin:2px 0 10px;}
   .detail-filters .filters-body{
     display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));
     gap:9px 10px;flex:1 1 340px;align-items:end;grid-auto-flow:row dense;
+    background:#fbfcfe;border:1px solid var(--c-border);border-radius:10px;padding:12px 14px;
   }
   .detail-filters.collapsed .filters-body{display:none;}
   .detail-filters .ftoggle{cursor:pointer;user-select:none;white-space:nowrap;align-self:start;}
@@ -294,11 +295,31 @@
   .filters-foot{grid-column:1/-1;display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:2px;color:var(--c-muted);font-size:12px;}
   #detail-filter-reset{grid-column:1/-1;justify-self:start;}
   .detail-pager .detail-filter.pager-size{flex-direction:row;align-items:center;gap:6px;font-size:12px;}
+  /* 筛选按钮（醒目）：实心藏蓝胶囊 + 生效计数 + 展开状态箭头 */
+  .ftoggle{
+    display:inline-flex;align-items:center;gap:7px;align-self:flex-start;
+    background:var(--c-head);border:1px solid var(--c-head);color:#fff;
+    font-family:inherit;font-size:12.5px;font-weight:600;letter-spacing:.3px;
+    padding:8px 15px;border-radius:999px;cursor:pointer;user-select:none;white-space:nowrap;
+    box-shadow:0 2px 8px rgba(0,32,96,.24);transition:background .15s,border-color .15s,box-shadow .15s,transform .1s;
+  }
+  .ftoggle:hover{background:#0a4ea3;border-color:#0a4ea3;box-shadow:0 4px 12px rgba(0,32,96,.30);}
+  .ftoggle:active{transform:translateY(1px);}
+  .ftoggle .ft-count{background:#fff;color:var(--c-head);border-radius:999px;font-size:11px;line-height:1;padding:2px 7px;font-weight:700;}
+  .ftoggle .ft-caret{font-size:10px;opacity:.92;}
   @media(max-width:640px){
     .detail-filters{display:block;}
-    .detail-filters .filters-body{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;flex:1 1 100%;}
+    .detail-filters .filters-body{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;flex:1 1 100%;padding:10px 12px;}
     .detail-filter .detail-select,.detail-filter .msel-btn{height:36px;}
     .num-filter,.date-filter{grid-column:1/-1;}
+  }
+  @media(min-width:641px){
+    /* 电脑端：更宽松的列宽与控件尺寸，筛选面板成组更清晰 */
+    .detail-filters{align-items:center;}
+    .detail-filters .filters-body{grid-template-columns:repeat(auto-fill,minmax(186px,1fr));gap:10px 12px;padding:13px 16px;}
+    .detail-filter{gap:4px;}
+    .detail-filter > .df-label{font-size:11.5px;}
+    .detail-filter .detail-select,.detail-filter .msel-btn{height:34px;font-size:12.5px;}
   }
   /* ⑤清单/弹窗 手机端卡片整卡可点击 */
   .detail-card.mkt-first-card{cursor:pointer;}
