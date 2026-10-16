@@ -27,7 +27,7 @@ async function ensureXlsxStyled(){
 
 // 1. 渠道分类枚举（用于选项下拉）
 const CHANNEL_CLASSES = ['营销部','商务部','市场部','公司所有','经营科室'];
-const L1_CHANNELS = ['品牌组','活动组','电商组','短视频组','商保业务','商务直客','中医科','儿科','客户转介绍','企业团检','市场田梦代理人','商务渠道-韩通代理人','公司所有'];
+const L1_CHANNELS = ['品牌组','活动组','电商组','新媒体组','短视频组','商保业务','商务直客','中医科','儿科','客户转介绍','企业团检','市场田梦代理人','商务渠道-韩通代理人','公司所有'];
 
 // 月目标默认值（万元）- 来自 sheet2 默认值
 const DEFAULT_TARGETS = {
@@ -442,12 +442,19 @@ async function syncFromCloud(){
 }
 async function saveOrdersToCloud(force){
   if(_cloudSaveTimer){ clearTimeout(_cloudSaveTimer); _cloudSaveTimer = null; }
+  // 失败可见性（2026-10-16）：force=true 表示用户显式动作（导入 / 清空 / 重算）触发的保存，
+  // 此时若云端没写成，除状态条外再弹一次 toast，避免「以为已存云端、其实只在本机」的静默失败。
+  const failSave = (msg) => {
+    setCloudStatus(msg, 'err');
+    if(force) showToast(msg, 'err', 5200);
+  };
   const doSave = async () => {
     _cloudSaveTimer = null;
-    const cloud = getCloud(); if(!cloud) return;
+    const cloud = getCloud();
+    if(!cloud){ failSave('云端组件未就绪：数据仅保存在本机，请刷新页面重试'); return; }
     let session = null;
     try{ const r = await cloud.auth.getSession(); session = r.data; if(r.error) session = null; }catch(e){ session = null; }
-    if(!session){ setCloudStatus('未登录 · 未同步云端', 'warn'); return; }
+    if(!session){ failSave('未登录云端：数据仅保存在本机，登录成功后才会同步'); return; }
     const payload = cloudPayload();
     // 空数据不写云端（清数据走 clearOrdersInCloud），避免把好的云端数据覆盖/误删成空的
     if(payload.orders.length === 0) return;
@@ -456,7 +463,7 @@ async function saveOrdersToCloud(force){
       // 直接报错导致「云端保存失败」→ 云端长期停留在旧快照，刷新后把新数据倒退覆盖。
       const { data: rows, error: selErr } = await cloud.database.from('dp_orders')
         .select('id, updated_at, payload').order('updated_at', { ascending:false }).limit(1);
-      if(selErr){ setCloudStatus('云端保存失败：' + (selErr.message || ''), 'err'); return; }
+      if(selErr){ failSave('云端保存失败：' + (selErr.message || '')); return; }
       const latest = Array.isArray(rows) && rows.length ? rows[0] : null;
       if(latest && latest.id != null){
         // 跨设备保护：云端已有比本地更新的数据（如另一台设备刚写入）且非强制保存时，
@@ -467,7 +474,7 @@ async function saveOrdersToCloud(force){
           return;
         }
         const { error } = await cloud.database.from('dp_orders').update({ payload, updated_at: new Date().toISOString() }).eq('id', latest.id);
-        if(error){ setCloudStatus('云端保存失败：' + (error.message || ''), 'err'); return; }
+        if(error){ failSave('云端保存失败：' + (error.message || '')); return; }
         // 清理可能存在的多余旧记录，保证下次读取只命中最新一条
         try{
           const { data: others } = await cloud.database.from('dp_orders').select('id');
@@ -481,12 +488,12 @@ async function saveOrdersToCloud(force){
         }catch(_){}
       }else{
         const { error } = await cloud.database.from('dp_orders').insert({ payload, updated_at: new Date().toISOString() });
-        if(error){ setCloudStatus('云端保存失败：' + (error.message || ''), 'err'); return; }
+        if(error){ failSave('云端保存失败：' + (error.message || '')); return; }
       }
       state.ordersTs = Number(payload.ts) || Date.now();
       setCloudStatus('已同步云端（' + payload.orders.length + ' 条）', 'ok');
     }catch(e){
-      setCloudStatus('云端保存异常：' + (e && e.message ? e.message : '网络错误'), 'err');
+      failSave('云端保存异常：' + (e && e.message ? e.message : '网络错误'));
     }
   };
   if(force){ await doSave(); } else { _cloudSaveTimer = setTimeout(doSave, 800); }
@@ -1037,7 +1044,7 @@ function calculate(orders, vabSet, cutoff, mktFirstKeysPre){
   // --- 0. 部门类别归属覆盖（⑥明细「报表归属」手动指定优先）---
   // 在明细表把某条明细的报表归属改为指定部门后，该行不再走渠道自动规则，直接计入指定部门；
   // 「其他」覆盖 = 从所有具体部门规则中剥离，落入残差「其他」；未指定（自动）的行走原有规则。
-  const DEPT_KEYS = ['品牌组-其他','活动组-活动支持','电商组','短视频组','品牌组-自然到店','商务部','其他'];
+  const DEPT_KEYS = ['品牌组-其他','活动组-活动支持','电商组','新媒体组','短视频组','品牌组-自然到店','商务部','其他'];
   const hasOv = r => DEPT_KEYS.includes(String(r.deptOverride||'').trim());
   const auto  = orders.filter(r => !hasOv(r));
   const ov    = k => orders.filter(r => String(r.deptOverride||'').trim() === k);
@@ -1075,6 +1082,14 @@ function calculate(orders, vabSet, cutoff, mktFirstKeysPre){
 
   // --- 3c. 电商组补充（2026-09-29 需求）：营销部 + 品牌组 + 二级渠道=线上400 → 归入电商组 ---
   const r3c = autoYx.filter(r => CC(r)==='营销部' && L1(r)==='品牌组' && L2(r).includes('线上400'));
+
+  // --- 3d. 新媒体组（2026-10-16 需求）：渠道分类=营销部 + 一级分类=新媒体组 → 独立部门类别 ---
+  //      口径与营销部其他类别完全一致：仅「30天内营销部初诊客户」的消费计入（autoYx 已含该门槛）；
+  //      ⑥明细的「报表归属」手动指定 新媒体组 时同样优先（ov）。
+  const r3d = [
+    ...autoYx.filter(r => CC(r)==='营销部' && L1(r)==='新媒体组'),
+    ...ov('新媒体组'),
+  ];
 
   // --- 4. 短视频组 ---
   const r4 = [
@@ -1141,21 +1156,22 @@ function calculate(orders, vabSet, cutoff, mktFirstKeysPre){
   const sumGaoXin = sumAll - sumBeiJiao;
   const sumStoreTotal = sumGaoXin + sumBeiJiao; // 门店合计 = 高新店 + 经开店
 
-  // --- 8. 其他 = 合计 - (品牌组-其他 + 活动组-活动支持 + 电商组 + 短视频组 + 品牌组-自然到店 + 商务部) ---
+  // --- 8. 其他 = 合计 - (品牌组-其他 + 活动组-活动支持 + 电商组 + 新媒体组 + 短视频组 + 品牌组-自然到店 + 商务部) ---
   // 注：市场部已并入"商务部"统一核算，故"其他"的扣减项里的「商务部」已含市场部金额，不会重复计入。
   // 注：原"活动组-自拓活动"板块已整体下线（不展示、不计算），其金额并入"其他"
   const sumBrandOther = sum(r1);
   const sumActSupport = sum(r2);
   const sumEcom = sum(r3) + sum(r3b) + sum(r3c);
+  const sumNewMedia = sum(r3d);
   const sumShort = sum(r4);
   const sumNature = sum(r5) + sum(r5b);
   const sumCommerce = sum(r6) + sum(r6b);
-  const sumOther = sumAll - (sumBrandOther + sumActSupport + sumEcom + sumShort + sumNature + sumCommerce);
+  const sumOther = sumAll - (sumBrandOther + sumActSupport + sumEcom + sumNewMedia + sumShort + sumNature + sumCommerce);
 
   return {
     rows: {
       '品牌组-其他': r1, '活动组-活动支持': r2,
-      '电商组': [...r3, ...r3b, ...r3c], '短视频组': r4,
+      '电商组': [...r3, ...r3b, ...r3c], '新媒体组': r3d, '短视频组': r4,
       '品牌组-自然到店': [...r5, ...r5b],
       '商务部': [...r6, ...r6b], '其他': orders.filter(()=>true),
       '合计': rAll, '新增业绩': r9, '基础业绩': orders, '管家部': r11,
@@ -1165,6 +1181,7 @@ function calculate(orders, vabSet, cutoff, mktFirstKeysPre){
       '品牌组-其他': sumBrandOther,
       '活动组-活动支持': sumActSupport,
       '电商组': sumEcom,
+      '新媒体组': sumNewMedia,
       '短视频组': sumShort,
       '品牌组-自然到店': sumNature,
       '商务部': sumCommerce,
@@ -1182,11 +1199,12 @@ function calculate(orders, vabSet, cutoff, mktFirstKeysPre){
 
 // 5. 报表渲染：表结构完全对齐截图 + 原表配色
 const REPORT_TEMPLATE = [
-  // 营销部（rowspan 5 = 公司支持2 + 部门业绩3）
-  // 月目标：公司支持块2行共享360；部门业绩块下 电商组+短视频组 合并为一格(77, rowspanTarget:2)，品牌组-自然到店 单独一格(3)
-  {main:'营销部', sub:'公司支持', item:'品牌组-其他', targetKey:'品牌组-其他', rowspanMain:5, rowspanSub:2, rowspanTarget:2, indent:1},
+  // 营销部（rowspan 6 = 公司支持2 + 部门业绩4）
+  // 月目标：公司支持块2行共享360；部门业绩块下 电商组+新媒体组+短视频组 合并为一格(77, rowspanTarget:3)，品牌组-自然到店 单独一格(3)
+  {main:'营销部', sub:'公司支持', item:'品牌组-其他', targetKey:'品牌组-其他', rowspanMain:6, rowspanSub:2, rowspanTarget:2, indent:1},
   {main:'',       sub:'',        item:'活动组-活动支持', targetKey:'活动组-活动支持', indent:1},
-  {main:'',       sub:'部门业绩', item:'电商组', targetKey:'电商组及短视频组', valueKey:'电商组', targetMergeKey:'电商组及短视频组', rowspanSub:3, rowspanTarget:2, indent:1},
+  {main:'',       sub:'部门业绩', item:'电商组', targetKey:'电商组及短视频组', valueKey:'电商组', targetMergeKey:'电商组及短视频组', rowspanSub:4, rowspanTarget:3, indent:1},
+  {main:'',       sub:'',        item:'新媒体组', targetKey:'电商组及短视频组', valueKey:'新媒体组', indent:1},
   {main:'',       sub:'',        item:'短视频组', targetKey:'电商组及短视频组', valueKey:'短视频组', indent:1},
   {main:'',       sub:'',        item:'品牌组-自然到店', targetKey:'品牌组-自然到店', valueKey:'品牌组-自然到店', indent:1},
   {main:'商务部', sub:'',        item:'', targetKey:'商务部', mergedLabel:true},
@@ -1251,7 +1269,7 @@ function renderReport(){
 // - 优先采用手动覆盖值（state.manual.month / state.manual.daily[date]）
 // - 未被手动覆盖的派生行按公式重算：
 //     基础业绩 = 合计 - 新增业绩
-//     其他     = 合计 - (品牌组-其他+活动组-活动支持+电商组+短视频组+品牌组-自然到店+商务部)
+//     其他     = 合计 - (品牌组-其他+活动组-活动支持+电商组+新媒体组+短视频组+品牌组-自然到店+商务部)
 //     高新     = 顶层合计 - 北郊   （主表顶层=合计；门店表顶层=门店合计）
 //     门店合计 = 高新 + 北郊
 function recomputeDerived(base, manual){
@@ -1259,7 +1277,7 @@ function recomputeDerived(base, manual){
   const man = manual || {};
   for(const k in man){ if(man[k] !== undefined && man[k] !== null && man[k] !== '') m[k] = Number(man[k]) || 0; }
   // 合计的组成项：6个部门块 + 其他（残差）。注意：新增业绩、管家部 是另一维度的子集，不计入合计。
-  const BLOCKS = ['品牌组-其他','活动组-活动支持','电商组','短视频组','品牌组-自然到店','商务部'];
+  const BLOCKS = ['品牌组-其他','活动组-活动支持','电商组','新媒体组','短视频组','品牌组-自然到店','商务部'];
   const g = k => (k in m ? (Number(m[k]) || 0) : 0);
   // 1) 合计：手动覆盖优先；否则当某部门块被手动覆盖时，仅按该块的增量调整原始合计；
   //    否则保持原合计（即 calculate 的真实总和 / 月视图的 Σ每日合计），不做任何重算。
@@ -1269,7 +1287,7 @@ function recomputeDerived(base, manual){
     if(delta !== 0) m['合计'] = (Number(base['合计']) || 0) + delta;
   }
   // 2) 其他：手动覆盖优先；否则 = 合计 - 6部门块之和（残差，随合计/部门块变化同步）
-  if(!('其他' in man)) m['其他'] = g('合计') - (g('品牌组-其他') + g('活动组-活动支持') + g('电商组') + g('短视频组') + g('品牌组-自然到店') + g('商务部'));
+  if(!('其他' in man)) m['其他'] = g('合计') - (g('品牌组-其他') + g('活动组-活动支持') + g('电商组') + g('新媒体组') + g('短视频组') + g('品牌组-自然到店') + g('商务部'));
   // 3) 基础业绩 = 合计 - 新增业绩
   if(!('基础业绩' in man)) m['基础业绩'] = g('合计') - g('新增业绩');
   // 4) 高新 = 合计 - 北郊；门店合计 = 高新 + 北郊（恒等于合计）
@@ -1299,7 +1317,7 @@ function computeMonthValues(dateList, dailyResults, monthKey){
   const mm = (state.manual.month && state.manual.month[monthKey || curMonthKey()]) || {};
   for(const k in mm){ if(mm[k] !== undefined && mm[k] !== '') m[k] = Number(mm[k]) || 0; }
   // 合计 = 6个部门块 + 其他（新增业绩/管家部不计入）；手动"合计"覆盖优先
-  const BLOCKS = ['品牌组-其他','活动组-活动支持','电商组','短视频组','品牌组-自然到店','商务部'];
+  const BLOCKS = ['品牌组-其他','活动组-活动支持','电商组','新媒体组','短视频组','品牌组-自然到店','商务部'];
   let sumBlocks = 0;
   for(const k of BLOCKS) sumBlocks += (Number(m[k]) || 0);
   const otherVal = (Number(m['其他']) || 0);
@@ -1316,7 +1334,7 @@ function computeMonthValues(dateList, dailyResults, monthKey){
 function monthDispValues(monthCalc){
   const m = Object.assign({}, monthCalc || {});
   const g = k => (Number(m[k]) || 0);
-  m['其他'] = g('合计') - (g('品牌组-其他') + g('活动组-活动支持') + g('电商组') + g('短视频组') + g('品牌组-自然到店') + g('商务部'));
+  m['其他'] = g('合计') - (g('品牌组-其他') + g('活动组-活动支持') + g('电商组') + g('新媒体组') + g('短视频组') + g('品牌组-自然到店') + g('商务部'));
   m['基础业绩'] = g('合计') - g('新增业绩');
   return m;
 }
@@ -2007,7 +2025,7 @@ function isRecToShangwu(r){
 
 // ===== 报表归属（部门类别）：明细表可手动指定，未指定按渠道规则自动归属 =====
 // 与 calculate 的 r1~r6b 规则镜像（仅用于展示/排序/筛选，金额计算仍以 calculate 为准）
-const DEPT_OPTIONS = ['品牌组-其他','活动组-活动支持','电商组','短视频组','品牌组-自然到店','商务部','其他'];
+const DEPT_OPTIONS = ['品牌组-其他','活动组-活动支持','电商组','新媒体组','短视频组','品牌组-自然到店','商务部','其他'];
 // 「30天内营销部初诊客户」键集合（带缓存，按 截止月+订单数+时间戳 失效）——与 calculate 口径一致
 let _mktKeysCache = { sig:'', set:null };
 function mktFirstKeysCached(){
@@ -2026,6 +2044,7 @@ function autoDeptOf(r){
   if(cc==='营销部' && l1==='品牌组' && (['微信小程序','微信公众号','客服手机','前台座机'].includes(l2) || (l2.includes('阿里') && l2.includes('高德')))) return yxGate ? '品牌组-其他' : '其他';
   if(cc==='营销部' && l1==='活动组' && l2==='活动支持') return yxGate ? '活动组-活动支持' : '其他';
   if(cc==='营销部' && ['电商组','客户转介绍','企业团检'].includes(l1)) return yxGate ? '电商组' : '其他';
+  if(cc==='营销部' && l1==='新媒体组') return yxGate ? '新媒体组' : '其他';
   if(cc==='营销部' && l1==='品牌组' && l2.includes('线上400')) return yxGate ? '电商组' : '其他';
   if(cc==='营销部' && l1==='短视频组') return yxGate ? '短视频组' : '其他';
   if(cc==='营销部' && l1==='品牌组' && l2.includes('自然到店')) return yxGate ? '品牌组-自然到店' : '其他';

@@ -373,12 +373,19 @@ async function syncFromCloud(){
 }
 async function saveOrdersToCloud(force){
   if(_cloudSaveTimer){ clearTimeout(_cloudSaveTimer); _cloudSaveTimer = null; }
+  // 失败可见性（2026-10-16）：force=true 表示用户显式动作（导入 / 清空 / 重算）触发的保存，
+  // 此时若云端没写成，除状态条外再弹一次 toast，避免「以为已存云端、其实只在本机」的静默失败。
+  const failSave = (msg) => {
+    setCloudStatus(msg, 'err');
+    if(force) showToast(msg, 'err', 5200);
+  };
   const doSave = async () => {
     _cloudSaveTimer = null;
-    const cloud = getCloud(); if(!cloud) return;
+    const cloud = getCloud();
+    if(!cloud){ failSave('云端组件未就绪：数据仅保存在本机，请刷新页面重试'); return; }
     let session = null;
     try{ const r = await cloud.auth.getSession(); session = r.data; if(r.error) session = null; }catch(e){ session = null; }
-    if(!session){ setCloudStatus('未登录 · 未同步云端', 'warn'); return; }
+    if(!session){ failSave('未登录云端：数据仅保存在本机，登录成功后才会同步'); return; }
     const payload = cloudPayload();
     // 空数据不写云端（清数据走 clearOrdersInCloud），避免把好的云端数据覆盖/误删成空的
     if(payload.orders.length === 0) return;
@@ -387,7 +394,7 @@ async function saveOrdersToCloud(force){
       // 直接报错导致「云端保存失败」→ 云端长期停留在旧快照，刷新后把新数据倒退覆盖。
       const { data: rows, error: selErr } = await cloud.database.from('dp_orders')
         .select('id, updated_at, payload').order('updated_at', { ascending:false }).limit(1);
-      if(selErr){ setCloudStatus('云端保存失败：' + (selErr.message || ''), 'err'); return; }
+      if(selErr){ failSave('云端保存失败：' + (selErr.message || '')); return; }
       const latest = Array.isArray(rows) && rows.length ? rows[0] : null;
       if(latest && latest.id != null){
         // 跨设备保护：云端已有比本地更新的数据（如另一台设备刚写入）且非强制保存时，
@@ -398,7 +405,7 @@ async function saveOrdersToCloud(force){
           return;
         }
         const { error } = await cloud.database.from('dp_orders').update({ payload, updated_at: new Date().toISOString() }).eq('id', latest.id);
-        if(error){ setCloudStatus('云端保存失败：' + (error.message || ''), 'err'); return; }
+        if(error){ failSave('云端保存失败：' + (error.message || '')); return; }
         // 清理可能存在的多余旧记录，保证下次读取只命中最新一条
         try{
           const { data: others } = await cloud.database.from('dp_orders').select('id');
@@ -412,12 +419,12 @@ async function saveOrdersToCloud(force){
         }catch(_){}
       }else{
         const { error } = await cloud.database.from('dp_orders').insert({ payload, updated_at: new Date().toISOString() });
-        if(error){ setCloudStatus('云端保存失败：' + (error.message || ''), 'err'); return; }
+        if(error){ failSave('云端保存失败：' + (error.message || '')); return; }
       }
       state.ordersTs = Number(payload.ts) || Date.now();
       setCloudStatus('已同步云端（' + payload.orders.length + ' 条）', 'ok');
     }catch(e){
-      setCloudStatus('云端保存异常：' + (e && e.message ? e.message : '网络错误'), 'err');
+      failSave('云端保存异常：' + (e && e.message ? e.message : '网络错误'));
     }
   };
   if(force){ await doSave(); } else { _cloudSaveTimer = setTimeout(doSave, 800); }

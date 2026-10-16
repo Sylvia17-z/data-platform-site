@@ -44,7 +44,7 @@
     })();
   }
 
-  var cloud = null, user = null;
+  var cloud = null, user = null, session = null;
 
   function getCloud(){
     if(cloud) return cloud;
@@ -54,8 +54,15 @@
     return cloud;
   }
 
-  /* ---------- 跳转登录页 ---------- */
+  /* ---------- 顶层 / 嵌入态判定 ---------- */
   function isTop(){ try{ return window.self === window.top; }catch(e){ return false; } }
+  /* 壳层（public/index.html）自身也加载本脚本并渲染右下角账号徽章；
+     子页 iframe 若再渲染一个，两个 position:fixed 徽章会落在同一个角落重叠 → 显示重影。
+     故嵌入态（self !== top）只保留登录态检查与跳转，不再注入 UI。
+     独立打开子页（self === top，如直接访问子页 URL / 从书签打开）仍正常渲染。 */
+  var EMBEDDED = !isTop();
+
+  /* ---------- 跳转登录页 ---------- */
   function goLogin(){
     if(window.__SA_NO_REDIRECT) return;                       // 测试钩子：禁止跳转
     try{
@@ -68,7 +75,7 @@
     }catch(e){}
   }
 
-  /* ---------- UI：徽章 + 账号信息面板 ---------- */
+  /* ---------- UI：徽章 + 账号信息面板（仅顶层窗口渲染，嵌入态跳过） ---------- */
   var CSS = ''
     + '#sa-badge{position:fixed;right:12px;bottom:12px;z-index:2147483000;background:#fff;border:1px solid #d5dde7;border-radius:999px;box-shadow:0 4px 14px rgba(15,35,64,.18);padding:6px 12px;font-size:12px;color:#1c2b3a;display:none;align-items:center;gap:8px;font-family:inherit;}'
     + '#sa-badge b{color:#123c73;font-weight:600;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}'
@@ -88,11 +95,13 @@
     + '#sa-panel button:disabled{opacity:.55;cursor:default;}'
     + '#sa-panel .sa-chg-tt{margin-top:14px;padding-top:12px;border-top:1px dashed #e4ebf3;font-size:12px;color:#5a6b80;font-weight:600;}'
     + '#sa-msg{margin-top:8px;font-size:12px;min-height:15px;color:#c0392b;}';
+  var badge = null, panel = null;
+  if(!EMBEDDED){
   var style = document.createElement('style'); style.textContent = CSS; document.head.appendChild(style);
 
-  var badge = document.createElement('div'); badge.id = 'sa-badge';
+  badge = document.createElement('div'); badge.id = 'sa-badge';
   badge.innerHTML = '<span>👤</span><b id="sa-badge-name"></b><button id="sa-badge-acct">账号</button>';
-  var panel = document.createElement('div'); panel.id = 'sa-panel';
+  panel = document.createElement('div'); panel.id = 'sa-panel';
   panel.innerHTML = ''
     + '<h4>👤 当前登录账号</h4>'
     + '<div class="sa-info">'
@@ -109,11 +118,13 @@
     + '<button class="sa-danger" id="sa-logout">退出登录</button>'
     + '<a href="/" target="_top" title="返回平台首页，查看全部模块" style="display:inline-flex;align-items:center;text-decoration:none;border:1px solid #123c73;color:#123c73;border-radius:8px;padding:8px 12px;font-size:13px;">🏠 平台首页</a>'
     + '</div>';
+  }
 
   var _uiAppended = false;
   function appendUI(){
     if(_uiAppended || !document.body) return;
     _uiAppended = true;
+    if(!badge || !panel) return;                            // 嵌入态：不注入 UI，避免与壳层徽章重叠
     document.body.appendChild(badge);
     document.body.appendChild(panel);
     if(user){ badge.style.display = 'flex'; fillInfo(); }   // 解锁早于 DOM 就绪时补显徽章
@@ -123,18 +134,32 @@
 
   function $(id){ return document.getElementById(id); }
   function msg(t, isErr){ var el = $('sa-msg'); if(el){ el.textContent = t || ''; el.style.color = isErr ? '#c0392b' : '#1a7a3a'; } }
+  /* 从会话里尽力取出一个可读账号标识：邮箱 > 用户名 > 手机号 > 昵称 > 用户ID。
+     （服务端用户模型以 username 承载邮箱；部分登录方式返回的 user 不带 email 字段，
+       旧实现此时会显示「—」，徽章看起来像坏了。） */
+  function pickName(){
+    var u = user || {}, s = session || {}, meta = u.user_metadata || {};
+    var cands = [u.email, u.username, u.phone, u.name, u.nickname, u.displayName,
+                 meta.email, meta.name, meta.username, s.email, s.username, u.id];
+    for(var i = 0; i < cands.length; i++){ if(cands[i]) return String(cands[i]); }
+    return '—';
+  }
   function fillInfo(){
     var e = $('sa-info-email'), u = $('sa-info-uid'), n = $('sa-badge-name');
-    // 服务端用户模型以 username 承载邮箱（验证码登录返回的 user 可能无 email 字段）
-    var email = (user && (user.email || user.username || user.phone || user.name)) || '—';
-    if(e) e.textContent = email;
+    var name = pickName();
+    if(e) e.textContent = name;
     if(u) u.textContent = (user && user.id) || '—';
-    if(n) n.textContent = email;
+    if(n) n.textContent = name;
   }
 
+  var _unlocked = false;
   function unlock(){
-    badge.style.display = 'flex';   // 显式覆盖 CSS 默认 display:none
+    if(badge) badge.style.display = 'flex';   // 显式覆盖 CSS 默认 display:none
     fillInfo();
+    /* 仅在「首次解锁」时广播一次：否则各 iframe / 标签页互相收到 PING 又各自回写 PING，
+       会形成无限 ping-pong（storage 事件风暴 → 反复重排重绘，徽章出现抖动/重影）。 */
+    if(_unlocked) return;
+    _unlocked = true;
     try{ localStorage.setItem(PING_KEY, String(Date.now())); }catch(e){}
     try{ window.dispatchEvent(new Event('site-auth-ready')); }catch(e){}
   }
@@ -144,7 +169,7 @@
     var admin = readAdminSession();
     if(admin){ user = admin.user; unlock(); return; }   // 管理员本地会话有效 → 直接解锁（不走云端，避免 SDK 触碰本地假会话）
     var c = getCloud(); if(!c){ setTimeout(function(){ checkSession(); }, 800); return; }
-    var session = null;
+    session = null;
     try{ var r = await c.auth.getSession(); session = r.data; if(r.error) session = null; }catch(e){ session = null; }
     if(session && session.user){ user = session.user; unlock(); startKeepalive(); }
     else { user = null; goLogin(); }
@@ -187,7 +212,8 @@
   async function actLogout(){
     var c = getCloud(); if(!c) return;
     try{ await c.auth.signOut(); }catch(e){}
-    user = null;
+    user = null; session = null;
+    _unlocked = false;                                                    // 允许下次登录再广播一次
     try{ localStorage.removeItem(SESSION_KEY); localStorage.removeItem('dp_auth_backup'); localStorage.removeItem(ADMIN_KEY); }catch(e){}
     try{ localStorage.setItem(PING_KEY, String(Date.now())); }catch(e){}   // 通知其他 iframe/标签页
     if(panel) panel.style.display = 'none';
