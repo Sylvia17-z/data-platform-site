@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>账号与角色权限管理</title>
+<style>
+  :root{
+    --c-bg:#eef1f6; --c-card:#fff; --c-border:#dbe3ee; --c-border-soft:#e9eef6;
+    --c-head:#002060; --c-head-2:#1e3a8a; --c-accent:#3658d3; --c-text:#1f2d4d;
+    --c-muted:#7a8aa6; --c-success:#1f8a4a; --c-warn:#a85b04; --c-error:#b3261e;
+    --radius:14px; --radius-sm:9px; --shadow-card:0 1px 2px rgba(31,45,77,.05),0 8px 24px rgba(31,45,77,.07);
+    --font-sans:"PingFang SC","Microsoft YaHei","Segoe UI",system-ui,-apple-system,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0;font-family:var(--font-sans);background:var(--c-bg);color:var(--c-text);font-size:14px;-webkit-font-smoothing:antialiased;}
+  .wrap{max-width:1080px;margin:0 auto;padding:24px 18px 60px;}
+  h1{font-size:20px;color:var(--c-head);margin:0 0 4px;}
+  .sub{color:var(--c-muted);font-size:12.5px;margin-bottom:18px;}
+  .panel{background:var(--c-card);border:1px solid var(--c-border);border-radius:var(--radius);box-shadow:var(--shadow-card);margin-bottom:18px;overflow:hidden;position:relative;}
+  .panel::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:linear-gradient(180deg,var(--c-head),var(--c-head-2));z-index:2;}
+  .panel > h2{font-size:15px;font-weight:700;color:var(--c-head);margin:0;padding:14px 18px 12px 22px;border-bottom:2px solid var(--c-border-soft);}
+  .panel > .body{padding:16px 18px 18px 22px;}
+  .banner{margin-bottom:18px;padding:11px 16px;border-radius:var(--radius-sm);font-size:13px;display:flex;gap:8px;align-items:flex-start;}
+  .banner.warn{background:#fff4e0;border:1px solid #d4a017;color:var(--c-warn);}
+  .banner.ok{background:#e3f5ea;border:1px solid #b7e3c7;color:var(--c-success);}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px;}
+  .label{font-size:12.5px;color:var(--c-muted);margin-right:6px;font-weight:500;}
+  .input,.select{padding:8px 11px;border:1px solid var(--c-border);border-radius:var(--radius-sm);font-size:13px;background:#fff;color:var(--c-text);font-family:inherit;outline:none;}
+  .input:focus,.select:focus{border-color:var(--c-accent);box-shadow:0 0 0 3px rgba(54,88,211,.12);}
+  .btn{cursor:pointer;border:1px solid var(--c-border);background:#fff;border-radius:var(--radius-sm);padding:8px 14px;color:var(--c-text);font-size:13px;font-weight:500;display:inline-flex;align-items:center;gap:6px;font-family:inherit;transition:all .15s ease;white-space:nowrap;}
+  .btn:hover{border-color:var(--c-accent);color:var(--c-accent);box-shadow:0 2px 8px rgba(54,88,211,.12);}
+  .btn-primary{background:var(--c-head);color:#fff;border-color:var(--c-head);}
+  .btn-primary:hover{background:var(--c-head-2);color:#fff;border-color:var(--c-head-2);}
+  .btn-danger{border-color:#f1c2bd;color:var(--c-error);}
+  .btn-danger:hover{background:#fde4e4;color:var(--c-error);border-color:#e7a39c;}
+  .btn-sm{padding:5px 10px;font-size:12px;}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:16px;}
+  .card{border:1px solid var(--c-border);border-radius:var(--radius-sm);padding:12px 14px;background:#fbfdff;}
+  .card h3{margin:0 0 8px;font-size:13.5px;color:var(--c-head);display:flex;justify-content:space-between;align-items:center;}
+  .checks{display:flex;flex-direction:column;gap:6px;margin:6px 0;}
+  .checks.col2{display:grid;grid-template-columns:1fr 1fr;gap:6px 14px;}
+  .chk{display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--c-text);cursor:pointer;}
+  .chk input{accent-color:var(--c-accent);}
+  .grp-title{font-size:12px;font-weight:700;color:var(--c-head);margin:10px 0 4px;padding-bottom:4px;border-bottom:1px dashed var(--c-border);}
+  .empty{color:var(--c-muted);font-size:13px;padding:18px;text-align:center;}
+  .toast{position:fixed;left:50%;top:24px;transform:translateX(-50%);background:#1f2d4d;color:#fff;padding:11px 20px;border-radius:10px;font-size:13px;box-shadow:0 8px 24px rgba(0,0,0,.18);z-index:9999;opacity:0;transition:opacity .25s;pointer-events:none;}
+  .toast.show{opacity:1;}
+  .toast.err{background:var(--c-error);}
+  .toast.ok{background:var(--c-success);}
+  .mut{font-size:11.5px;color:var(--c-muted);margin-top:4px;}
+  .savebar{position:sticky;bottom:0;background:rgba(255,255,255,.96);border-top:1px solid var(--c-border);padding:12px 18px;display:flex;gap:10px;justify-content:flex-end;backdrop-filter:blur(4px);}
+</style>
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#123c73">
+<script>if('serviceWorker' in navigator){ window.addEventListener('load', function(){ navigator.serviceWorker.register('/sw.js').catch(function(){}); }); }</script>
+</head>
+<body>
+<div class="wrap" id="app">
+  <h1>🔐 账号与角色权限管理</h1>
+  <div class="sub">管理与维护操作员档案、角色及细粒度权限（菜单可见性 / 导入 / 导出 / 清除 / 编辑）。配置随云端共享账号同步，全组织生效。</div>
+
+  <div id="banner-slot"></div>
+
+  <div id="no-permission" class="panel" style="display:none;">
+    <div class="body">
+      <h2 style="border:none;padding-left:0;">⛔ 无访问权限</h2>
+      <p class="sub" style="margin:0;">当前账号未分配「管理账号与角色」权限。请联系系统管理员为您开通，或使用具备该权限的账号登录。</p>
+    </div>
+  </div>
+
+  <div id="admin-ui" style="display:none;">
+
+    <!-- 本机操作员选择 -->
+    <div class="panel">
+      <h2>① 本机当前操作员</h2>
+      <div class="body">
+        <div class="row">
+          <span class="label">当前使用本机的操作员：</span>
+          <select id="current-op" class="select"></select>
+          <span id="current-op-info" class="mut"></span>
+        </div>
+        <div class="mut">共用同一云账号的多人场景：在此选择「此刻是谁在操作本机」，不同操作员可拥有不同角色与权限。</div>
+      </div>
+    </div>
+
+    <!-- 角色管理 -->
+    <div class="panel">
+      <h2>② 角色与权限点</h2>
+      <div class="body">
+        <div class="row">
+          <select id="role-select" class="select"></select>
+          <button class="btn btn-sm" id="role-edit">编辑选中角色</button>
+          <button class="btn btn-sm btn-primary" id="role-new">＋ 新建角色</button>
+          <button class="btn btn-sm btn-danger" id="role-del">删除选中角色</button>
+        </div>
+        <div id="role-editor" class="card" style="display:none;margin-top:8px;"></div>
+        <div id="role-list" class="grid" style="margin-top:14px;"></div>
+      </div>
+    </div>
+
+    <!-- 操作员管理 -->
+    <div class="panel">
+      <h2>③ 操作员档案</h2>
+      <div class="body">
+        <div class="row">
+          <button class="btn btn-sm btn-primary" id="op-new">＋ 新建操作员</button>
+        </div>
+        <div id="op-editor" class="card" style="display:none;margin-bottom:14px;"></div>
+        <div id="op-list" class="grid"></div>
+      </div>
+    </div>
+
+  </div>
+
+  <div id="save-bar" class="savebar" style="display:none;">
+    <span id="save-status" class="mut" style="margin-right:auto;"></span>
+    <button class="btn" id="reset-btn">放弃修改</button>
+    <button class="btn btn-primary" id="save-btn">💾 保存配置</button>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<!-- 云端配置：仅在发布域名生效；本地/预览环境 getCloud() 返回 null 优雅降级为「仅本机」 -->
+<script>
+  window.CLOUD_ENDPOINT = 'https://haibei-medical.app.workbuddy.host';
+  window.CLOUD_PK = 'wbpk_KQXIeDHLXWDHN7WQp3zqUQ_Y5IlM6hJd7n10U8UN5bYmSGUYeevVOwl';
+</script>
+<script>
+(function(){
+  var urls = [
+    'https://cdn.jsdelivr.net/npm/@tencent-ai/workbuddy-cloud-sdk@dev/lib/index.global.js',
+    'https://unpkg.com/@tencent-ai/workbuddy-cloud-sdk@dev/lib/index.global.js',
+    'https://registry.npmmirror.com/@tencent-ai/workbuddy-cloud-sdk/latest/files/lib/index.global.js'
+  ];
+  var i = 0;
+  function tryNext(){
+    if(i >= urls.length){ document.dispatchEvent(new Event('cloud-sdk-failed')); return; }
+    var s = document.createElement('script');
+    s.src = urls[i++];
+    s.onload = function(){ if(window.WorkBuddyCloud){ document.dispatchEvent(new Event('cloud-sdk-ready')); } else tryNext(); };
+    s.onerror = function(){ tryNext(); };
+    document.head.appendChild(s);
+  }
+  tryNext();
+})();
+</script>
+<script src="/shared/rbac.js?v=20261016b"></script>
+<script src="/shared/auth-gate.js?v=20261016a"></script>
+<script>document.write('<script src="assets/app.js?v=20261016b_' + Date.now() + '"><\/script>');</script>
+</body>
+</html>

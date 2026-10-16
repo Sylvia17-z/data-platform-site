@@ -77,6 +77,15 @@ const MODULES = [
       { id: 'ma-consumption', name: '累计消费统计', icon: '💳', mod: 'consumption' },
     ],
   },
+  {
+    id: 'account-roles',
+    name: '账号与角色权限',
+    icon: '🔐',
+    group: '系统管理',
+    type: 'embed',
+    src: '/pages/account-roles/index.html',
+    desc: '管理与维护操作员档案、角色及细粒度权限（菜单可见性 / 导入 / 导出 / 清除 / 编辑）',
+  },
 ];
 
 const $ = (sel) => document.querySelector(sel);
@@ -102,6 +111,9 @@ window.addEventListener('message', (e) => {
       const payload = localStorage.getItem(m.key);
       if(e.source && e.source.postMessage) e.source.postMessage({ type:'dp:payload', key:m.key, payload: payload }, '*');
     } catch(_){}
+  } else if(m.type === 'rbac:request'){
+    // 子页（iframe）请求当前权限快照：回发 rbac:state 供其守卫禁用无权限操作
+    try { if (e.source && e.source.postMessage) e.source.postMessage({ type:'rbac:state', payload: RBAC.snapshotForChild() }, '*'); } catch(_){}
   }
 });
 
@@ -115,15 +127,42 @@ async function boot() {
     $('#content').innerHTML = '<div class="loading">当前没有可集成的模块。</div>';
     return;
   }
+  // 权限引擎就绪后：菜单按角色过滤、权限变更时重渲并广播给各 iframe
+  RBAC.onChange(() => { renderNav(); broadcastRbacState(); });
+  await RBAC.ready();
   renderNav();
   const hash = location.hash.replace('#', '');
-  const first = state.modules[0];
-  const startId = resolveTarget(hash) ? hash
-    : (first.children && first.children.length ? first.children[0].id : first.id);
+  const startId = resolveTarget(hash) ? hash : firstVisibleId();
   openTarget(startId);
   window.addEventListener('hashchange', () => {
     const id = location.hash.replace('#', '');
     if (resolveTarget(id)) openTarget(id);
+  });
+}
+
+/* ---------- 模块可见性（RBAC） ---------- */
+function canShowModule(m) {
+  if (typeof RBAC === 'undefined') return true;
+  if (m.id === 'account-roles') return RBAC.can('manageAcl'); // 管理入口仅 manageAcl 可见
+  return RBAC.canViewModule(m.id);
+}
+function firstVisibleId() {
+  for (const m of state.modules) {
+    if (!canShowModule(m)) continue;
+    if (m.children && m.children.length) return m.children[0].id;
+    return m.id;
+  }
+  const f = state.modules[0];
+  return (f && f.children && f.children.length) ? f.children[0].id : (f ? f.id : '');
+}
+/* 向所有已打开的 iframe 广播当前权限快照（子页守卫据此禁用无权限操作） */
+function broadcastRbacState() {
+  if (typeof RBAC === 'undefined') return;
+  const snap = RBAC.snapshotForChild();
+  state.tabs.forEach((t) => {
+    const page = document.getElementById('page-' + t.id);
+    const f = page && page.querySelector('iframe');
+    if (f && f.contentWindow) { try { f.contentWindow.postMessage({ type: 'rbac:state', payload: snap }, '*'); } catch (_) {} }
   });
 }
 
@@ -136,6 +175,7 @@ function renderNav() {
   Object.keys(groups).forEach((g) => {
     html += `<div class="nav-group">${g}</div>`;
     groups[g].forEach((m) => {
+      if (!canShowModule(m)) return;               // 无权限的模块不在侧边栏出现
       if (m.children && m.children.length) {
         const sub = m.children.map((c) => `
           <div class="nav-subitem" data-id="${c.id}">
@@ -219,7 +259,7 @@ function createChildTab(tab, parent, child) {
   // 独立页面（如月度分析面板，现已作为一级菜单）使用 src 直接嵌入，无需 postMessage。
   frame.src = withVer((child.src || parent.src).replace(/^\//, ''));
   const post = () => { if (!child.mod) return; try { frame.contentWindow.postMessage({ type: 'app:setMod', mod: child.mod }, '*'); } catch (e) {} };
-  frame.addEventListener('load', () => { pushEmbeddedState(frame); post(); setTimeout(post, 300); });
+  frame.addEventListener('load', () => { pushEmbeddedState(frame); post(); setTimeout(post, 300); broadcastRbacState(); });
   page.appendChild(frame);
   $('#content').appendChild(page);
 }
@@ -246,7 +286,7 @@ function createTabPage(tab, mod) {
   frame.title = mod.name;
   frame.setAttribute('loading', 'lazy');
   frame.src = withVer(mod.src.replace(/^\//, '')); // 去掉前导斜杠，兼容 GitHub Pages 子路径；http(s) 下追加版本号防缓存
-  frame.addEventListener('load', () => pushEmbeddedState(frame));
+  frame.addEventListener('load', () => { pushEmbeddedState(frame); broadcastRbacState(); });
   page.appendChild(frame);
   $('#content').appendChild(page);
 }

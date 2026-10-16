@@ -1484,6 +1484,30 @@ https://github.com/nodeca/pako/blob/main/LICENSE
   });
 })();
 </script>
+<script src="/shared/rbac.js?v=20261016b"></script>
+<script>
+/* 敏感操作 → 权限点映射：集中维护，rbac.js 守卫据此禁用无权限按钮（导入/导出/清除/编辑/重算）。
+   覆盖全站各页常见触发器，不存在的选择器自动跳过。 */
+(function(){
+  var MAP = {
+    'file-orders':'import','file-vab':'import','fileVab':'import','fileOrder':'import',
+    'fileCharge':'import','fileProjMap':'import','fileBoth':'import','fileAppt':'import',
+    'file':'import','drop':'import','reimport':'import',
+    'export-xlsx':'export','export-png':'export','export-store-xlsx':'export','export-store-png':'export',
+    'vabExport':'export','orderExport':'export','chargeExport':'export','statsExport':'export',
+    'consExport':'export','projExport':'export','projExportMap':'export','btnPng':'export','btnXlsx':'export','btnNextPng':'export','btnNextXlsx':'export',
+    'clear-vab':'clear','clear-manual':'clear','clear-date':'clear','clear-all':'clear','projClearMap':'clear','btnClearOV':'clear',
+    'edit-vab':'editVab','vab-add-save':'editVab','recompute':'recompute'
+  };
+  function tag(){
+    Object.keys(MAP).forEach(function(id){
+      var el = document.getElementById(id);
+      if(el && !el.hasAttribute('data-rbac')) el.setAttribute('data-rbac', MAP[id]);
+    });
+  }
+  if(document.readyState!=='loading') tag(); else document.addEventListener('DOMContentLoaded', tag);
+})();
+</script>
 <script src="/shared/auth-gate.js?v=20261016a"></script>
 </body>
 </html>
