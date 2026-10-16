@@ -88,6 +88,7 @@ const state = {
   targets: {...DEFAULT_TARGETS},
   cutoffDate: null,// 截止日期
   ordersTs: 0,     // 订单快照写入时刻（epoch ms），用于本地/云端新旧裁决（防云端旧快照覆盖本地新数据）
+  snapTs: 0,       // 整包快照变更时刻（epoch ms）：orders/VAB/月目标/手动覆盖 任一变更都更新，随快照上云做跨设备裁决
   results: null,   // 最新计算结果
   colWidths: {},   // 用户拖拽调整的列宽（index -> width）
   manual: {        // 手动修改的数据（覆盖计算值）
@@ -106,10 +107,22 @@ function ensureUid(r){ if(!r._uid) r._uid = nextUid(); return r; }
 // 手动修改数据持久化（localStorage：月目标 / 手动覆盖值）
 const TARGETS_STORAGE_KEY = 'dailyPerformance_targets';
 const MANUAL_STORAGE_KEY = 'dailyPerformance_manual';
-function persistTargets(){ try{ localStorage.setItem(TARGETS_STORAGE_KEY, JSON.stringify(state.targets)); }catch(e){} }
+// 云端整包快照版本号（单一时间戳）：orders / VAB 名单 / 月目标 / 手动覆盖 任一变更都会更新它。
+// 用于「同一账号跨设备」的整包新旧裁决——修复「两个浏览器登录同一账号，订单同步了，
+// 但 VAB 会员名单 / 月目标没同步」：以前这些本地状态不在云端快照里，故换机后回落为 0 / 默认值。
+const SNAP_TS_STORAGE_KEY = 'dailyPerformance_snap_ts';
+function loadSnapTs(){ try{ return Number(localStorage.getItem(SNAP_TS_STORAGE_KEY)) || 0; }catch(e){ return 0; } }
+function saveSnapTs(v){ try{ localStorage.setItem(SNAP_TS_STORAGE_KEY, String(v || 0)); }catch(e){} }
+function bumpSnapTs(){ state.snapTs = Date.now(); saveSnapTs(state.snapTs); return state.snapTs; }
+state.snapTs = loadSnapTs(); // 本机最后一次本地变更时刻（0 = 本机从未产生本地变更）
+function persistTargets(){ writeTargetsLocal(); markCloudDirty(); }
 function restoreTargets(){ try{ const raw = localStorage.getItem(TARGETS_STORAGE_KEY); if(raw) state.targets = {...DEFAULT_TARGETS, ...JSON.parse(raw)}; }catch(e){} }
-function persistManual(){ try{ localStorage.setItem(MANUAL_STORAGE_KEY, JSON.stringify(state.manual)); }catch(e){} }
+function persistManual(){ writeManualLocal(); markCloudDirty(); }
 function restoreManual(){ try{ const raw = localStorage.getItem(MANUAL_STORAGE_KEY); if(raw){ const m = JSON.parse(raw); state.manual.month = m.month || {}; state.manual.daily = m.daily || {}; } }catch(e){ } }
+// 纯本地写入（不触发云端上传）：供「应用云端快照」时落盘使用，避免 A/B 两端互相回写形成 ping-pong。
+function writeTargetsLocal(){ try{ localStorage.setItem(TARGETS_STORAGE_KEY, JSON.stringify(state.targets)); }catch(e){} }
+function writeManualLocal(){ try{ localStorage.setItem(MANUAL_STORAGE_KEY, JSON.stringify(state.manual)); }catch(e){} }
+function writeVabLocal(){ try{ localStorage.setItem(VAB_STORAGE_KEY, JSON.stringify({ set:[...state.vabSet], list: state.vabList || [], rows: state.vabRows || [], demo: !!state.demoVab })); }catch(e){} }
 // 当前报表月份键（YYYY-MM）。手动月累计覆盖按月隔离存储：
 // 修复「上月手动调整的月累计残留到本月」——旧格式为扁平 {行名: 值}（无月份），新读取只认 {YYYY-MM: {行名: 值}}，
 // 旧扁平键自然失效（正是本次数据异常的根源：新增业绩月累计被上月覆盖值污染，导致 基础业绩=合计−新增 变为负数）。
@@ -208,6 +221,8 @@ function persistOrders(force, syncNow){
     }
   }
   state.ordersTs = Date.now();
+  state.snapTs = state.ordersTs;      // 订单变更同样是「整包快照」的一次变更
+  saveSnapTs(state.snapTs);
   const payload = JSON.stringify({ orders: state.orders, cutoff: state.cutoffDate || null, ts: state.ordersTs });
   let lsOk = false;
   // 1) localStorage 同步（最快恢复路径，刷新/卸载前都会执行，最可靠）
@@ -294,7 +309,72 @@ function applyOrdersObj(obj){
   }
   return false;
 }
-function cloudPayload(){ return { orders: state.orders, cutoff: state.cutoffDate || null, ts: Date.now() }; }
+function cloudPayload(){
+  return {
+    orders: state.orders,
+    cutoff: state.cutoffDate || null,
+    // 同账号跨设备同步范围扩展（2026-10-16）：VAB 会员名单 / 月目标 / 手动覆盖也随快照上云，
+    // 否则换设备后会出现「订单在、VAB 名单为 0、月目标回落默认值」的割裂状态。
+    vab: { list: state.vabList || [], rows: state.vabRows || [], demo: !!state.demoVab },
+    targets: state.targets,
+    manual: state.manual,
+    ts: state.snapTs || Date.now(),
+  };
+}
+// 应用云端整包快照：订单 + VAB 会员名单 + 月目标 + 手动覆盖。
+// 期间置 _applyingCloud，禁止任何写入路径把「刚拉下来的云端数据」又立刻推回云端（防 ping-pong）。
+let _applyingCloud = false;
+function applyCloudObj(obj){
+  if(!obj || typeof obj !== 'object') return false;
+  _applyingCloud = true;
+  let touched = false;
+  try{
+    if(applyOrdersObj(obj)) touched = true;
+    const v = obj.vab;
+    if(v && typeof v === 'object'){
+      // 只有快照里「确实带了 vab 字段」才处理（旧版快照没有该字段 → 不动本机，避免误清空）；
+      // 带了字段但为空数组 = 云端显式清空 VAB → 同步清空本机。
+      const hasVabKey = Array.isArray(v.rows) || Array.isArray(v.list);
+      if(hasVabKey){
+        const rows = (Array.isArray(v.rows) && v.rows.length) ? v.rows
+                   : ((Array.isArray(v.list) && v.list.length) ? v.list.map(x => ({'会员号': x})) : []);
+        setVabRows(rows);
+        state.demoVab = rows.length ? !!v.demo : false;
+        writeVabLocal();
+        touched = true;
+      }
+    }
+    if(obj.targets && typeof obj.targets === 'object' && Object.keys(obj.targets).length){
+      state.targets = Object.assign({}, DEFAULT_TARGETS, obj.targets);
+      writeTargetsLocal();
+      // 必须同步重绘「② 月目标」输入框：renderReportInner() 里的 readTargets() 会把 DOM 输入值
+      // 反向写回 state.targets，若 DOM 仍是旧值（如默认 360），刚恢复的云端值（350）会被立刻覆盖回去。
+      if(typeof renderTargets === 'function') renderTargets();
+      touched = true;
+    }
+    if(obj.manual && typeof obj.manual === 'object'){
+      state.manual.month = obj.manual.month || {};
+      state.manual.daily = obj.manual.daily || {};
+      writeManualLocal();
+      touched = true;
+    }
+    if(Number(obj.ts)){
+      state.ordersTs = Number(obj.ts) || 0;
+      state.snapTs = Number(obj.ts) || 0;
+      saveSnapTs(state.snapTs);
+    }
+  }finally{
+    _applyingCloud = false;
+  }
+  return touched;
+}
+// 标记整包快照为「脏」：更新版本号并触发（防抖）上传。orders / VAB / 月目标 / 手动覆盖 任一变更均调用。
+function markCloudDirty(force){
+  if(_applyingCloud) return;              // 正在应用云端快照 → 不回写
+  bumpSnapTs();
+  // 无订单时不推送（清空流程走 clearOrdersInCloud），避免把云端已有订单误覆盖成空快照
+  if(Array.isArray(state.orders) && state.orders.length > 0) saveOrdersToCloud(!!force);
+}
 // 取一组订单的「最新月份」（形如 2026-10）；无有效日期返回 ''。用于本地/云端新旧裁决。
 function monthOfOrders(orders){
   let max = '';
@@ -309,7 +389,8 @@ function monthOfOrders(orders){
   return max;
 }
 
-async function syncFromCloud(){
+async function syncFromCloud(opts){
+  const silent = !!(opts && opts.silent);   // 后台轮询触发：不弹恢复提示
   const cloud = getCloud();
   if(!cloud){ setCloudStatus('云端组件加载中…（多源回退）请稍候', 'warn'); return; }
   let session = null;
@@ -329,31 +410,41 @@ async function syncFromCloud(){
     const row = Array.isArray(data) ? data[0] : data;
     if(row && row.payload){
       const data2 = row;
-      // 新旧裁决：避免「云端旧快照覆盖本地新数据」。
-      // 背景：云端写入失败/多行残留时云端可能停留在旧月份，刷新后若无条件 apply，
-      // 会把刚导入并已落盘本地的新数据（如本月）倒退成旧的 9 月数据。
-      // 规则：比较 payload.ts（写入时刻）与本地 state.cutoffDate 指向的数据月份；
-      //   - 云端 ts 更新 且 云端数据月份 >= 本地月份 → 采用云端；
-      //   - 云端数据月份 < 本地月份（本地更新）→ 保留本地并把本地推回云端；
-      //   - 月份相同 → 采用条数更多的一方（更可能是完整快照）。
+      // 整包新旧裁决（2026-10-16 重写）：orders + VAB 名单 + 月目标 + 手动覆盖 视为「一个快照」整体裁决，
+      // 避免出现「订单采用云端、VAB/月目标却仍是本机旧值」的割裂（用户实测：同账号两台机器，订单一致，
+      // 但一台 VAB 64 人/月目标 350，另一台 VAB 0 人/月目标 360）。
+      // 规则（ts = 本机最后一次本地变更时刻 state.snapTs，随快照上云）：
+      //   - 本机无任何本地变更记录（snapTs=0）→ 采用云端；
+      //   - cloudTs > localTs → 采用云端（其他设备更新）；
+      //   - cloudTs < localTs → 保留本地并推回云端；
+      //   - ts 相同 → 订单条数多者胜；完全持平则判定「已一致」，不动作（避免每次刷新都无谓上传/互相覆盖）。
+      // 安全网：云端订单月份落后于本地 → 判定云端为陈旧快照，保留本地（防止旧快照把新数据倒退）。
       const cloudTs   = Number(data2.payload && data2.payload.ts) || 0;
-      const localTs   = Number(state.ordersTs) || 0;
+      const localTs   = Number(state.snapTs) || 0;
       const cloudCnt  = (data2.payload.orders && data2.payload.orders.length) || 0;
       const localCnt  = Array.isArray(state.orders) ? state.orders.length : 0;
       const cloudMon  = monthOfOrders(data2.payload.orders);
       const localMon  = monthOfOrders(state.orders);
-      const cloudNewer = cloudTs > localTs;
-      const cloudMonNewerOrEq = cloudMon >= localMon;           // 月份字典比较：'2026-10' >= '2026-09'
-      const localIsNewerByMonth = !cloudMonNewerOrEq;            // 本地月份更新
-      const adoptCloud = localIsNewerByMonth ? false
-                        : (cloudMonNewerOrEq && (cloudNewer || cloudCnt > localCnt) ? true
-                          : (cloudCnt > localCnt));
-      if(adoptCloud){
-        applyOrdersObj(data2.payload);
-        state.ordersTs = cloudTs || Date.now();
+      let verdict;
+      if(!localTs || cloudTs > localTs) verdict = 'cloud';
+      else if(cloudTs < localTs) verdict = 'local';
+      else verdict = (cloudCnt === localCnt) ? 'same' : (cloudCnt > localCnt ? 'cloud' : 'local');
+      if(verdict === 'cloud' && localMon && cloudMon && cloudMon < localMon) verdict = 'local';
+      // 升级迁移（2026-10-16）：旧版快照不含 vab/targets/manual 字段，且这些老机器 state.snapTs 恒为 0，
+      // 会让「本机有 VAB、云端没有」的机器误判为采用云端 → VAB 永远推不上去（另一台机器始终显示 0 人）。
+      // 规则：本机无变更记录 + 云端完全没有 VAB 数据 + 本机有 VAB → 改判「本地优先推送」，把 VAB/月目标补进云端。
+      const cloudHasVab = !!(data2.payload.vab && ((data2.payload.vab.list && data2.payload.vab.list.length) || (data2.payload.vab.rows && data2.payload.vab.rows.length)));
+      const localHasVab = (state.vabList || []).length > 0;
+      if(localTs === 0 && !cloudHasVab && localHasVab) verdict = 'local';
+      const cloudVabN = (data2.payload.vab && data2.payload.vab.list && data2.payload.vab.list.length) || 0;
+      if(verdict === 'same'){
+        setCloudStatus('已同步云端（' + cloudCnt + ' 条 · VAB ' + cloudVabN + ' 人）', 'ok');
+      }else if(verdict === 'cloud'){
+        applyCloudObj(data2.payload);
         try{ localStorage.setItem(ORDERS_STORAGE_KEY, JSON.stringify(data2.payload)); }catch(e){}
-        if(typeof runRestoredRecompute === 'function') runRestoredRecompute();
-        setCloudStatus('已同步云端（' + cloudCnt + ' 条）', 'ok');
+        if(typeof runRestoredRecompute === 'function') runRestoredRecompute({ silent });
+        try{ refreshVabStatus(); }catch(e){}
+        setCloudStatus('已同步云端（' + cloudCnt + ' 条 · VAB ' + (state.vabList || []).length + ' 人）', 'ok');
       }else{
         // 本地更新 → 覆盖云端，避免云端长期停留在旧数据导致下次刷新又倒退
         if(localCnt > 0){
@@ -400,7 +491,7 @@ async function saveOrdersToCloud(force){
         // 跨设备保护：云端已有比本地更新的数据（如另一台设备刚写入）且非强制保存时，
         // 不用过期本地数据覆盖云端，改为拉取云端保持一致
         const cloudTsNow = Number(latest.payload && latest.payload.ts) || 0;
-        if(!force && cloudTsNow > (Number(state.ordersTs) || 0)){
+        if(!force && cloudTsNow > (Number(state.snapTs) || 0)){
           setCloudStatus('云端数据更新（其他设备已保存），已跳过本次上传', 'warn');
           return;
         }
@@ -422,7 +513,8 @@ async function saveOrdersToCloud(force){
         if(error){ failSave('云端保存失败：' + (error.message || '')); return; }
       }
       state.ordersTs = Number(payload.ts) || Date.now();
-      setCloudStatus('已同步云端（' + payload.orders.length + ' 条）', 'ok');
+      state.snapTs = state.ordersTs; saveSnapTs(state.snapTs);
+      setCloudStatus('已同步云端（' + payload.orders.length + ' 条 · VAB ' + (payload.vab && payload.vab.list ? payload.vab.list.length : 0) + ' 人）', 'ok');
     }catch(e){
       failSave('云端保存异常：' + (e && e.message ? e.message : '网络错误'));
     }
@@ -525,6 +617,8 @@ function persistVab(){
     }
     console.warn('VAB 保存失败', e);
   }
+  // VAB 名单同样属于「整包快照」的一部分：变更后打脏标记，随订单一起上云（修复「换机后 VAB 名单为 0」）
+  markCloudDirty();
 }
 // 用完整行对象集合刷新 VAB 状态：vabRows(展示全部字段) / vabList(会员号) / vabSet(匹配) 三者同步
 function setVabRows(rows){
@@ -741,6 +835,8 @@ function clearAllData(){
   // 同步清除 IndexedDB 持久化层，避免刷新后从 IDB 重新恢复已被清除的订单
   idbDel(ORDERS_STORAGE_KEY).catch(()=>{});
   clearOrdersInCloud(); // 云端一并清空（异步，不阻塞本机清除流程）
+  // 本机变更时刻推到最新（不清零）：确保「本机主动清空」不会被云端旧快照在刷新后回灌（ts 裁决 → 保留本地空态）
+  bumpSnapTs();
   state.orders = [];
   state.manual = { month:{}, daily:{} };
   state.targets = Object.assign({}, DEFAULT_TARGETS);
@@ -784,6 +880,7 @@ function clearOrdersByDate(){
     try{ localStorage.removeItem(ORDERS_STORAGE_KEY); }catch(e){}
     idbDel(ORDERS_STORAGE_KEY).catch(()=>{});
     clearOrdersInCloud();
+    bumpSnapTs(); // 同 clearAllData：标记本机已有更新动作，防云端旧快照回灌
     renderReport(); renderStoreReport([], []); renderImportDetails(); renderTargets();
     if($('data-status')){ $('data-status').textContent = '待导入数据'; $('data-status').className = 'chip'; }
     showToast('已清除 ' + dateStr + ' 全部记录（页面已无剩余数据），手动调整已清空', 'ok', 3600);
@@ -3051,10 +3148,22 @@ function initApp(){
   // SDK 多源回退晚于首帧加载完成时：加载成功→重试云端同步刷新状态条；全部失败→明确提示
   document.addEventListener('cloud-sdk-ready', () => { if(!_cloudUser) syncFromCloud(); });
   document.addEventListener('cloud-sdk-failed', () => { if(!_cloudUser) setCloudStatus('云端组件加载失败 · 请检查网络后刷新重试（数据仍保存在本机）', 'err'); });
+  // 跨设备近实时同步（2026-10-16）：同一账号在另一台电脑/浏览器改动后，本机定时/切回页面时轻量重拉一次。
+  // 保护：本地存在待写入变更（防抖未触发）或正在应用云端快照时跳过，绝不用云端覆盖尚未上传的本地改动。
+  const cloudPoll = () => {
+    if(document.hidden) return;
+    if(_cloudSaveTimer) return;
+    if(_applyingCloud) return;
+    syncFromCloud({ silent: true });
+  };
+  setInterval(cloudPoll, 30000);
+  document.addEventListener('visibilitychange', () => { if(!document.hidden) cloudPoll(); });
 }
 
 // 历史订单恢复后的渲染与重算（localStorage 同步恢复 / IndexedDB 异步恢复共用）
-function runRestoredRecompute(){
+// opts.silent=true：跨设备定时同步等「后台刷新」场景，不再弹「已从本地恢复 N 条」提示，避免打扰
+function runRestoredRecompute(opts){
+  const silent = !!(opts && opts.silent);
   if(state.orders.length > 0){
     if(state.cutoffDate) $('cutoff-date').value = state.cutoffDate;
     // 防止新导入订单的 _uid 与已恢复订单冲突：把序列号抬到已恢复最大值之上
@@ -3066,6 +3175,7 @@ function runRestoredRecompute(){
     showOrdersSaved(true);
     const runRecompute = () => {
       recompute();
+      if(silent) return;
       showToast(`已从本地恢复 ${state.orders.length} 条历史订单，月累计/每日数据已自动刷新`, 'ok');
       // 若已存数据的最新月份早于当前月，说明存在「比存储更新的数据未落盘」的情况
       // （例如上一会话看过 10 月但未成功导入/保存）。此时明确提示，避免用户误以为数据被系统吞掉。
