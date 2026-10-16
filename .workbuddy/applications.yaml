@@ -1,1 +1,3 @@
-applications: []
+applications:
+  - name: 医管考核数据平台
+    locator: wbapp_ONr5mV8oGSJATSETzda78k

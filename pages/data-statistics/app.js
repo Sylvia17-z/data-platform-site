@@ -220,13 +220,16 @@
     var avg = perfRows.length ? pSum.total/perfRows.length : 0;
 
     // 管家：纯按"开单咨询师"分组；仅空咨询师 / 营销部归入"无"；王勤红独立成行（不并入"无"）
-    // 王勤红的业绩不含渠道分类为「商务部」的订单
+    // 王勤红个人业绩剔除「商务部」渠道订单；但为保持与周业绩合计对账一致，该部分计入「无」
     var perfByName={};
     ORDER.forEach(function(r){
       if(!inRange(r.date)) return;
       var c=r.consultant||"";
-      if(c==="王勤红" && deptOrder(r.deptSrc)==="商务部") return;   // 王勤红业绩剔除商务部渠道
       var add=Math.round(r.cash*100)/100;
+      if(c==="王勤红" && deptOrder(r.deptSrc)==="商务部"){
+        perfByName["无"]=Math.round(((perfByName["无"]||0)+add)*100)/100;   // 王勤红商务部渠道业绩归入「无」，保总量对账
+        return;
+      }
       var key=(c==="营销部" || c==="")?"无":c;
       perfByName[key]=Math.round(((perfByName[key]||0)+add)*100)/100;
     });
