@@ -359,6 +359,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
 
 </script>
 
+<script src="/shared/kpi-cloud-sync.js?v=20261016a"></script>
 <script>
 
 (function(){
@@ -1409,6 +1410,52 @@ https://github.com/nodeca/pako/blob/main/LICENSE
           if(p.getAttribute("data-mod")===key) p.classList.add("active"); else p.classList.remove("active");
         });
       });
+    });
+  }
+
+  /* ---------- 云端持久化（WorkBuddy Cloud Service，按账号隔离） ----------
+   * 周客量平台的原始数据只存在内存里（此前仅手工调整 stats_ov 落 localStorage），
+   * 刷新/换设备即丢。现把「预约 + 订单 + 数据区间 + 手工调整」整包快照存 dp_stats，
+   * 每账号一行（owner_id 由服务端 auth.uid() 填充 + RLS 隔离）；未登录时不影响本机使用。 */
+  window.CLOUD_ENDPOINT = window.CLOUD_ENDPOINT || "https://haibei-medical.app.workbuddy.host";
+  window.CLOUD_PK = window.CLOUD_PK || "wbpk_KQXIeDHLXWDHN7WQp3zqUQ_Y5IlM6hJd7n10U8UN5bYmSGUYeevVOwl";
+  var KPI_TS_KEY = "kpi_cloud_ts_stats";
+
+  function kpiPayload(){
+    if(!APPT.length && !ORDER.length) return null;
+    return { appt:APPT, order:ORDER, range:{start:RANGE.start, end:RANGE.end}, ov:OV, ts:Date.now() };
+  }
+  function applyKpiPayload(p){
+    if(!p) return;
+    APPT  = Array.isArray(p.appt)  ? p.appt  : [];
+    ORDER = Array.isArray(p.order) ? p.order : [];
+    OV    = (p.ov && typeof p.ov === "object") ? p.ov : { perf:{}, butler:{} };
+    if(p.range && p.range.start && p.range.end){
+      RANGE.start = p.range.start; RANGE.end = p.range.end;
+      if(dateStart) dateStart.value = RANGE.start;
+      if(dateEnd)   dateEnd.value   = RANGE.end;
+    }
+    if(APPT.length && ORDER.length){
+      if(!RANGE.start || !RANGE.end) autoRange();
+      saveOV();
+      recompute();
+      status.innerHTML = '<b style="color:#0a7a3a">✅ 已从云端恢复</b>（预约 '+APPT.length+' 行 / 订单 '+ORDER.length+' 行）· ' + status.innerHTML;
+    } else if(APPT.length){
+      defaultNextStat(); renderNext();
+    }
+  }
+  // 本地变更 → 标记待上传：saveOV（手工调整）与 recompute（导入 / 区间调整 / 清空）覆盖全部入口
+  var _kpiSaveOV = saveOV, _kpiRecompute = recompute;
+  saveOV    = function(){ _kpiSaveOV.apply(this, arguments);    if(window.KpiCloudSync) window.KpiCloudSync.markDirty(); };
+  recompute = function(){ _kpiRecompute.apply(this, arguments); if(window.KpiCloudSync) window.KpiCloudSync.markDirty(); };
+  if(window.KpiCloudSync){
+    window.KpiCloudSync.start({
+      table: 'dp_stats',
+      tsKey: KPI_TS_KEY,
+      collect: kpiPayload,
+      apply: applyKpiPayload,
+      isEmpty: function(p){ return !(p && ((p.appt && p.appt.length) || (p.order && p.order.length))); },
+      countOf: function(p){ return p ? ((p.appt ? p.appt.length : 0) + (p.order ? p.order.length : 0)) : 0; }
     });
   }
 })();

@@ -311,6 +311,26 @@ https://github.com/nodeca/pako/blob/main/LICENSE
 </script>
 
 <script>
+/* 云端 SDK 加载（多源回退，与 shared/auth-gate.js 同源同序）：本页无登录门，直接复用同源已登录会话。 */
+(function(){
+  if(window.WorkBuddyCloud) return;
+  var urls=[
+    'https://cdn.jsdelivr.net/npm/@tencent-ai/workbuddy-cloud-sdk@dev/lib/index.global.js',
+    'https://unpkg.com/@tencent-ai/workbuddy-cloud-sdk@dev/lib/index.global.js',
+    'https://registry.npmmirror.com/@tencent-ai/workbuddy-cloud-sdk/latest/files/lib/index.global.js'
+  ];
+  var i=0;
+  (function next(){
+    if(i>=urls.length){ setTimeout(next,5000); return; }
+    var s=document.createElement('script'); s.src=urls[i++];
+    s.onload=function(){ if(!window.WorkBuddyCloud) next(); };
+    s.onerror=next;
+    document.head.appendChild(s);
+  })();
+})();
+</script>
+<script src="/shared/kpi-cloud-sync.js?v=20261016a"></script>
+<script>
 
 (function(){
   "use strict";
@@ -1348,6 +1368,50 @@ https://github.com/nodeca/pako/blob/main/LICENSE
           if(p.getAttribute("data-mod")===key) p.classList.add("active"); else p.classList.remove("active");
         });
       });
+    });
+  }
+
+  /* ---------- 云端持久化（WorkBuddy Cloud Service，按账号隔离） ----------
+   * 与桌面版 index.html 共用同一张表 dp_stats 与同一份快照口径（预约 + 订单 + 区间 + 手工调整），
+   * 保证手机端与电脑端看到的是同一份数据。本页无登录门：直接复用同源已登录会话。 */
+  window.CLOUD_ENDPOINT = window.CLOUD_ENDPOINT || "https://haibei-medical.app.workbuddy.host";
+  window.CLOUD_PK = window.CLOUD_PK || "wbpk_KQXIeDHLXWDHN7WQp3zqUQ_Y5IlM6hJd7n10U8UN5bYmSGUYeevVOwl";
+  var KPI_TS_KEY = "kpi_cloud_ts_stats";
+
+  function kpiPayload(){
+    if(!APPT.length && !ORDER.length) return null;
+    return { appt:APPT, order:ORDER, range:{start:RANGE.start, end:RANGE.end}, ov:OV, ts:Date.now() };
+  }
+  function applyKpiPayload(p){
+    if(!p) return;
+    APPT  = Array.isArray(p.appt)  ? p.appt  : [];
+    ORDER = Array.isArray(p.order) ? p.order : [];
+    OV    = (p.ov && typeof p.ov === "object") ? p.ov : { perf:{}, butler:{} };
+    if(p.range && p.range.start && p.range.end){
+      RANGE.start = p.range.start; RANGE.end = p.range.end;
+      if(dateStart) dateStart.value = RANGE.start;
+      if(dateEnd)   dateEnd.value   = RANGE.end;
+    }
+    if(APPT.length && ORDER.length){
+      if(!RANGE.start || !RANGE.end) autoRange();
+      saveOV();
+      recompute();
+      status.innerHTML = '<b style="color:#0a7a3a">✅ 已从云端恢复</b>（预约 '+APPT.length+' 行 / 订单 '+ORDER.length+' 行）· ' + status.innerHTML;
+    } else if(APPT.length){
+      defaultNextStat(); renderNext();
+    }
+  }
+  var _kpiSaveOV = saveOV, _kpiRecompute = recompute;
+  saveOV    = function(){ _kpiSaveOV.apply(this, arguments);    if(window.KpiCloudSync) window.KpiCloudSync.markDirty(); };
+  recompute = function(){ _kpiRecompute.apply(this, arguments); if(window.KpiCloudSync) window.KpiCloudSync.markDirty(); };
+  if(window.KpiCloudSync){
+    window.KpiCloudSync.start({
+      table: 'dp_stats',
+      tsKey: KPI_TS_KEY,
+      collect: kpiPayload,
+      apply: applyKpiPayload,
+      isEmpty: function(p){ return !(p && ((p.appt && p.appt.length) || (p.order && p.order.length))); },
+      countOf: function(p){ return p ? ((p.appt ? p.appt.length : 0) + (p.order ? p.order.length : 0)) : 0; }
     });
   }
 })();

@@ -170,6 +170,7 @@
   <div id="placeholder" class="empty">尚未导入数据 —— 请先选择 Excel 文件。</div>
 </div>
 
+<script src="/shared/kpi-cloud-sync.js?v=20261016a"></script>
 <script src="./vendor/xlsx.full.min.js"></script>
 <script>
 (function(){
@@ -215,6 +216,20 @@
   /* ---------- 仪表盘状态 ---------- */
   var dash={ rows:null, map:null, fname:'', months:[], scope:'__all__' };  // scope: '__all__' | 'YYYY-MM'
 
+  /* 数据落地 + UI 切换：本地导入与「云端恢复」共用同一条路径，保证两端表现一致 */
+  function applyData(rows, map, fname, fromCloud){
+    dash.rows=rows; dash.map=map; dash.fname=fname; dash.scope='__all__';
+    dash.months=(function(){ var s=new Set(); rows.forEach(function(r){ var m=monthKey(r[map.date]); if(m) s.add(m); }); return Array.from(s).sort(); })();
+    // 导入成功：导入卡收窄为状态条
+    importCard.classList.add('mini');
+    document.getElementById('drop').style.display='none';
+    miniBar.style.display='flex';
+    document.getElementById('fName').textContent=fname;
+    document.getElementById('fMeta').textContent=fmtInt(rows.length)+' 行 · 覆盖 '+dash.months.length+' 个月（'+dash.months.join('、')+'）';
+    setStatus((fromCloud?'已从云端恢复 ':'已导入 ')+fmtInt(rows.length)+' 行','ok');
+    renderDashboard();
+  }
+
   function loadFile(f){
     setStatus('正在解析 '+f.name+' …');
     var reader=new FileReader();
@@ -228,16 +243,8 @@
         var headers=Object.keys(rows[0]);
         var map=resolveHeaders(headers);
         if(map.date==null||map.cash==null){ setStatus('未匹配到关键列（收款时间 / 收款金额-现款支付），请确认文件结构。','err'); return; }
-        dash.rows=rows; dash.map=map; dash.fname=f.name; dash.scope='__all__';
-        dash.months=(function(){ var s=new Set(); rows.forEach(function(r){ var m=monthKey(r[map.date]); if(m) s.add(m); }); return Array.from(s).sort(); })();
-        // 导入成功：导入卡收窄为状态条
-        importCard.classList.add('mini');
-        document.getElementById('drop').style.display='none';
-        miniBar.style.display='flex';
-        document.getElementById('fName').textContent=f.name;
-        document.getElementById('fMeta').textContent=fmtInt(rows.length)+' 行 · 覆盖 '+dash.months.length+' 个月（'+dash.months.join('、')+'）';
-        setStatus('已导入 '+fmtInt(rows.length)+' 行','ok');
-        renderDashboard();
+        applyData(rows, map, f.name, false);
+        if(window.KpiCloudSync) window.KpiCloudSync.markDirty();   // 数据变更 → 触发云端上传
       }catch(err){ setStatus('解析失败：'+err.message,'err'); }
     };
     reader.readAsArrayBuffer(f);
@@ -423,6 +430,32 @@
 
   function shortNum(n){ if(Math.abs(n)>=10000) return (n/10000).toFixed(1)+'万'; if(Math.abs(n)>=1000) return (n/1000).toFixed(1)+'k'; return fmt(n); }
   function escapeHtml(s){ return String(s).replace(/[&<>]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;'}[c];}); }
+
+  /* ---------- 云端持久化（WorkBuddy Cloud Service，按账号隔离） ----------
+   * 目的：导入的明细与聚合结果不随浏览器/设备丢失。整包 JSONB 快照存 dp_monthly，
+   * 每账号一行（owner_id 由服务端 auth.uid() 填充 + RLS 隔离），未登录时不影响本机使用。 */
+  window.CLOUD_ENDPOINT = window.CLOUD_ENDPOINT || 'https://haibei-medical.app.workbuddy.host';
+  window.CLOUD_PK = window.CLOUD_PK || 'wbpk_KQXIeDHLXWDHN7WQp3zqUQ_Y5IlM6hJd7n10U8UN5bYmSGUYeevVOwl';
+  var KPI_TS_KEY = 'kpi_cloud_ts_monthly';
+  function dashPayload(){
+    if(!dash.rows || !dash.rows.length || !dash.map) return null;
+    return { rows: dash.rows, map: dash.map, fname: dash.fname || '', scope: dash.scope || '__all__', ts: Date.now() };
+  }
+  function applyDashPayload(p){
+    if(!p || !Array.isArray(p.rows) || !p.rows.length || !p.map || p.map.date == null) return;
+    applyData(p.rows, p.map, p.fname || '云端数据', true);
+    if(p.scope){ dash.scope = p.scope; renderDashboard(); }
+  }
+  if(window.KpiCloudSync){
+    window.KpiCloudSync.start({
+      table: 'dp_monthly',
+      tsKey: KPI_TS_KEY,
+      collect: dashPayload,
+      apply: applyDashPayload,
+      isEmpty: function(p){ return !(p && Array.isArray(p.rows) && p.rows.length); },
+      countOf: function(p){ return (p && Array.isArray(p.rows)) ? p.rows.length : 0; }
+    });
+  }
 })();
 </script>
 <script src="/shared/auth-gate.js?v=20261016a"></script>
