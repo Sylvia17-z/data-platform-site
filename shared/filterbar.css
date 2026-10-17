@@ -1,0 +1,173 @@
+/* ============================================================
+   shared/filterbar.css — 全站筛选区统一规范 (v=20261017a)
+   ------------------------------------------------------------
+   设计令牌 + 数据段(.dataseg) + 筛选段(.fbar/.detail-filters)
+   + 按钮三级分级 + msel/分页条/弹窗/toast 规范值
+   引用方式（必须放在页面自身 <style> 之后，后加载覆盖旧值）：
+     <link rel="stylesheet" href="/shared/filterbar.css?v=20261017a">
+   口径：改本文件必须同步 bump 全站引用版本号。
+   ============================================================ */
+
+/* ---------- 1. 统一令牌 ---------- */
+:root{
+  --fctl-h:32px;         /* 控件统一高（电脑端） */
+  --fctl-h-m:36px;       /* 控件统一高（手机端） */
+  --fbtn-h-m:38px;       /* 手机端操作按钮高（触达目标） */
+  --fctl-radius:8px;     /* 控件统一圆角 */
+  --fctl-border:#dbe3ee; /* 控件统一边框色 */
+  --fbar-bg:#fbfcfe;     /* 筛选栅格底色 */
+}
+
+/* ---------- 2. 按钮三级分级：主=藏蓝实底 / 次=白底描边 / 危=红描边 ---------- */
+.btn{
+  height:var(--fctl-h);padding:0 13px;border-radius:var(--fctl-radius);
+  font-size:12.5px;display:inline-flex;align-items:center;justify-content:center;gap:6px;
+  font-family:inherit;white-space:nowrap;cursor:pointer;transition:all .15s ease;
+}
+.btn-sm{height:26px;padding:0 10px;font-size:12px;}
+.btn-primary{
+  background:var(--c-head,#002060);color:#fff;border-color:var(--c-head,#002060);
+}
+.btn-primary:hover{background:var(--c-head-2,#1e3a8a);color:#fff;border-color:var(--c-head-2,#1e3a8a);}
+.btn-danger,.btn.danger{
+  border-color:#f1c2bd;color:var(--c-error,#b3261e);background:#fff;
+}
+.btn-danger:hover,.btn.danger:hover{background:#fde4e4;color:var(--c-error,#b3261e);border-color:#e7a39c;}
+
+/* ---------- 3. 数据段：操作按钮行（组标签 + 主操作 … 推远 危险操作靠右） ---------- */
+.dataseg{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:0 0 10px;}
+.dataseg:last-child{margin-bottom:0;}
+.dataseg .seg-label{font-size:12px;color:var(--c-muted,#7a8aa6);font-weight:600;min-width:74px;flex:0 0 auto;}
+.dataseg .push{flex:1 1 0;min-width:8px;}
+.dataseg .file-meta,.dataseg .meta{font-size:11.5px;}
+
+/* ---------- 4. 筛选段 fbar：⚙折叠胶囊 + 栅格（label 上 / 控件下） ---------- */
+.fbar{display:flex;flex-wrap:wrap;align-items:flex-start;gap:10px;}
+.fbar .fbody{
+  display:grid;grid-template-columns:repeat(auto-fill,minmax(186px,1fr));
+  gap:10px 12px;flex:1 1 340px;align-items:end;grid-auto-flow:row dense;
+  background:var(--fbar-bg);border:1px solid var(--fctl-border);border-radius:10px;padding:13px 16px;
+}
+.fbar.collapsed .fbody{display:none;}
+.fitem{position:relative;display:flex;flex-direction:column;gap:3px;min-width:0;
+  font-size:11px;line-height:1.25;color:var(--c-muted,#7a8aa6);}
+.fitem > .flabel{font-size:11px;color:var(--c-muted,#7a8aa6);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.fitem select,.fitem input[type=text],.fitem input[type=number],.fitem input[type=date],
+.fitem .proj-filter-btn,.fitem .msel-btn{
+  width:100%;min-width:0;height:34px;border:1px solid var(--fctl-border);background:#fff;
+  border-radius:var(--fctl-radius);padding:0 10px;font-size:12.5px;color:var(--c-text,#1f2d4d);
+  font-family:inherit;outline:none;
+}
+.fitem select:focus,.fitem input[type=text]:focus,.fitem input[type=number]:focus,
+.fitem input[type=date]:focus,.fitem .proj-filter-btn:focus{
+  border-color:var(--c-accent,#3658d3);box-shadow:0 0 0 2px rgba(54,88,211,.18);
+}
+.fitem .proj-filter-btn{text-align:left;justify-content:flex-start;display:inline-flex;align-items:center;cursor:pointer;}
+.fitem.span2{grid-column:span 2;}
+.ftoggle{
+  display:inline-flex;align-items:center;gap:7px;background:var(--c-head,#002060);
+  border:1px solid var(--c-head,#002060);color:#fff;font-size:12.5px;font-weight:600;
+  height:32px;padding:0 14px;border-radius:999px;box-shadow:0 2px 8px rgba(0,32,96,.24);
+  cursor:pointer;user-select:none;white-space:nowrap;font-family:inherit;flex:0 0 auto;
+}
+.ftoggle:hover{background:var(--c-head-2,#1e3a8a);border-color:var(--c-head-2,#1e3a8a);}
+.ftoggle .ft-count{background:#fff;color:var(--c-head,#002060);border-radius:999px;font-size:10.5px;
+  min-width:17px;height:17px;line-height:17px;text-align:center;font-weight:700;padding:0 4px;}
+.fres{grid-column:1/-1;justify-self:start;height:30px;padding:0 13px;font-size:12px;
+  border-radius:var(--fctl-radius);border:1px solid var(--fctl-border);background:#fff;
+  color:var(--c-accent,#3658d3);cursor:pointer;font-family:inherit;}
+.fres:hover{background:var(--c-head,#002060);color:#fff;border-color:var(--c-head,#002060);}
+
+/* ---------- 5. detail-filters 体系（⑥明细/⑤清单：以初诊版形态为全站基准） ---------- */
+.detail-filters{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin:2px 0 10px;}
+.detail-filters .filters-body{
+  display:grid;grid-template-columns:repeat(auto-fill,minmax(186px,1fr));
+  gap:10px 12px;flex:1 1 340px;align-items:end;grid-auto-flow:row dense;
+  background:var(--fbar-bg);border:1px solid var(--fctl-border);border-radius:10px;padding:13px 16px;
+}
+.detail-filters.collapsed .filters-body{display:none;}
+.detail-filters .ftoggle{align-self:center;}
+.detail-filter{display:flex;flex-direction:column;gap:3px;min-width:0;
+  font-size:11px;line-height:1.25;color:var(--c-muted,#7a8aa6);}
+.detail-filter > .df-label{font-size:11.5px;color:var(--c-muted,#7a8aa6);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.detail-filter .detail-select,.detail-filter .msel,.detail-filter .msel-btn{width:100%;min-width:0;}
+.detail-filter .msel{display:flex;}
+.detail-filter .msel-btn{justify-content:space-between;text-align:left;}
+.detail-select{
+  height:34px;border:1px solid var(--fctl-border);background:#fff;padding:0 10px;
+  border-radius:var(--fctl-radius);font-size:12.5px;font-weight:500;color:var(--c-text,#1f2d4d);
+  cursor:pointer;min-width:0;font-family:inherit;outline:none;
+}
+.detail-select:focus{border-color:var(--c-accent,#3658d3);box-shadow:0 0 0 2px rgba(54,88,211,.18);}
+.detail-reset{height:30px;padding:0 13px;font-size:12px;border-radius:var(--fctl-radius);
+  border:1px solid var(--fctl-border);background:#fff;color:var(--c-accent,#3658d3);cursor:pointer;font-family:inherit;}
+.detail-reset:hover{background:var(--c-head,#002060);color:#fff;border-color:var(--c-head,#002060);}
+.span2{grid-column:span 2;}
+.num-filter{grid-column:span 2;}
+.num-line{display:flex;gap:6px;}
+.num-line .op-sel{flex:0 0 76px;width:76px;}
+.date-filter{grid-column:span 2;}
+.date-line{display:flex;gap:6px;align-items:center;}
+.filters-foot{grid-column:1/-1;display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+
+/* ---------- 6. msel 多选下拉（全站统一值，与初诊版一致） ---------- */
+.msel{position:relative;display:inline-flex;}
+.msel-btn{min-width:120px;}
+.msel-panel{display:none;position:absolute;top:calc(100% + 4px);left:0;z-index:40;
+  min-width:170px;max-height:260px;overflow:auto;background:#fff;border:1px solid var(--fctl-border);
+  border-radius:10px;box-shadow:0 6px 20px rgba(20,40,80,.14);padding:6px;}
+.msel-panel.open{display:block;}
+.msel-top{display:flex;flex-direction:column;gap:5px;padding-bottom:5px;border-bottom:1px solid var(--c-border-soft,#e9eef6);margin-bottom:5px;}
+.msel-search{height:28px;border:1px solid var(--fctl-border);border-radius:6px;padding:0 8px;font-size:12px;font-family:inherit;outline:none;}
+.msel-actions{display:flex;gap:6px;}
+.msel-act{font-size:11px;border:1px solid var(--fctl-border);background:#fff;border-radius:6px;padding:2px 8px;color:var(--c-accent,#3658d3);cursor:pointer;font-family:inherit;}
+.msel-act:hover{background:var(--c-head,#002060);color:#fff;border-color:var(--c-head,#002060);}
+label.msel-item{display:flex;align-items:center;gap:7px;padding:4px 6px;border-radius:6px;font-size:12.5px;cursor:pointer;color:var(--c-text,#1f2d4d);}
+label.msel-item:hover{background:#f2f6fd;}
+label.msel-item input{accent-color:var(--c-accent,#3658d3);}
+.msel-caret{font-size:10px;color:var(--c-muted,#7a8aa6);}
+
+/* ---------- 7. 分页条 / 弹窗 / toast 规范值 ---------- */
+.detail-pager{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:10px 0 4px;font-size:12px;color:var(--c-muted,#7a8aa6);}
+.detail-pager .pg-btn{font-family:inherit;font-size:12px;border:1px solid var(--fctl-border);background:#fff;
+  color:var(--c-accent,#3658d3);border-radius:var(--fctl-radius);padding:4px 11px;cursor:pointer;min-width:30px;}
+.detail-pager .pg-btn:hover:not([disabled]){background:#f2f6fd;}
+.detail-pager .pg-btn.active{background:var(--c-head,#002060);color:#fff;border-color:var(--c-head,#002060);}
+.detail-pager .pg-btn[disabled]{opacity:.4;cursor:not-allowed;}
+.detail-pager .pg-info{margin-left:auto;}
+.modal-mask{position:fixed;inset:0;background:rgba(15,23,42,.45);display:none;align-items:center;justify-content:center;z-index:50;backdrop-filter:blur(2px);}
+.modal-box{background:#fff;border-radius:12px;width:min(460px,92vw);max-height:88vh;overflow:auto;box-shadow:0 12px 40px rgba(0,0,0,.25);}
+.toast{position:fixed;left:50%;top:24px;transform:translateX(-50%);background:#1f2d4d;color:#fff;
+  padding:11px 20px;border-radius:10px;font-size:13px;box-shadow:0 8px 24px rgba(0,0,0,.18);
+  z-index:9999;opacity:0;transition:opacity .25s;pointer-events:none;}
+.toast.show{opacity:1;}
+
+/* ---------- 8. 手机端（≤640px）：栅格 2 列 + 触达尺寸 ---------- */
+@media (max-width:640px){
+  /* 操作按钮触达高度 38px（覆盖桌面 .btn 32px；btn-sm 保持小尺寸） */
+  .btn{height:var(--fbtn-h-m);}
+  .btn-sm{height:26px;}
+  /* 数据段：2 列等宽网格，按钮通铺等高；组标签/说明文字占整行 */
+  .dataseg{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;}
+  .dataseg .seg-label{grid-column:1/-1;min-width:0;}
+  .dataseg .push{display:none;}
+  .dataseg .btn{height:var(--fbtn-h-m);width:100%;justify-content:center;}
+  .dataseg .btn.full{grid-column:1/-1;}
+  .dataseg .file-meta,.dataseg .meta,.dataseg label{grid-column:1/-1;}
+  /* 筛选段：单列外壳 + 2 列栅格（width:100% 防 flex 父容器收缩） */
+  .fbar,.detail-filters{display:block;width:100%;}
+  .fbar .fbody,.detail-filters .filters-body{
+    grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;padding:10px 12px;margin-top:8px;flex:none;
+  }
+  .fbar .ftoggle,.detail-filters .ftoggle{width:100%;justify-content:center;}
+  .fitem select,.fitem input[type=text],.fitem input[type=number],.fitem input[type=date],
+  .fitem .proj-filter-btn,.fitem .msel-btn,
+  .detail-filter .detail-select,.detail-filter .msel-btn{height:var(--fctl-h-m);font-size:13px;}
+  .fitem.span2,.fitem.num-filter,.fitem.date-filter,
+  .detail-filter.span2,.detail-filter.num-filter,.detail-filter.date-filter{grid-column:1/-1;}
+  .detail-pager .pg-btn{padding:6px 12px;}
+}
+/* 电脑端微调（>640px） */
+@media (min-width:641px){
+  .fitem > .flabel,.detail-filter > .df-label{font-size:11.5px;}
+}

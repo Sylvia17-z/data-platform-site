@@ -393,6 +393,7 @@
   .cloud-err{color:var(--c-error);}
   /* 登录浮层（复用 .modal-mask/.modal-box 体系，单独抬高层级避免被其它浮层遮挡） */
 </style>
+<link rel="stylesheet" href="/shared/filterbar.css?v=20261017a">
 <link rel="manifest" href="/manifest.json">
 <meta name="theme-color" content="#123c73">
 <link rel="apple-touch-icon" href="/icons/icon-192.png">
@@ -411,52 +412,50 @@
   <!-- 控制面板 -->
   <div class="panel" data-page-node-id="q3UG7s9I9lOeGXeyBazgrD">
     <h2 data-page-node-id="CAnTOEgbyucSNzEYBOtamy">① 数据导入</h2>
-    <div class="row" style="gap:18px;" data-page-node-id="uRauk3BTriiIEQj3dJFP4P">
-      <div data-page-node-id="e9yoGRgkpNU7G5jw6O3wqZ">
-        <span class="label" data-page-node-id="rcMNWKRBWP74I43ofv9dYm">订单收退款明细：</span>
-        <input type="file" id="file-orders" accept=".xlsx,.xls" hidden data-page-node-id="qPfudSznaBi8SGbJMA7Tvy" />
-        <label for="file-orders" class="btn btn-primary" data-page-node-id="BQzpkj18KygQmHmAUfLIfE">📁 上传订单表</label>
-        <span id="orders-meta" class="file-meta" data-page-node-id="WXC1BHVp6u6ppPQsqfxqkH">未导入</span>
-        <span id="save-status" class="file-meta" style="color:#1f8a4a;"></span>
-        <span id="cloud-status" class="file-meta"></span>
-        <label style="font-size:12px;margin-left:6px;color:var(--c-muted);" data-page-node-id="3bjnFxlhUdGSfQY30HRnDq">
-          <input type="checkbox" id="merge-mode" checked data-page-node-id="HM0RpqKy2mrDSwFwMCFHUO" /> 合并到历史数据（重叠日期覆盖，其它日期保留）
-        </label>
-      </div>
-      <div data-page-node-id="GuBPinJbNcTK30VWY2G5DZ">
-        <span class="label" data-page-node-id="nywmf7ZKstPW3vFTFE5ORl">VAB 会员列表：</span>
-        <input type="file" id="file-vab" accept=".xlsx,.xls" hidden data-page-node-id="DXtBHsfyxdEcg3rFrb5nwS" />
-        <label for="file-vab" class="btn" data-page-node-id="auLOVNlApcfoAfw3SxzTvF">👥 上传VAB会员表</label>
-        <span id="vab-meta" class="file-meta" data-page-node-id="xstmJe27hHeREDGXMIA0Ql">未导入</span>
-        <button class="btn" id="edit-vab" title="展开/收起 VAB 会员清单（清单内双击单元格编辑、行尾 × 删除会员）" data-page-node-id="2vcS9kp7k74vSZfjuKUP8k">📋 编辑会员</button>
-        <button class="btn" id="clear-vab" title="清空本机保存的VAB清单（重置旧版本残留/示例数据），清空后重新上传真实会员表" data-page-node-id="clearVabBtn">🗑 清空VAB</button>
-      </div>
-      <!-- VAB 会员清单（默认展开呈现导入会员，单元格可双击编辑、行尾可删除） -->
-      <details class="vab-list-details" style="margin-top:10px;" data-page-node-id="vabListBox">
-        <summary id="vab-list-summary" class="vab-list-summary">📋 VAB 会员清单</summary>
-        <div id="vab-list" class="vab-list-wrap"></div>
-      </details>
-      <!-- 新增 VAB 会员弹窗（录入会员号/姓名/组别等全部字段） -->
-      <div id="vab-add-modal" class="modal-mask" style="display:none;" data-page-node-id="vabAddModal">
-        <div class="modal-box" role="dialog" aria-modal="true">
-          <div class="modal-title">＋ 新增 VAB 会员</div>
-          <div id="vab-add-fields" class="modal-fields"></div>
-          <div class="modal-actions">
-            <button class="btn btn-primary" id="vab-add-save" data-page-node-id="vabAddSave">💾 保存</button>
-            <button class="btn" id="vab-add-cancel" data-page-node-id="vabAddCancel">取消</button>
-          </div>
+    <div class="dataseg" data-page-node-id="uRauk3BTriiIEQj3dJFP4P">
+      <span class="seg-label" data-page-node-id="rcMNWKRBWP74I43ofv9dYm">订单明细</span>
+      <input type="file" id="file-orders" accept=".xlsx,.xls" hidden data-page-node-id="qPfudSznaBi8SGbJMA7Tvy" />
+      <label for="file-orders" class="btn btn-primary" data-page-node-id="BQzpkj18KygQmHmAUfLIfE">📁 上传订单表</label>
+      <span id="orders-meta" class="file-meta" data-page-node-id="WXC1BHVp6u6ppPQsqfxqkH">未导入</span>
+      <span id="save-status" class="file-meta" style="color:#1f8a4a;"></span>
+      <span id="cloud-status" class="file-meta"></span>
+      <label style="font-size:12px;color:var(--c-muted);" data-page-node-id="3bjnFxlhUdGSfQY30HRnDq">
+        <input type="checkbox" id="merge-mode" checked data-page-node-id="HM0RpqKy2mrDSwFwMCFHUO" /> 合并到历史数据（重叠日期覆盖，其它日期保留）
+      </label>
+    </div>
+    <div class="dataseg" data-page-node-id="GuBPinJbNcTK30VWY2G5DZ">
+      <span class="seg-label" data-page-node-id="nywmf7ZKstPW3vFTFE5ORl">VAB 名单</span>
+      <input type="file" id="file-vab" accept=".xlsx,.xls" hidden data-page-node-id="DXtBHsfyxdEcg3rFrb5nwS" />
+      <label for="file-vab" class="btn" data-page-node-id="auLOVNlApcfoAfw3SxzTvF">👥 上传VAB会员表</label>
+      <span id="vab-meta" class="file-meta" data-page-node-id="xstmJe27hHeREDGXMIA0Ql">未导入</span>
+      <button class="btn" id="edit-vab" title="展开/收起 VAB 会员清单（清单内双击单元格编辑、行尾 × 删除会员）" data-page-node-id="2vcS9kp7k74vSZfjuKUP8k">📋 编辑会员</button>
+      <button class="btn btn-danger" id="clear-vab" title="清空本机保存的VAB清单（重置旧版本残留/示例数据），清空后重新上传真实会员表" data-page-node-id="clearVabBtn">🗑 清空VAB</button>
+    </div>
+    <!-- VAB 会员清单（默认展开呈现导入会员，单元格可双击编辑、行尾可删除） -->
+    <details class="vab-list-details" style="margin:0 0 10px 84px;" data-page-node-id="vabListBox">
+      <summary id="vab-list-summary" class="vab-list-summary">📋 VAB 会员清单</summary>
+      <div id="vab-list" class="vab-list-wrap"></div>
+    </details>
+    <!-- 新增 VAB 会员弹窗（录入会员号/姓名/组别等全部字段） -->
+    <div id="vab-add-modal" class="modal-mask" style="display:none;" data-page-node-id="vabAddModal">
+      <div class="modal-box" role="dialog" aria-modal="true">
+        <div class="modal-title">＋ 新增 VAB 会员</div>
+        <div id="vab-add-fields" class="modal-fields"></div>
+        <div class="modal-actions">
+          <button class="btn btn-primary" id="vab-add-save" data-page-node-id="vabAddSave">💾 保存</button>
+          <button class="btn" id="vab-add-cancel" data-page-node-id="vabAddCancel">取消</button>
         </div>
       </div>
     </div>
-    <div class="row" style="margin-top:12px;" data-page-node-id="qlWcD1nsI8D3ZcQmFA9B4f">
-      <span class="label" data-page-node-id="SQGaFDln4aDjb4EwYfvV9E">截止日期：</span>
+    <div class="dataseg" data-page-node-id="qlWcD1nsI8D3ZcQmFA9B4f">
+      <span class="seg-label" data-page-node-id="SQGaFDln4aDjb4EwYfvV9E">截止日期</span>
       <input type="date" id="cutoff-date" class="input" data-page-node-id="3ZaYGlsyPJp2mOgfqHAvFj" />
       <span class="file-meta" data-page-node-id="HGIi1hVHYymyUOMA4NeaFz">（仅汇总 ≤ 该日期的数据）</span>
       <button class="btn" id="recompute" data-page-node-id="pOgl6nqAh86a9vsgpK848M">🔄 重新计算</button>
-      <button class="btn" id="clear-manual" title="清除所有手动调整的月累计/每日数据，恢复自动计算（用于修正手动改错导致的「月累计≠当日」）">🧹 清除手动调整</button>
-      <button class="btn" id="clear-date" title="清除某个指定日期（按收款时间所在日）的全部业绩记录，各统计表自动重算">🗓 清除指定日期</button>
+      <span class="push"></span>
+      <button class="btn btn-danger" id="clear-manual" title="清除所有手动调整的月累计/每日数据，恢复自动计算（用于修正手动改错导致的「月累计≠当日」）">🧹 清除手动调整</button>
+      <button class="btn btn-danger" id="clear-date" title="清除某个指定日期（按收款时间所在日）的全部业绩记录，各统计表自动重算">🗓 清除指定日期</button>
       <button class="btn btn-danger" id="clear-all" title="清除本机保存的订单/月目标/手动调整/列宽，重置为空后重新导入（不影响 VAB 会员）">🗑 清除全部数据</button>
-      <span style="flex:1" data-page-node-id="cm7JsX5fZ7iDlJZeeDkKUf"></span>
       <a class="btn" href="../daily-performance-chuzhen/index.html" style="text-decoration:none;" title="切换到「每日业绩日报表·初诊版」页面（逻辑完全一致，数据各自独立导入）">🚀 初诊版入口 →</a>
     </div>
     <div id="render-error" style="display:none;margin-top:10px;padding:10px 12px;background:#fde4e4;color:#b3261e;border:1px solid #b3261e;border-radius:6px;font-size:13px;" data-page-node-id="Cren2M9ptIxbdhlZu8Vs9i"></div>

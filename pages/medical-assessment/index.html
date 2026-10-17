@@ -6,7 +6,7 @@
 <title>医管考核数据统计</title>
 <style>
   :root{
-    --navy:#01418B;
+    --navy:#002060;
     --navy-900:#003366;
     --navy-700:#0a4ea3;
     --navy-500:#03539f;
@@ -201,7 +201,15 @@
     outline:2px solid var(--navy-700);outline-offset:1px;
   }
   label.fbtn:focus-within{outline:2px solid var(--navy-700);outline-offset:1px;}
+
+  /* 手机端兜底（此前无任何 @media；筛选区响应式由 shared/filterbar.css 提供） */
+  @media (max-width:640px){
+    .wrap{padding:10px 10px 40px;}
+    .toolbar{padding:10px 12px;gap:8px;}
+    .topbar{padding:12px 14px;}
+  }
 </style>
+<link rel="stylesheet" href="/shared/filterbar.css?v=20261017a">
 <link rel="manifest" href="/manifest.json">
 <meta name="theme-color" content="#123c73">
 <link rel="apple-touch-icon" href="/icons/icon-192.png">
@@ -226,39 +234,51 @@
         <span class="desc">导入 VAB 会员清单（考核花名册），作为收退款 / 收费明细的匹配基准（会员号 / 姓名 → 管家 / 医生 / 是否参与到店率考核）。</span>
       </div>
       <div class="toolbar">
-        <div class="grp">
-          <label class="fbtn">批量导入
+        <div class="dataseg">
+          <span class="seg-label">数据</span>
+          <label class="fbtn">📥 批量导入
             <input type="file" id="fileVab" accept=".xlsx,.xls" />
           </label>
           <button type="button" class="btn" id="vabAdd">＋ 新增</button>
-          <button type="button" class="btn" id="vabExport">批量导出</button>
-          <button type="button" class="btn" id="vabTemplate">下载导入模板</button>
-          <button type="button" class="btn" id="vabBatchDel" disabled>批量删除</button>
-          <button type="button" class="btn danger" id="vabClearAll">清空数据</button>
+          <button type="button" class="btn" id="vabExport">📤 批量导出</button>
+          <button type="button" class="btn" id="vabTemplate">⬇ 下载导入模板</button>
+          <span class="push"></span>
+          <button type="button" class="btn danger" id="vabBatchDel" disabled>🗑 批量删除</button>
+          <button type="button" class="btn danger" id="vabClearAll">🗑 清空数据</button>
         </div>
-        <div class="grp">
-          <span class="gl">导入方式：</span>
-          <select id="vabImportMode">
-            <option value="replace">覆盖导入</option>
-            <option value="append">追加导入</option>
-          </select>
+        <div class="fbar">
+          <button type="button" class="ftoggle" data-fbar="vab"><span>⚙</span><span>筛选</span><span class="ft-caret">▴</span></button>
+          <div class="fbody">
+            <span class="fitem"><span class="flabel">导入方式</span>
+              <select id="vabImportMode" class="fctl">
+                <option value="replace">覆盖导入</option>
+                <option value="append">追加导入</option>
+              </select>
+            </span>
+            <span class="fitem span2"><span class="flabel">搜索（姓名 / 会员号 / 管家）</span>
+              <input type="text" id="vabSearch" class="fctl" placeholder="输入关键词…" />
+            </span>
+            <span class="fitem"><span class="flabel">是否参与到店率考核</span>
+              <select id="vabKaohe" class="fctl">
+                <option value="all">全部</option>
+                <option value="是">仅参加考核</option>
+                <option value="否">不参加考核</option>
+              </select>
+            </span>
+            <span class="fitem"><span class="flabel">是否争议 VAB</span>
+              <select id="vabDispute" class="fctl">
+                <option value="all">全部</option>
+                <option value="是">仅争议VAB</option>
+                <option value="否">仅非争议VAB</option>
+              </select>
+            </span>
+          </div>
         </div>
-        <div class="grp">
-          <span class="gl">筛选 / 排序：</span>
-          <input type="text" id="vabSearch" class="inp" placeholder="搜索姓名 / 会员号 / 管家…" />
-          <select id="vabKaohe">
-            <option value="all">是否参与到店率考核：全部</option>
-            <option value="是">仅参加考核</option>
-            <option value="否">不参加考核</option>
-          </select>
-          <select id="vabDispute">
-            <option value="all">是否争议VAB：全部</option>
-            <option value="是">仅争议VAB</option>
-            <option value="否">仅非争议VAB</option>
-          </select>
+        <div class="dataseg" style="margin-bottom:0;">
+          <span class="hint" id="vabHint">尚未导入清单（可下载模板后批量导入，或直接「新增」）</span>
+          <span class="push"></span>
+          <span class="hint" id="vabSelHint">已选 0 项</span>
         </div>
-        <span class="hint" id="vabHint">尚未导入清单（可下载模板后批量导入，或直接「新增」）</span>
-        <span class="hint" id="vabSelHint" style="margin-left:auto;">已选 0 项</span>
       </div>
       <div class="stats" id="vabStats" style="display:none;">
         <div class="stat"><div class="v" id="vabTotal">0</div><div class="k">清单人数</div></div>
@@ -277,56 +297,58 @@
         <span class="desc">导入订单项目收退款表-明细；按会员号直接匹配 VAB 会员清单（由「VAB 会员清单」面板统一管理，无需重复导出），补全管家 / 医生 / 是否参与到店率考核，未匹配行已标注。</span>
       </div>
       <div class="toolbar">
-        <div class="grp">
-          <label class="fbtn">导入收退款明细
+        <div class="dataseg">
+          <span class="seg-label">数据</span>
+          <label class="fbtn">📥 导入收退款明细
             <input type="file" id="fileOrder" accept=".xlsx,.xls" />
           </label>
+          <span class="fitem" style="flex-direction:row;align-items:center;gap:6px;"><span class="flabel" style="width:auto;">导入方式</span>
+            <select id="orderImportMode" class="fctl" style="width:auto;">
+              <option value="replace">覆盖导入</option>
+              <option value="append">追加导入</option>
+            </select>
+          </span>
+          <span class="push"></span>
+          <button class="btn" id="orderExport" disabled>📤 导出 Excel</button>
+          <button class="btn danger" id="orderClear">🗑 清空明细</button>
         </div>
-        <div class="grp">
-          <span class="gl">导入方式：</span>
-          <select id="orderImportMode">
-            <option value="replace">覆盖导入</option>
-            <option value="append">追加导入</option>
-          </select>
-        </div>
-        <div class="grp">
-          <span class="gl">匹配状态：</span>
-          <select id="orderFilter">
-            <option value="all">全部</option>
-            <option value="y">仅匹配</option>
-            <option value="n">仅未匹配</option>
-          </select>
-        </div>
-        <div class="grp proj-filter">
-          <span class="gl">月份：</span>
-          <button type="button" class="proj-filter-btn" id="orderMonthBtn">全部月份</button>
-          <div class="proj-filter-pop" id="orderMonthPop" style="display:none;">
-            <label class="pf-row"><input type="checkbox" class="pf-cb" data-v="__all__" /> 全部</label>
-            <div class="pf-cats" id="orderMonthCats"></div>
+        <div class="fbar">
+          <button type="button" class="ftoggle" data-fbar="order"><span>⚙</span><span>筛选</span><span class="ft-caret">▴</span></button>
+          <div class="fbody">
+            <span class="fitem"><span class="flabel">匹配状态</span>
+              <select id="orderFilter" class="fctl">
+                <option value="all">全部</option>
+                <option value="y">仅匹配</option>
+                <option value="n">仅未匹配</option>
+              </select>
+            </span>
+            <span class="fitem proj-filter"><span class="flabel">月份（多选）</span>
+              <button type="button" class="proj-filter-btn" id="orderMonthBtn">全部月份</button>
+              <div class="proj-filter-pop" id="orderMonthPop" style="display:none;">
+                <label class="pf-row"><input type="checkbox" class="pf-cb" data-v="__all__" /> 全部</label>
+                <div class="pf-cats" id="orderMonthCats"></div>
+              </div>
+            </span>
+            <span class="fitem"><span class="flabel">VAB 争议</span>
+              <select id="orderDispute" class="fctl">
+                <option value="all">全部</option>
+                <option value="是">仅争议VAB</option>
+                <option value="否">仅非争议VAB</option>
+              </select>
+            </span>
+            <span class="fitem proj-filter"><span class="flabel">重点项目（多选）</span>
+              <button type="button" class="proj-filter-btn" id="orderProjBtn">全部</button>
+              <div class="proj-filter-pop" id="orderProjPop" style="display:none;">
+                <label class="pf-row"><input type="checkbox" class="pf-cb" data-v="__all__" /> 全部</label>
+                <div class="pf-cats" id="orderProjCats"></div>
+                <label class="pf-row"><input type="checkbox" class="pf-cb" data-v="none" /> 仅未匹配</label>
+              </div>
+            </span>
+            <span class="fitem span2"><span class="flabel">搜索（会员号 / 姓名 / 管家 / 品项 / 重点项目）</span>
+              <input type="text" id="orderSearch" class="fctl" placeholder="输入关键词…" />
+            </span>
           </div>
         </div>
-        <div class="grp">
-          <span class="gl">VAB 争议：</span>
-          <select id="orderDispute">
-            <option value="all">是否争议VAB：全部</option>
-            <option value="是">仅争议VAB</option>
-            <option value="否">仅非争议VAB</option>
-          </select>
-        </div>
-        <div class="grp proj-filter">
-          <span class="gl">重点项目：</span>
-          <button type="button" class="proj-filter-btn" id="orderProjBtn">全部</button>
-          <div class="proj-filter-pop" id="orderProjPop" style="display:none;">
-            <label class="pf-row"><input type="checkbox" class="pf-cb" data-v="__all__" /> 全部</label>
-            <div class="pf-cats" id="orderProjCats"></div>
-            <label class="pf-row"><input type="checkbox" class="pf-cb" data-v="none" /> 仅未匹配</label>
-          </div>
-        </div>
-        <div class="grp">
-          <input type="text" id="orderSearch" class="inp" placeholder="搜索会员号 / 姓名 / 管家 / 品项 / 重点项目…" />
-        </div>
-        <button class="btn" id="orderExport" disabled>导出 Excel</button>
-        <button class="btn" id="orderClear">清空明细</button>
       </div>
       <div class="warn" id="orderWarn">尚未导入 VAB 会员清单，请先在「VAB 会员清单」面板导入（数据自动共享，无需重复导出）。</div>
       <div class="stats" id="orderStats" style="display:none;">
@@ -349,56 +371,58 @@
         <span class="desc">导入收费明细；按患者姓名直接匹配 VAB 会员清单（由「VAB 会员清单」面板统一管理，无需重复导出），（姓名 → 会员号 / 管家 / 医生 / 是否参与到店率考核），未匹配行已标注。</span>
       </div>
       <div class="toolbar">
-        <div class="grp">
-          <label class="fbtn">导入收费明细
+        <div class="dataseg">
+          <span class="seg-label">数据</span>
+          <label class="fbtn">📥 导入收费明细
             <input type="file" id="fileCharge" accept=".xlsx,.xls" />
           </label>
+          <span class="fitem" style="flex-direction:row;align-items:center;gap:6px;"><span class="flabel" style="width:auto;">导入方式</span>
+            <select id="chargeImportMode" class="fctl" style="width:auto;">
+              <option value="replace">覆盖导入</option>
+              <option value="append">追加导入</option>
+            </select>
+          </span>
+          <span class="push"></span>
+          <button class="btn" id="chargeExport" disabled>📤 导出 Excel</button>
+          <button class="btn danger" id="chargeClear">🗑 清空明细</button>
         </div>
-        <div class="grp">
-          <span class="gl">导入方式：</span>
-          <select id="chargeImportMode">
-            <option value="replace">覆盖导入</option>
-            <option value="append">追加导入</option>
-          </select>
-        </div>
-        <div class="grp">
-          <span class="gl">匹配状态：</span>
-          <select id="chargeFilter">
-            <option value="all">全部</option>
-            <option value="y">仅匹配</option>
-            <option value="n">仅未匹配</option>
-          </select>
-        </div>
-        <div class="grp proj-filter">
-          <span class="gl">月份：</span>
-          <button type="button" class="proj-filter-btn" id="chargeMonthBtn">全部月份</button>
-          <div class="proj-filter-pop" id="chargeMonthPop" style="display:none;">
-            <label class="pf-row"><input type="checkbox" class="pf-cb" data-v="__all__" /> 全部</label>
-            <div class="pf-cats" id="chargeMonthCats"></div>
+        <div class="fbar">
+          <button type="button" class="ftoggle" data-fbar="charge"><span>⚙</span><span>筛选</span><span class="ft-caret">▴</span></button>
+          <div class="fbody">
+            <span class="fitem"><span class="flabel">匹配状态</span>
+              <select id="chargeFilter" class="fctl">
+                <option value="all">全部</option>
+                <option value="y">仅匹配</option>
+                <option value="n">仅未匹配</option>
+              </select>
+            </span>
+            <span class="fitem proj-filter"><span class="flabel">月份（多选）</span>
+              <button type="button" class="proj-filter-btn" id="chargeMonthBtn">全部月份</button>
+              <div class="proj-filter-pop" id="chargeMonthPop" style="display:none;">
+                <label class="pf-row"><input type="checkbox" class="pf-cb" data-v="__all__" /> 全部</label>
+                <div class="pf-cats" id="chargeMonthCats"></div>
+              </div>
+            </span>
+            <span class="fitem"><span class="flabel">VAB 争议</span>
+              <select id="chargeDispute" class="fctl">
+                <option value="all">全部</option>
+                <option value="是">仅争议VAB</option>
+                <option value="否">仅非争议VAB</option>
+              </select>
+            </span>
+            <span class="fitem proj-filter"><span class="flabel">重点项目（多选）</span>
+              <button type="button" class="proj-filter-btn" id="chargeProjBtn">全部</button>
+              <div class="proj-filter-pop" id="chargeProjPop" style="display:none;">
+                <label class="pf-row"><input type="checkbox" class="pf-cb" data-v="__all__" /> 全部</label>
+                <div class="pf-cats" id="chargeProjCats"></div>
+                <label class="pf-row"><input type="checkbox" class="pf-cb" data-v="none" /> 仅未匹配</label>
+              </div>
+            </span>
+            <span class="fitem span2"><span class="flabel">搜索（会员号 / 姓名 / 管家 / 项目 / 重点项目）</span>
+              <input type="text" id="chargeSearch" class="fctl" placeholder="输入关键词…" />
+            </span>
           </div>
         </div>
-        <div class="grp">
-          <span class="gl">VAB 争议：</span>
-          <select id="chargeDispute">
-            <option value="all">是否争议VAB：全部</option>
-            <option value="是">仅争议VAB</option>
-            <option value="否">仅非争议VAB</option>
-          </select>
-        </div>
-        <div class="grp proj-filter">
-          <span class="gl">重点项目：</span>
-          <button type="button" class="proj-filter-btn" id="chargeProjBtn">全部</button>
-          <div class="proj-filter-pop" id="chargeProjPop" style="display:none;">
-            <label class="pf-row"><input type="checkbox" class="pf-cb" data-v="__all__" /> 全部</label>
-            <div class="pf-cats" id="chargeProjCats"></div>
-            <label class="pf-row"><input type="checkbox" class="pf-cb" data-v="none" /> 仅未匹配</label>
-          </div>
-        </div>
-        <div class="grp">
-          <input type="text" id="chargeSearch" class="inp" placeholder="搜索会员号 / 姓名 / 管家 / 项目 / 重点项目…" />
-        </div>
-        <button class="btn" id="chargeExport" disabled>导出 Excel</button>
-        <button class="btn" id="chargeClear">清空明细</button>
       </div>
       <div class="warn" id="chargeWarn">尚未导入 VAB 会员清单，请先在「VAB 会员清单」面板导入（数据自动共享，无需重复导出）。</div>
       <div class="stats" id="chargeStats" style="display:none;">
@@ -422,26 +446,32 @@
       </div>
       <div class="stats" id="statsKpi" style="margin-bottom:12px;"></div>
       <div class="toolbar">
-        <div class="grp">
-          <span class="gl">统计维度：</span>
-          <select id="statsDim">
-            <option value="manager">管家维度</option>
-            <option value="doctor">医生维度</option>
-          </select>
+        <div class="dataseg">
+          <span class="seg-label">导出</span>
+          <span class="push"></span>
+          <button class="btn" id="statsExport" disabled>📤 导出 Excel</button>
         </div>
-        <div class="grp">
-          <span class="gl">统计月份：</span>
-          <select id="statsMonth"><option value="">请选择月份</option></select>
+        <div class="fbar">
+          <button type="button" class="ftoggle" data-fbar="stats"><span>⚙</span><span>筛选</span><span class="ft-caret">▴</span></button>
+          <div class="fbody">
+            <span class="fitem"><span class="flabel">统计维度</span>
+              <select id="statsDim" class="fctl">
+                <option value="manager">管家维度</option>
+                <option value="doctor">医生维度</option>
+              </select>
+            </span>
+            <span class="fitem"><span class="flabel">统计月份</span>
+              <select id="statsMonth" class="fctl"><option value="">请选择月份</option></select>
+            </span>
+            <span class="fitem"><span class="flabel">VAB 争议</span>
+              <select id="statsDispute" class="fctl">
+                <option value="all">全部</option>
+                <option value="是">仅争议VAB</option>
+                <option value="否">仅非争议VAB</option>
+              </select>
+            </span>
+          </div>
         </div>
-        <div class="grp">
-          <span class="gl">VAB 争议：</span>
-          <select id="statsDispute">
-            <option value="all">是否争议VAB：全部</option>
-            <option value="是">仅争议VAB</option>
-            <option value="否">仅非争议VAB</option>
-          </select>
-        </div>
-        <button class="btn" id="statsExport" disabled>导出 Excel</button>
       </div>
       <div class="table-scroll">
         <table class="tbl" id="statsTable"><thead></thead><tbody></tbody></table>
@@ -457,26 +487,32 @@
         <span class="desc">按管家 / 医生维度，汇总 VAB 会员在指定月份的累计消费：收退款「现款支付金额」、退款金额，以及收费明细金额，自动计算净消费（现款支付 − 退款 + 收费）。数据更新或刷新页面后自动重算。<b style="color:var(--navy-700);">点击任意维度行可查看该维度下的会员消费汇总，再点击某会员可展开其逐笔明细。</b></span>
       </div>
       <div class="toolbar">
-        <div class="grp">
-          <span class="gl">统计维度：</span>
-          <select id="consDim">
-            <option value="manager">管家维度</option>
-            <option value="doctor">医生维度</option>
-          </select>
+        <div class="dataseg">
+          <span class="seg-label">导出</span>
+          <span class="push"></span>
+          <button class="btn" id="consExport" disabled>📤 导出 Excel</button>
         </div>
-        <div class="grp">
-          <span class="gl">统计月份：</span>
-          <select id="consMonth"><option value="">全部月份</option></select>
+        <div class="fbar">
+          <button type="button" class="ftoggle" data-fbar="cons"><span>⚙</span><span>筛选</span><span class="ft-caret">▴</span></button>
+          <div class="fbody">
+            <span class="fitem"><span class="flabel">统计维度</span>
+              <select id="consDim" class="fctl">
+                <option value="manager">管家维度</option>
+                <option value="doctor">医生维度</option>
+              </select>
+            </span>
+            <span class="fitem"><span class="flabel">统计月份</span>
+              <select id="consMonth" class="fctl"><option value="">全部月份</option></select>
+            </span>
+            <span class="fitem"><span class="flabel">VAB 争议</span>
+              <select id="consDispute" class="fctl">
+                <option value="all">全部</option>
+                <option value="是">仅争议VAB</option>
+                <option value="否">仅非争议VAB</option>
+              </select>
+            </span>
+          </div>
         </div>
-        <div class="grp">
-          <span class="gl">VAB 争议：</span>
-          <select id="consDispute">
-            <option value="all">是否争议VAB：全部</option>
-            <option value="是">仅争议VAB</option>
-            <option value="否">仅非争议VAB</option>
-          </select>
-        </div>
-        <button class="btn" id="consExport" disabled>导出 Excel</button>
       </div>
       <div class="table-scroll">
         <table class="tbl" id="consTable"><thead></thead><tbody></tbody></table>
@@ -492,48 +528,53 @@
         <span class="desc">按管家 / 医生维度考核 12 个重点项目类别的普及率达成：覆盖率 = 考核窗口内该类别有消费的会员户主数 ÷ 该维度会员户主总数；季度考核倒推 3 个月、半年倒推 6 个月、年度倒推 12 个月（以所选「考核基准月」为终点，含基准月）；覆盖率 ≥ 普及率目标 即达成。<b style="color:var(--navy-700);">点击任意列标题可复制该整列数据</b>（仅数据，不含列名）。</span>
       </div>
       <div class="toolbar">
-        <div class="grp">
-          <span class="gl">统计维度：</span>
-          <select id="projDim">
-            <option value="manager">管家维度</option>
-            <option value="doctor">医生维度</option>
-          </select>
-        </div>
-        <div class="grp">
-          <span class="gl">考核基准月：</span>
-          <select id="projMonth"><option value="">全部时间</option></select>
-        </div>
-        <div class="grp">
-          <span class="gl">VAB 争议：</span>
-          <select id="projDispute" title="按是否争议VAB筛选">
-            <option value="all">是否争议VAB：全部</option>
-            <option value="是">仅争议VAB</option>
-            <option value="否">仅非争议VAB</option>
-          </select>
-        </div>
-        <div class="grp">
-          <span class="gl">筛选：</span>
-          <select id="projFManager" title="按管家名称筛选"><option value="">管家：全部</option></select>
-          <select id="projFDoctor" title="按医生名称筛选"><option value="">医生：全部</option></select>
-          <select id="projFProject" title="按项目名称筛选"><option value="">项目：全部</option></select>
-        </div>
-        <div class="grp">
-          <label class="fbtn">导入项目分类映射
+        <div class="dataseg">
+          <span class="seg-label">项目映射</span>
+          <label class="fbtn">📥 导入项目分类映射
             <input type="file" id="fileProjMap" accept=".xlsx,.xls,.csv" />
           </label>
-          <button type="button" class="btn" id="projClearMap">清除映射</button>
-          <button type="button" class="btn" id="projExportMap">导出项目分类映射</button>
-        </div>
-        <div class="grp">
-      <label style="display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--ink-soft);cursor:pointer;">
-        <input type="checkbox" id="projOnlyHit" style="accent-color:var(--navy);width:15px;height:15px;" />
-        仅显示命中（默认显示全部项目，未命中显示 0）
-      </label>
-        </div>
-        <div class="grp">
+          <button type="button" class="btn" id="projExportMap">📤 导出项目分类映射</button>
+          <button type="button" class="btn danger" id="projClearMap">🗑 清除映射</button>
+          <span class="push"></span>
           <button type="button" class="btn" id="projDiagBtn" title="输入客户姓名/会员号，排查其为何未（或已）纳入重点项目统计">🔍 排查客户</button>
+          <button class="btn" id="projExport" disabled>📤 导出 Excel</button>
         </div>
-        <button class="btn" id="projExport" disabled>导出 Excel</button>
+        <div class="fbar">
+          <button type="button" class="ftoggle" data-fbar="proj"><span>⚙</span><span>筛选</span><span class="ft-caret">▴</span></button>
+          <div class="fbody">
+            <span class="fitem"><span class="flabel">统计维度</span>
+              <select id="projDim" class="fctl">
+                <option value="manager">管家维度</option>
+                <option value="doctor">医生维度</option>
+              </select>
+            </span>
+            <span class="fitem"><span class="flabel">考核基准月</span>
+              <select id="projMonth" class="fctl"><option value="">全部时间</option></select>
+            </span>
+            <span class="fitem"><span class="flabel">VAB 争议</span>
+              <select id="projDispute" class="fctl" title="按是否争议VAB筛选">
+                <option value="all">全部</option>
+                <option value="是">仅争议VAB</option>
+                <option value="否">仅非争议VAB</option>
+              </select>
+            </span>
+            <span class="fitem"><span class="flabel">管家</span>
+              <select id="projFManager" class="fctl" title="按管家名称筛选"><option value="">全部</option></select>
+            </span>
+            <span class="fitem"><span class="flabel">医生</span>
+              <select id="projFDoctor" class="fctl" title="按医生名称筛选"><option value="">全部</option></select>
+            </span>
+            <span class="fitem"><span class="flabel">项目</span>
+              <select id="projFProject" class="fctl" title="按项目名称筛选"><option value="">全部</option></select>
+            </span>
+            <span class="fitem span2"><span class="flabel">筛选选项</span>
+              <label style="display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--ink-soft);cursor:pointer;padding:5px 0;">
+                <input type="checkbox" id="projOnlyHit" style="accent-color:var(--navy);width:15px;height:15px;flex:0 0 auto;" />
+                仅显示命中（默认显示全部项目，未命中显示 0）
+              </label>
+            </span>
+          </div>
+        </div>
       </div>
       <div id="projDiagBox" style="display:none;margin-bottom:12px;"></div>
       <div class="vab-linked" id="projWarn"></div>
@@ -3481,5 +3522,30 @@ const PROJ_EXCLUDE = {
 </script>
 <script src="/shared/auth-gate.js?v=20261016a"></script>
 <script src="/shared/ma-cloud-sync.js?v=20261013c"></script>
+<script>
+/* 筛选段折叠（全站统一规范 shared/filterbar.css）：⚙筛选 胶囊切换 fbody 显隐，状态按面板持久化 */
+(function(){
+  function applyBtn(btn){
+    var key = 'ma_fbar_' + (btn.getAttribute('data-fbar') || 'x');
+    var bar = btn.closest('.fbar');
+    var collapsed = false;
+    try{ collapsed = localStorage.getItem(key) === '1'; }catch(e){}
+    if(bar) bar.classList.toggle('collapsed', collapsed);
+    var caret = btn.querySelector('.ft-caret');
+    if(caret) caret.textContent = collapsed ? '▸' : '▴';
+  }
+  document.querySelectorAll('.ftoggle[data-fbar]').forEach(function(btn){
+    applyBtn(btn);
+    btn.addEventListener('click', function(){
+      var key = 'ma_fbar_' + (btn.getAttribute('data-fbar') || 'x');
+      var bar = btn.closest('.fbar');
+      var collapsed = bar ? bar.classList.toggle('collapsed') : false;
+      try{ localStorage.setItem(key, collapsed ? '1' : '0'); }catch(e){}
+      var caret = btn.querySelector('.ft-caret');
+      if(caret) caret.textContent = collapsed ? '▸' : '▴';
+    });
+  });
+})();
+</script>
 </body>
 </html>

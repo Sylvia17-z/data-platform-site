@@ -1989,6 +1989,9 @@ let detailMonth = []; // 月度筛选：选中月份数组（[]=全部；'__blan
 let detailDate = [];  // 日期筛选：选中日期数组（[]=全部；'__blank__'=收款时间为空白的行）
 let detailSort = { key:'', dir:1 }; // 列排序：''=未排序；dir 1=升序 -1=降序（再次点击同列切换）
 let detailFilters = {}; // 字段筛选：key -> 选中值数组（[]=全部；'__blank__'=该字段为空白）；name/memberNo 仍为模糊包含字符串；vab 为 ['hit']/['miss']
+// ⑥筛选区折叠状态（与初诊版 ftoggle 交互一致；localStorage 键独立，避免与初诊版互相影响——同 origin 共享存储）
+let detailFiltersCollapsed = false;
+try{ detailFiltersCollapsed = localStorage.getItem('dp_std_detail_filters_collapsed') === '1'; }catch(e){}
 // 多选下拉（msel）运行态：当前展开的 key + 各 key 的候选项缓存（供「全选」用）
 const MS_BLANK = '__blank__';
 const mselRuntime = { open: null, options: {}, search: null };  // search={key,q}：面板内关键词（重渲染后恢复）
@@ -2282,10 +2285,13 @@ function renderImportDetails(){
   const fText = (key,label) => `<label class="detail-filter"><span class="df-label">${label}</span>`
     + `<input type="text" class="detail-select" data-dfilter-text="${key}" value="${esc(detailFilters[key]||'')}" `
     + `placeholder="含…"></label>`;
+  const activeFieldCount = Object.values(detailFilters||{}).filter(v=>Array.isArray(v)?v.length:!!v).length;
   const anyDetailFilter = !!(detailMonth.length||detailDate.length
     ||Object.values(detailFilters||{}).some(v=>Array.isArray(v)?v.length:!!v));
   const filterBar = `
-    <div class="detail-filters">
+    <div class="detail-filters ${detailFiltersCollapsed?'collapsed':''}">
+      <button type="button" id="detail-filter-toggle" class="ftoggle" title="展开/收起筛选区"><span>⚙</span><span>筛选</span>${anyDetailFilter?`<span class="ft-count">${detailMonth.length+detailDate.length+activeFieldCount}</span>`:''}<span class="ft-caret">${detailFiltersCollapsed?'▸':'▴'}</span></button>
+      <div class="filters-body">
       ${mselHTML('__month__','月度',months)}
       ${mselHTML('__date__','日期',dates)}
       ${fText('name','姓名')}
@@ -2298,6 +2304,7 @@ function renderImportDetails(){
       ${mselHTML('cashPay','现款支付',cashVals)}
       ${mselHTML('vab','VAB',[['hit','✔ 命中'],['miss','— 未命中']],'span2')}
       ${anyDetailFilter?'<button type="button" id="detail-filter-reset" class="detail-reset" title="清除全部筛选">清除筛选</button>':''}
+      </div>
     </div>`;
   const tabs = DETAIL_TABS.map(t=>`<button class="detail-tab ${t.key===detailTab?'active':''}" data-tab="${t.key}">${t.label}</button>`).join('');
   // 表头：# 与 操作 不排序，其余列点击排序（当前排序列显示 ▲升序 / ▼降序）
@@ -2310,7 +2317,6 @@ function renderImportDetails(){
     }))
     .concat(['<th>操作</th>']).join('');
   const tabLabel = DETAIL_TABS.find(t=>t.key===detailTab).label;
-  const activeFieldCount = Object.values(detailFilters||{}).filter(v=>Array.isArray(v)?v.length:!!v).length;
   const filterNote = (detailMonth.length?('月度选'+detailMonth.length+'项 · '):'')
     +(detailDate.length?('日期选'+detailDate.length+'项 · '):'')
     +(activeFieldCount?('字段筛选 '+activeFieldCount+' 项 · '):'');
@@ -2386,6 +2392,14 @@ function onImportDetailsClick(e){
     if(detailSort.key === k) detailSort.dir = -detailSort.dir;
     else detailSort = { key:k, dir:1 };
     detailPage = 1;
+    renderImportDetails();
+    return;
+  }
+  // ⑥筛选区折叠切换（⚙筛选 胶囊；状态持久化，与初诊版交互一致）
+  const ftg = e.target.closest && e.target.closest('#detail-filter-toggle');
+  if(ftg){
+    detailFiltersCollapsed = !detailFiltersCollapsed;
+    try{ localStorage.setItem('dp_std_detail_filters_collapsed', detailFiltersCollapsed?'1':'0'); }catch(err){}
     renderImportDetails();
     return;
   }
