@@ -44,6 +44,7 @@
     font-size:14px;
     -webkit-font-smoothing:antialiased;
     text-rendering:optimizeLegibility;
+    overflow-x:hidden; /* 根治：页面级永不横向滚动（scrollLeft 恒 0），左侧内容不会被滚出视野；宽表格一律在各自 .table-wrap 内部横向滚动 */
   }
 
   /* ============ 布局容器 ============ */
