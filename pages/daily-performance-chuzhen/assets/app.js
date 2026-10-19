@@ -114,7 +114,10 @@ const MANUAL_STORAGE_KEY = 'dailyPerformance_manual';
 // 但 VAB 会员名单 / 月目标没同步」：以前这些本地状态不在云端快照里，故换机后回落为 0 / 默认值。
 const SNAP_TS_STORAGE_KEY = 'dailyPerformance_snap_ts';
 function loadSnapTs(){ try{ return Number(localStorage.getItem(SNAP_TS_STORAGE_KEY)) || 0; }catch(e){ return 0; } }
-function saveSnapTs(v){ try{ localStorage.setItem(SNAP_TS_STORAGE_KEY, String(v || 0)); }catch(e){} }
+function saveSnapTs(v){
+  try{ (window.__snapLog = window.__snapLog || []).push('set ' + (v||0) + ' @ ' + (new Error().stack || '').split('\n').slice(2,4).join(' <- ')); }catch(_){}
+  try{ localStorage.setItem(SNAP_TS_STORAGE_KEY, String(v || 0)); }catch(e){}
+}
 function bumpSnapTs(){ state.snapTs = Date.now(); saveSnapTs(state.snapTs); return state.snapTs; }
 state.snapTs = loadSnapTs(); // 本机最后一次本地变更时刻（0 = 本机从未产生本地变更）
 function persistTargets(){ writeTargetsLocal(); markCloudDirty(); }
@@ -221,6 +224,15 @@ function persistOrders(force, syncNow){
       // 内存空但存储有数据 → 不覆写、不清空，仅静默返回保护既有数据。
       return;
     }
+    // 空 localStorage 的真·新设备（2026-10-19 新增）：此处空写入会凭空制造一个「更新的 snapTs」，
+    // 使 syncFromCloud 裁决为 local，从而压制云端整包（订单/历史明细/VAB/月目标全部不恢复）。
+    // 本地从未有过真实快照（snap_ts 不存在/为 0）→ 跳过本次空持久化；显式清空走 force=true 不受影响。
+    let snapTs = 0;
+    try{ snapTs = Number(localStorage.getItem(SNAP_TS_STORAGE_KEY)) || 0; }catch(e){}
+    if(!snapTs){
+      try{ (window.__guardLog = window.__guardLog || []).push('BLOCKED @ ' + (new Error().stack || '').split('\n').slice(1,4).join(' <- ')); }catch(_){}
+      return;
+    }
   }
   state.ordersTs = Date.now();
   state.snapTs = state.ordersTs;      // 订单变更同样是「整包快照」的一次变更
@@ -312,6 +324,12 @@ function persistHist(){
   try{ localStorage.setItem(HIST_STORAGE_KEY, payload); }catch(e){ /* 配额超限：IndexedDB 兜底 */ }
   idbSet(HIST_STORAGE_KEY, payload).catch(()=>{});
   try{ if(window.parent && window.parent !== window) window.parent.postMessage({ type:'dp:persist', key:HIST_STORAGE_KEY, payload }, '*'); }catch(e){}
+  // 云端持久化（2026-10-19）：随 dp_orders 整包快照上云（cloudPayload.hist 瘦行）。
+  // 守卫：订单为空时不上传——避免「只有历史明细没有订单」的设备把云端订单覆盖为空快照。
+  if(Array.isArray(state.orders) && state.orders.length > 0){
+    bumpSnapTs();
+    saveOrdersToCloud();
+  }
 }
 
 function restoreHist(){
@@ -442,6 +460,15 @@ function cloudPayload(){
     vab: { list: state.vabList || [], rows: state.vabRows || [], demo: !!state.demoVab },
     targets: state.targets,
     manual: state.manual,
+    // 近一年消费明细随快照上云（2026-10-19）：瘦行仅保留判定所需 4 字段（memberNo/name/payTime/_uid，见 histKeysCached）
+    hist: {
+      histOrders: (state.histOrders || []).map(r => ({
+        memberNo: r.memberNo || '', name: r.name || '',
+        payTime: (r.payTime instanceof Date) ? r.payTime.toISOString() : (r.payTime || ''),
+        _uid: r._uid
+      })),
+      histTs: state.histTs || 0,
+    },
     ts: state.snapTs || Date.now(),
   };
 }
@@ -476,7 +503,19 @@ function applyCloudObj(obj){
       if(typeof renderTargets === 'function') renderTargets();
       touched = true;
     }
-    if(obj.manual && typeof obj.manual === 'object'){
+    const h = obj.hist;
+  if(h && typeof h === 'object'){
+    // 只有快照里确实带了 hist 字段才处理（旧版快照没有 → 不动本机，避免误清空）；
+    // 显式空数组 = 云端已清除 → 同步清空本机。分支内不调 persistHist（_applyingCloud 期间防回写）。
+    if(Array.isArray(h.histOrders)){
+      if(applyHistRaw(JSON.stringify({ histOrders: h.histOrders, ts: h.histTs || Number(obj.ts) || Date.now() }))){
+        invalidateMktKeyCaches();
+        if(typeof refreshHistMeta === 'function') refreshHistMeta(); // 同步状态文案（已同步云端/行数）
+        touched = true;
+      }
+    }
+  }
+  if(obj.manual && typeof obj.manual === 'object'){
       state.manual.month = obj.manual.month || {};
       state.manual.daily = obj.manual.daily || {};
       writeManualLocal();
@@ -555,8 +594,14 @@ async function syncFromCloud(opts){
       const localCnt  = Array.isArray(state.orders) ? state.orders.length : 0;
       const cloudMon  = monthOfOrders(data2.payload.orders);
       const localMon  = monthOfOrders(state.orders);
+      // 本地「真实数据」标志：orders / VAB / 历史明细 任一非空。
+      // 本地全空（如新设备 / 清过缓存）时 snapTs 可能被空写入抬高，此时无权压制云端——必拉云端，
+      // 否则会出现「换设备后一直显示已同步云端(2 条) 但数据为空」的假同步（2026-10-19 修复）。
+      const localEmpty = localCnt === 0
+        && !(state.vabRows || []).length
+        && !(state.histOrders || []).length;
       let verdict;
-      if(!localTs || cloudTs > localTs) verdict = 'cloud';
+      if(!localTs || localEmpty || cloudTs > localTs) verdict = 'cloud';
       else if(cloudTs < localTs) verdict = 'local';
       else verdict = (cloudCnt === localCnt) ? 'same' : (cloudCnt > localCnt ? 'cloud' : 'local');
       if(verdict === 'cloud' && localMon && cloudMon && cloudMon < localMon) verdict = 'local';
@@ -3170,7 +3215,9 @@ function refreshHistMeta(){
   const meta = $('hist-meta');
   if(!meta) return;
   if(state.histOrders.length){
-    meta.textContent = `✔ 本地历史明细（${state.histOrders.length} 行）· 新客规则已启用`;
+    // 云同步状态提示：历史明细随订单整包上云；仅当订单已导入时才会推送到云端
+    const clouded = Array.isArray(state.orders) && state.orders.length > 0;
+    meta.textContent = `✔ 历史明细（${state.histOrders.length} 行）· 新客规则已启用 · ` + (clouded ? '已同步云端' : '订单未导入，暂仅保存在本机');
   }else{
     meta.textContent = '未导入（新客规则停用）';
   }
