@@ -1438,9 +1438,10 @@ function calculate(orders, vabSet, cutoff, mktFirstKeysPre){
   const sumGaoXin = sumAll - sumBeiJiao;
   const sumStoreTotal = sumGaoXin + sumBeiJiao; // 门店合计 = 高新店 + 经开店
 
-  // --- 8. 其他 = 合计 - (品牌组-其他 + 活动组-活动支持 + 电商组 + 新媒体组 + 短视频组 + 品牌组-自然到店 + 商务部) ---
+  // --- 8. 其他 = 合计 - (品牌组-其他 + 活动组-活动支持 + 电商组 + 新媒体组 + 品牌组-自然到店 + 商务部) ---
   // 注：市场部已并入"商务部"统一核算，故"其他"的扣减项里的「商务部」已含市场部金额，不会重复计入。
   // 注：原"活动组-自拓活动"板块已整体下线（不展示、不计算），其金额并入"其他"
+  // 注：短视频组行已隐藏（2026-10-19），其金额并入"其他"，合计守恒；rows/values 字典仍保留该键供内部计算
   const sumBrandOther = sum(r1);
   const sumActSupport = sum(r2);
   const sumEcom = sum(r3) + sum(r3b) + sum(r3c);
@@ -1448,7 +1449,7 @@ function calculate(orders, vabSet, cutoff, mktFirstKeysPre){
   const sumShort = sum(r4);
   const sumNature = sum(r5) + sum(r5b);
   const sumCommerce = sum(r6) + sum(r6b);
-  const sumOther = sumAll - (sumBrandOther + sumActSupport + sumEcom + sumNewMedia + sumShort + sumNature + sumCommerce);
+  const sumOther = sumAll - (sumBrandOther + sumActSupport + sumEcom + sumNewMedia + sumNature + sumCommerce);
 
   return {
     rows: {
@@ -1481,13 +1482,12 @@ function calculate(orders, vabSet, cutoff, mktFirstKeysPre){
 
 // 5. 报表渲染：表结构完全对齐截图 + 原表配色
 const REPORT_TEMPLATE = [
-  // 营销部（rowspan 6 = 公司支持2 + 部门业绩4）
-  // 月目标：公司支持块2行共享360；部门业绩块下 电商组+新媒体组+短视频组 合并为一格(77, rowspanTarget:3)，品牌组-自然到店 单独一格(3)
-  {main:'营销部', sub:'公司支持', item:'品牌组-其他', targetKey:'品牌组-其他', rowspanMain:6, rowspanSub:2, rowspanTarget:2, indent:1},
+  // 营销部（rowspan 5 = 公司支持2 + 部门业绩3；短视频组行已隐藏 2026-10-19，其金额并入"其他"）
+  // 月目标：公司支持块2行共享360；部门业绩块下 电商组+新媒体组 合并为一格(77, rowspanTarget:2)，品牌组-自然到店 单独一格(3)
+  {main:'营销部', sub:'公司支持', item:'品牌组-其他', targetKey:'品牌组-其他', rowspanMain:5, rowspanSub:2, rowspanTarget:2, indent:1},
   {main:'',       sub:'',        item:'活动组-活动支持', targetKey:'活动组-活动支持', indent:1},
-  {main:'',       sub:'部门业绩', item:'电商组', targetKey:'电商组及短视频组', valueKey:'电商组', targetMergeKey:'电商组及短视频组', rowspanSub:4, rowspanTarget:3, indent:1},
+  {main:'',       sub:'部门业绩', item:'电商组', targetKey:'电商组及短视频组', valueKey:'电商组', targetMergeKey:'电商组及短视频组', rowspanSub:3, rowspanTarget:2, indent:1},
   {main:'',       sub:'',        item:'新媒体组', targetKey:'电商组及短视频组', valueKey:'新媒体组', indent:1},
-  {main:'',       sub:'',        item:'短视频组', targetKey:'电商组及短视频组', valueKey:'短视频组', indent:1},
   {main:'',       sub:'',        item:'品牌组-自然到店', targetKey:'品牌组-自然到店', valueKey:'品牌组-自然到店', indent:1},
   {main:'商务部', sub:'',        item:'', targetKey:'商务部', mergedLabel:true},
   {main:'其他',   sub:'',        item:'', targetKey:'其他', mergedLabel:true},
