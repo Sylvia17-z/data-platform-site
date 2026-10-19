@@ -803,11 +803,13 @@ function fitVabTableWrap(wrap){
   if(!tbl) return;
   const trs = tbl.querySelectorAll('tbody tr');
   if(!trs.length) return;
+  // ≤200 行：完整展开（显式 none 覆盖页面 CSS 的 .table-wrap{max-height:300px}）
+  if(trs.length <= 200){ wrap.style.maxHeight = 'none'; return; }
   // 行距用相邻行 offsetTop 差值（精确整数，不受字体/亚像素测量影响）
   const rowH = trs.length > 1 ? (trs[1].offsetTop - trs[0].offsetTop) : trs[0].offsetHeight;
   if(!rowH) return;
   const theadH = trs[0].offsetTop; // 首行顶(相对表格顶) = 表头高
-  const cap = Math.max(280, Math.min(window.innerHeight * 0.64, 600));
+  const cap = Math.max(280, window.innerHeight * 0.8); // 与内滚形态 80vh 一致
   const n = Math.max(3, Math.floor((cap - theadH) / rowH));
   wrap.style.maxHeight = (theadH + n * rowH) + 'px';
   // 自校正：以实际渲染结果消除 border/box-sizing/字体晚载造成的半行偏移
@@ -846,8 +848,10 @@ function renderVabList(){
         return `<tr data-m="${esc(m)}">${cells}<td style="text-align:center;"><button class="vab-del" type="button" title="删除该会员">×</button></td></tr>`;
       }).join('')
     : '';
+  // ≤200 行完整展开（随页面自然滚动，无内滚框）——彻底消除「清单被裁/遮盖显示不全」；
+  // 超大列表（>200 行）才启用内部滚动（80vh），由 fitVabTableWrap 对齐行高避免半行
   const tableBlock = rows.length
-    ? `<div class="table-wrap vab-table-wrap" style="max-height:320px;overflow:auto;border:1px solid var(--c-border);border-radius:8px;margin:8px 0;">
+    ? `<div class="table-wrap vab-table-wrap" style="${rows.length > 200 ? 'max-height:80vh;' : 'max-height:none;'}overflow:auto;border:1px solid var(--c-border);border-radius:8px;margin:8px 0;">
          <table class="data"><thead>${headHtml}</thead><tbody>${bodyHtml}</tbody></table></div>`
     : `<div class="file-meta" style="margin:8px 0;">（暂无 VAB 会员，点「＋ 新增会员」弹窗录入，或重新上传会员表）</div>`;
   box.innerHTML =
