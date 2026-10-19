@@ -664,6 +664,8 @@ function refreshVabStatus(){
   renderVabList(); // 同步刷新页面上的会员清单
 }
 // 在页面上渲染 VAB 会员清单（按导入表格的全部字段展示），默认展开呈现，支持单元格双击编辑 + 行内删除 + 页面内新增
+/* ---- VAB 会员清单分页状态（默认 10 条/页，可选 10/20/50/100） ---- */
+let vabPage = 1, vabPageSize = 10;
 // VAB 清单滚动容器高度自适应：上限随视口伸缩（64vh，600px 封顶），并对齐「表头+整数倍行高」，
 // 避免底部行被裁一半造成「遮盖显示不全」的观感；折叠态（不可见）跳过，展开/resize 时重算
 function fitVabTableWrap(wrap){
@@ -710,21 +712,42 @@ function renderVabList(){
   const headHtml = headers.length
     ? '<tr>' + headers.map(h=>`<th>${esc(h)}</th>`).join('') + '<th style="width:44px;text-align:center;">操作</th></tr>'
     : '';
-  const bodyHtml = rows.length
-    ? rows.map((r,i)=>{
+  /* ---- 分页：默认 10 条/页 ---- */
+  const total = rows.length;
+  const pages = Math.max(1, Math.ceil(total / vabPageSize));
+  if(vabPage > pages) vabPage = pages;
+  if(vabPage < 1) vabPage = 1;
+  const vabStart = (vabPage - 1) * vabPageSize;
+  const pageRows = rows.slice(vabStart, vabStart + vabPageSize);
+  const bodyHtml = pageRows.length
+    ? pageRows.map((r,k)=>{
+        const i = vabStart + k; // 真实行索引（编辑/删除定位 state.vabRows 用）
         const m = normalizeVab(r);
         const cells = headers.map(h=>`<td class="vab-cell" data-ri="${i}" data-field="${esc(h)}" title="双击编辑该字段">${esc(r[h] ?? '')}</td>`).join('');
         return `<tr data-m="${esc(m)}">${cells}<td style="text-align:center;"><button class="vab-del" type="button" title="删除该会员">×</button></td></tr>`;
       }).join('')
     : '';
-  // ≤200 行完整展开（随页面自然滚动，无内滚框）——彻底消除「清单被裁/遮盖显示不全」；
-  // 超大列表（>200 行）才启用内部滚动（80vh），由 fitVabTableWrap 对齐行高避免半行
+  // 分页后每页行数有限：表格完整展开（显式 none 覆盖页面 CSS .table-wrap{max-height:300px}），
+  // 横向滚动截在容器内（配合 .vab-list-details/.vab-list-wrap 的 min-width:0 防撑开）
   const tableBlock = rows.length
-    ? `<div class="table-wrap vab-table-wrap" style="${rows.length > 200 ? 'max-height:80vh;' : 'max-height:none;'}overflow:auto;border:1px solid var(--c-border);border-radius:8px;margin:8px 0;">
+    ? `<div class="table-wrap vab-table-wrap" style="max-height:none;overflow:auto;border:1px solid var(--c-border);border-radius:8px;margin:8px 0;">
          <table class="data"><thead>${headHtml}</thead><tbody>${bodyHtml}</tbody></table></div>`
     : `<div class="file-meta" style="margin:8px 0;">（暂无 VAB 会员，点「＋ 新增会员」弹窗录入，或重新上传会员表）</div>`;
+  const pagerHtml = rows.length
+    ? `<div class="detail-pager" style="margin:6px 2px 12px;">
+         <button type="button" class="pg-btn" data-vpg="first" title="第一页"${vabPage<=1?' disabled':''}>«</button>
+         <button type="button" class="pg-btn" data-vpg="prev" title="上一页"${vabPage<=1?' disabled':''}>‹ 上一页</button>
+         <span class="pg-info" style="margin:0 8px;">第 ${vabPage} / ${pages} 页 · 共 ${total} 人</span>
+         <button type="button" class="pg-btn" data-vpg="next" title="下一页"${vabPage>=pages?' disabled':''}>下一页 ›</button>
+         <button type="button" class="pg-btn" data-vpg="last" title="最后一页"${vabPage>=pages?' disabled':''}>»</button>
+         <select id="vab-page-size" class="detail-select" style="height:26px;width:auto;margin-left:8px;" title="每页显示条数">
+           ${[10,20,50,100].map(n=>`<option value="${n}"${vabPageSize===n?' selected':''}>${n} 条/页</option>`).join('')}
+         </select>
+       </div>`
+    : '';
   box.innerHTML =
     tableBlock +
+    pagerHtml +
     `<div class="vab-add-row">` +
       `<button id="vab-add-btn" class="btn btn-primary" type="button">＋ 新增会员</button>` +
       `<span class="file-meta">弹窗录入会员号/姓名/组别/手机号等全部字段</span>` +
@@ -744,6 +767,7 @@ function renderVabList(){
   if(!box.dataset.bound){
     box.addEventListener('click', onVabListClick);
     box.addEventListener('dblclick', onVabListDblClick);
+    box.addEventListener('change', onVabListChange);
     box.dataset.bound = '1';
   }
 }
@@ -795,7 +819,25 @@ function startVabCellEdit(td){
 function onVabListClick(e){
   const del = e.target.closest && e.target.closest('.vab-del');
   if(del){ const tr = del.closest('tr'); deleteVabMember(tr && tr.dataset.m); return; }
-  if(e.target.id === 'vab-add-btn'){ openAddVabModal(); }
+  if(e.target.id === 'vab-add-btn'){ openAddVabModal(); return; }
+  const vpg = e.target.closest && e.target.closest('[data-vpg]');
+  if(vpg){
+    const pages = Math.max(1, Math.ceil((state.vabRows || []).length / vabPageSize));
+    const a = vpg.dataset.vpg;
+    if(a === 'first') vabPage = 1;
+    else if(a === 'prev') vabPage = Math.max(1, vabPage - 1);
+    else if(a === 'next') vabPage = Math.min(pages, vabPage + 1);
+    else if(a === 'last') vabPage = pages;
+    renderVabList();
+  }
+}
+// 清单分页：每页条数切换
+function onVabListChange(e){
+  if(e.target && e.target.id === 'vab-page-size'){
+    vabPageSize = Number(e.target.value) || 10;
+    vabPage = 1;
+    renderVabList();
+  }
 }
 // 新增会员改为弹窗（见 openAddVabModal / saveAddVabModal），不再内联输入会员号
 // 新增会员弹窗：按当前 VAB 字段模板生成输入项，可录入会员号/姓名/组别等全部字段
@@ -840,6 +882,7 @@ function saveAddVabModal(){
   setVabRows(state.vabRows);
   persistVab();
   recompute();
+  vabPage = Math.max(1, Math.ceil((state.vabRows || []).length / vabPageSize)); // 新增后跳末页，看到新会员
   refreshVabStatus(); // 刷新状态条与清单（含新行）
   closeAddVabModal();
   showToast('已新增会员：'+row['会员号'], 'ok');

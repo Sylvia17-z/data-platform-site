@@ -134,7 +134,7 @@
   .chip:not(.ok):not(.warn):not(.err){background:#eef2fa;color:var(--c-accent);}
 
   /* ============ VAB 会员清单 ============ */
-  .vab-list-details{flex-basis:100%;width:100%;} /* 独占整行，铺满面板空白区域 */
+  .vab-list-details{flex-basis:100%;width:100%;min-width:0;max-width:100%;} /* min-width:0 防 flex 子项被宽表格撑开面板（操作列被裁/左侧标签顶出视口） */ /* 独占整行，铺满面板空白区域 */
   .vab-list-summary{cursor:pointer;user-select:none;font-size:13px;font-weight:600;color:var(--c-head);} /* 点击 summary 可收起/展开 */
   /* VAB 新增会员弹窗 */
   .modal-mask{position:fixed;inset:0;background:rgba(15,23,42,.42);display:flex;align-items:center;justify-content:center;z-index:1000;padding:16px;}
@@ -146,7 +146,7 @@
   .modal-input{padding:8px 11px;border:1px solid var(--c-border);border-radius:var(--radius-sm);font-size:13px;font-family:inherit;background:#fff;color:var(--c-text);}
   .modal-input:focus{outline:none;border-color:var(--c-head);box-shadow:0 0 0 3px rgba(0,32,96,.10);}
   .modal-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:18px;}
-  .vab-list-wrap{flex-basis:100%;width:100%;padding:14px !important;background:#f7f9fd;border:1px solid var(--c-border);border-radius:var(--radius-sm);}
+  .vab-list-wrap{flex-basis:100%;width:100%;min-width:0;max-width:100%;padding:14px !important;background:#f7f9fd;border:1px solid var(--c-border);border-radius:var(--radius-sm);}
   .vab-table-wrap td.vab-cell{cursor:cell;transition:background .12s;}
   .vab-table-wrap td.vab-cell:hover{background:#eaf0fb;}
   .vab-table-wrap td.vab-cell input{font-family:inherit;}
