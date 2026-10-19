@@ -664,6 +664,37 @@ function refreshVabStatus(){
   renderVabList(); // 同步刷新页面上的会员清单
 }
 // 在页面上渲染 VAB 会员清单（按导入表格的全部字段展示），默认展开呈现，支持单元格双击编辑 + 行内删除 + 页面内新增
+// VAB 清单滚动容器高度自适应：上限随视口伸缩（64vh，600px 封顶），并对齐「表头+整数倍行高」，
+// 避免底部行被裁一半造成「遮盖显示不全」的观感；折叠态（不可见）跳过，展开/resize 时重算
+function fitVabTableWrap(wrap){
+  if(!wrap || !wrap.offsetParent) return;
+  const tbl = wrap.querySelector('table');
+  if(!tbl) return;
+  const trs = tbl.querySelectorAll('tbody tr');
+  if(!trs.length) return;
+  // 行距用相邻行 offsetTop 差值（精确整数，不受字体/亚像素测量影响）
+  const rowH = trs.length > 1 ? (trs[1].offsetTop - trs[0].offsetTop) : trs[0].offsetHeight;
+  if(!rowH) return;
+  const theadH = trs[0].offsetTop; // 首行顶(相对表格顶) = 表头高
+  const cap = Math.max(280, Math.min(window.innerHeight * 0.64, 600));
+  const n = Math.max(3, Math.floor((cap - theadH) / rowH));
+  wrap.style.maxHeight = (theadH + n * rowH) + 'px';
+  // 自校正：以实际渲染结果消除 border/box-sizing/字体晚载造成的半行偏移
+  const off = (wrap.clientHeight - trs[0].offsetTop) % rowH;
+  if(off !== 0) wrap.style.maxHeight = (parseFloat(wrap.style.maxHeight) - off) + 'px';
+  // 字体加载会改变表头/行高 → 就绪后重算一次
+  if(document.fonts && document.fonts.status !== 'loaded') document.fonts.ready.then(() => fitVabTableWrap(wrap)).catch(()=>{});
+}
+// 窗口尺寸变化时重算全部清单容器（全局只绑一次，防抖 180ms）
+if(!window.__vabFitResizeBound){
+  window.__vabFitResizeBound = true;
+  window.addEventListener('resize', () => {
+    clearTimeout(window.__vabFitT);
+    window.__vabFitT = setTimeout(() => {
+      document.querySelectorAll('.vab-table-wrap').forEach(w => fitVabTableWrap(w));
+    }, 180);
+  });
+}
 function renderVabList(){
   const box = $('vab-list');
   if(!box) return;
@@ -694,6 +725,17 @@ function renderVabList(){
       `<button id="vab-add-btn" class="btn btn-primary" type="button">＋ 新增会员</button>` +
       `<span class="file-meta">弹窗录入会员号/姓名/组别/手机号等全部字段</span>` +
     `</div>`;
+  // 渲染后立即对齐滚动高度（消除半行裁切）；清单折叠态测不到行高则跳过，展开 toggle 时会重算
+  const vwrap = box.querySelector('.vab-table-wrap');
+  if(vwrap) fitVabTableWrap(vwrap);
+  const vdetails = box.closest('.vab-list-details');
+  if(vdetails && !vdetails.dataset.fitBound){
+    vdetails.dataset.fitBound = '1';
+    vdetails.addEventListener('toggle', () => {
+      const w = box.querySelector('.vab-table-wrap');
+      if(w) fitVabTableWrap(w);
+    });
+  }
   // 事件委托只需绑定一次（容器常驻，内部元素随 innerHTML 重建）
   if(!box.dataset.bound){
     box.addEventListener('click', onVabListClick);
