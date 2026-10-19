@@ -90,6 +90,8 @@ const state = {
   ordersTs: 0,     // 订单快照写入时刻（epoch ms），用于本地/云端新旧裁决（防云端旧快照覆盖本地新数据）
   snapTs: 0,       // 整包快照变更时刻（epoch ms）：orders/VAB/月目标/手动覆盖 任一变更都更新，随快照上云做跨设备裁决
   results: null,   // 最新计算结果
+  histOrders: [],  // 近一年消费明细（2026-10-16 新增）：仅用于「营销部顾客一年内无消费 → 初诊客户」判定，不计入业绩金额
+  histTs: 0,       // 历史明细写入时刻（epoch ms），参与初诊键集合缓存失效签名
   colWidths: {},   // 用户拖拽调整的列宽（index -> width）
   manual: {        // 手动修改的数据（覆盖计算值）
     month: {},     // month[rowKey] = 手动月累计值
@@ -268,10 +270,69 @@ function showOrdersSaved(ok){
 window.addEventListener('message', (e) => {
   const m = (e && e.data) || null;
   if(!m || m.type !== 'dp:payload' || !m.key) return;
-  if(m.key !== ORDERS_STORAGE_KEY) return;
-  if(state.orders.length > 0) return;
-  if(applyOrdersRaw(m.payload)) runRestoredRecompute();
+  if(m.key === ORDERS_STORAGE_KEY){
+    if(state.orders.length > 0) return;
+    if(applyOrdersRaw(m.payload)) runRestoredRecompute();
+    return;
+  }
+  // 近一年消费明细：壳窗口推送 / 应答恢复（恢复后初诊键集合缓存失效，待下次重算生效）
+  if(m.key === HIST_STORAGE_KEY){
+    if(state.histOrders.length > 0) return;
+    if(applyHistRaw(m.payload)) invalidateMktKeyCaches();
+    return;
+  }
 });
+
+/* =================== 近一年消费明细（历史）本地持久化 ===================
+ * 用途：2026-10-16 新增「营销部顾客一年内无消费记录 → 视为初诊客户」判定规则的数据源。
+ * 与订单表相互独立：仅参与初诊判定，不计入任何业绩金额；未导入时该规则自动停用（保持既有口径）。
+ * 持久化与订单同构：localStorage 同步 + IndexedDB 兜底 + 壳窗口桥接（dp:persist / dp:request）。 */
+const HIST_STORAGE_KEY = 'dailyPerformance_hist';
+
+function applyHistRaw(raw){
+  if(!raw || typeof raw !== 'string') return false;
+  try{
+    const obj = JSON.parse(raw);
+    if(obj && Array.isArray(obj.histOrders)){
+      state.histOrders = obj.histOrders.map(r => {
+        if(r && typeof r.payTime === 'string') r.payTime = new Date(r.payTime);
+        if(r && !r._uid) r._uid = nextUid();
+        return r;
+      });
+      if(obj.ts) state.histTs = Number(obj.ts) || 0;
+      return true;
+    }
+  }catch(e){}
+  return false;
+}
+
+function persistHist(){
+  state.histTs = Date.now();
+  const payload = JSON.stringify({ histOrders: state.histOrders, ts: state.histTs });
+  try{ localStorage.setItem(HIST_STORAGE_KEY, payload); }catch(e){ /* 配额超限：IndexedDB 兜底 */ }
+  idbSet(HIST_STORAGE_KEY, payload).catch(()=>{});
+  try{ if(window.parent && window.parent !== window) window.parent.postMessage({ type:'dp:persist', key:HIST_STORAGE_KEY, payload }, '*'); }catch(e){}
+}
+
+function restoreHist(){
+  let raw = null;
+  try{ raw = localStorage.getItem(HIST_STORAGE_KEY); }catch(e){ raw = null; }
+  if(raw) applyHistRaw(raw);
+  // 异步回退：IndexedDB（localStorage 为空时兜底）；恢复后使初诊键集合缓存失效
+  idbGet(HIST_STORAGE_KEY).then(saved => {
+    if(saved && typeof saved === 'string' && !raw && state.histOrders.length === 0){
+      if(applyHistRaw(saved)) invalidateMktKeyCaches();
+    }
+  }).catch(()=>{});
+  // 桥接父窗口：向壳索取持久化数据（与壳的主动推送互补）
+  try{ if(window.parent && window.parent !== window) window.parent.postMessage({ type:'dp:request', key:HIST_STORAGE_KEY }, '*'); }catch(e){}
+}
+
+// 初诊键集合缓存失效（历史明细导入/清除/恢复后调用；随后 recompute() 重算生效）
+function invalidateMktKeyCaches(){
+  _histKeysCache = { sig:'', date:'', set:null };
+  _mktKeysCache = { sig:'', set:null };
+}
 
 /* =================== 云端持久化（WorkBuddy Cloud Service，按账号隔离） ===================
  * 根因：发布/访问环境会抹掉 localStorage/IndexedDB 的跨会话持久性（sandbox 不透明源 / origin 漂移），
@@ -716,6 +777,7 @@ function restoreVab(){
 restoreVab();
 restoreColWidths(); // 恢复列宽（拖拽调整后保留）
 restoreOrders(); // 恢复历史导入订单（刷新网页后保留，含月累计/每日所需原始数据）
+restoreHist(); // 恢复近一年消费明细（刷新网页后保留，用于「一年内无消费→初诊」新客判定）
 // 统一刷新 VAB 状态文案（示例 vs 已保存默认，且可覆盖更新）
 function refreshVabStatus(){
   const meta = $('vab-meta');
@@ -894,7 +956,7 @@ function clearAllData(){
     || Object.keys(state.manual.month).length > 0 || Object.keys(state.manual.daily).length > 0
     || Object.keys(state.colWidths).length > 0;
   if(!hasData){ showToast('当前本机数据已为空，无需清除', 'warn'); return; }
-  if(!window.confirm('确定清除本机保存的全部页面数据？\n（订单、月目标、手动调整、列宽将全部清空，刷新后恢复为空；VAB会员不受影响。此操作不可撤销）')) return;
+  if(!window.confirm('确定清除本机保存的全部页面数据？\n（订单、月目标、手动调整、列宽将全部清空，刷新后恢复为空；VAB会员与近一年消费明细不受影响。此操作不可撤销）')) return;
   try{
     localStorage.removeItem(ORDERS_STORAGE_KEY);
     localStorage.removeItem(MANUAL_STORAGE_KEY);
@@ -1098,20 +1160,54 @@ function inDateRange(d, cutoff){
   return true;
 }
 
+// 「近一年消费明细」键集合（2026-10-16 新增）：历史明细中 payTime 在 [截止日-365天, 截止日]
+// 窗口内的客户键（会员号优先，无会员号按姓名）。规则B数据源：营销部渠道顾客若不在此集合中
+// → 一年内无消费记录 → 视为初诊客户。带缓存（按 截止日 + 历史行数 + 时间戳 失效）。
+let _histKeysCache = { sig:'', date:'', set:null };
+function histKeysCached(cutoff){
+  const d = (cutoff && !isNaN(cutoff.getTime())) ? fmtDate(cutoff) : '';
+  const sig = (state.histOrders||[]).length + '|' + (state.histTs||0);
+  if(_histKeysCache.sig !== sig || _histKeysCache.date !== d){
+    const s = new Set();
+    if(d && (state.histOrders||[]).length){
+      const start = fmtDate(new Date(cutoff.getTime() - 365*86400000));
+      state.histOrders.forEach(r => {
+        if(!r.payTime) return;
+        const dd = fmtDate(r.payTime);
+        if(dd < start || dd > d) return;
+        const k = mktFirstClientKey(r);
+        if(k && k !== 'name:') s.add(k);
+      });
+    }
+    _histKeysCache = { sig, date:d, set:s };
+  }
+  return _histKeysCache.set;
+}
+
 // 「营销部初诊客户」键集合（会员号优先，无会员号按姓名）——营销部各类别业绩仅计入这些客户的消费。
-// 窗口：滚动 30 天（含两端，可跨月）——起点=截止日往前推 29 天：9.30 → 9.1~9.30，10.1 → 9.2~10.1（2026-10-15 需求）。
+// 规则A（既有口径）：滚动 30 天（含两端，可跨月）窗口内 来源渠道=营销部 且 到访类型=初诊；
+//   窗口起点=截止日往前推 29 天：9.30 → 9.1~9.30，10.1 → 9.2~10.1（2026-10-15 需求）。
+// 规则B（2026-10-16 新增）：营销部渠道顾客（渠道分类=营销部 或 推荐→营销部）在「近一年消费明细」
+//   中无任何消费记录（截止日往前推一年窗口内无该客户键）→ 视为初诊客户。
+//   仅导入「近一年消费明细」后启用（集合非空才算启用），未导入时保持既有口径，防止复诊老客误判。
+// 两条规则取并集；客户键口径一致（mktFirstClientKey）。
 function buildMktFirstKeys(list, cutoff){
   const s = new Set();
   if(!cutoff || isNaN(cutoff.getTime())) return s;
   const end = fmtDate(cutoff);
   const start = fmtDate(new Date(cutoff.getTime() - 29*86400000));
+  const histKeys = histKeysCached(cutoff); // 未导入历史明细时为空集 → 规则B自动停用
   (list||[]).forEach(r => {
     if(!r.payTime) return;
     const d = fmtDate(r.payTime);
-    if(d < start || d > end) return;
-    if(isMktChuzhenOrder(r)){
+    if(d >= start && d <= end && isMktChuzhenOrder(r)){
+      // 规则A：30天窗口内 营销部渠道 且 到访类型=初诊
       const k = mktFirstClientKey(r);
       if(k && k !== 'name:') s.add(k);
+    }else if(histKeys.size && (chanHas(r,'营销部') || isRecToYingxiao(r))){
+      // 规则B：营销部渠道顾客 且 近一年历史消费明细中无该客户键 → 新客视为初诊
+      const k = mktFirstClientKey(r);
+      if(k && k !== 'name:' && !histKeys.has(k)) s.add(k);
     }
   });
   return s;
@@ -2127,7 +2223,9 @@ const DEPT_OPTIONS = ['品牌组-其他','活动组-活动支持','电商组','�
 let _mktKeysCache = { sig:'', set:null };
 function mktFirstKeysCached(){
   const month = state.cutoffDate ? String(state.cutoffDate).slice(0,7) : '';
-  const sig = month + '|' + (state.orders||[]).length + '|' + (state.ordersTs||0);
+  // 签名含历史明细签名（行数+时间戳）：导入/清除「近一年消费明细」后初诊键集合立即重建
+  const sig = month + '|' + (state.orders||[]).length + '|' + (state.ordersTs||0)
+    + '|H' + (state.histOrders||[]).length + '|' + (state.histTs||0);
   if(_mktKeysCache.sig !== sig){
     const cutoff = state.cutoffDate ? new Date(state.cutoffDate) : null;
     _mktKeysCache = { sig, set: buildMktFirstKeys(state.orders, cutoff) };
@@ -2938,6 +3036,58 @@ function toggleVabList(){
   }
 }
 
+// ===== 近一年消费明细导入（2026-10-16 新增）=====
+// 「营销部顾客一年内无消费记录 → 视为初诊客户」规则的数据源。表结构与订单表一致（订单项目收退款表），
+// 仅读取 会员号/姓名/收款时间 参与判定；该数据不计入任何业绩金额；未导入时新客规则自动停用。
+async function onFileHistory(input){
+  const f = input.files?.[0];
+  if(!f) return;
+  try{
+    await ensureXlsx();
+    const parsed = await parseExcelFile(f);
+    const allRows = parsed.map(normalizeOrder);
+    const rows = allRows.filter(r => r.payTime).map(ensureUid);
+    if(parsed.length > 0 && rows.length === 0){
+      showToast(`❌ 历史明细导入失败：已读到 ${parsed.length} 行，但「收款时间」全部无法解析。请确认表头含「收款时间」列且为可识别日期格式`, 'err', 9000);
+      if($('hist-meta')){ $('hist-meta').textContent = '❌ 导入失败：收款时间全部无法解析'; $('hist-meta').className = 'file-meta'; }
+      return;
+    }
+    state.histOrders = rows;
+    persistHist(); // 内部刷新 histTs 并落盘（localStorage + IndexedDB + 壳窗口桥接）
+    invalidateMktKeyCaches();
+    refreshHistMeta();
+    recompute();
+    showToast(`近一年消费明细导入成功（${rows.length} 行）。「营销部顾客一年内无消费记录 → 初诊客户」规则已启用`, 'ok', 5200);
+  }catch(e){
+    console.error(e);
+    showToast('历史消费明细解析失败：'+e.message, 'err');
+  }
+}
+
+// 清除近一年消费明细（不影响订单/VAB/月目标）；清除后新客规则自动停用
+function clearHistData(){
+  if(!state.histOrders.length){ showToast('尚未导入近一年消费明细，无需清除', 'warn'); return; }
+  if(!window.confirm('确定清除已导入的近一年消费明细？\n清除后「营销部顾客一年内无消费记录 → 初诊客户」规则将停用，业绩报表恢复既有口径（30天内 到访类型=初诊）。\n订单 / VAB 会员 / 月目标不受影响。此操作不可撤销。')) return;
+  state.histOrders = [];
+  persistHist(); // 写入空快照（含壳窗口桥接，防刷新后旧数据回灌）
+  invalidateMktKeyCaches();
+  refreshHistMeta();
+  recompute();
+  showToast('已清除近一年消费明细，新客规则已停用', 'ok');
+}
+
+// 历史明细状态文案（导入 / 本地恢复 / 清除 后统一刷新）
+function refreshHistMeta(){
+  const meta = $('hist-meta');
+  if(!meta) return;
+  if(state.histOrders.length){
+    meta.textContent = `✔ 本地历史明细（${state.histOrders.length} 行）· 新客规则已启用`;
+  }else{
+    meta.textContent = '未导入（新客规则停用）';
+  }
+  meta.className = 'file-meta';
+}
+
 // 导入数据中的最新日期（YYYY-MM-DD）
 function latestOrderDate(){
   if(!state.orders.length) return todayIso();
@@ -2987,17 +3137,24 @@ function renderMktFirstClients(){
   const winStart = fmtDate(new Date(cutoff.getTime() - 29*86400000));
   const winLabel = '近30天（' + winStart + ' ~ ' + winEnd + '）';
   const inWin = r => { if(!r.payTime) return false; const d = fmtDate(r.payTime); return d >= winStart && d <= winEnd; };
-  // 按客户分组（仅营销部初诊订单用于定位客户；消费明细在弹窗内按客户全量口径重新取）
+  // 按客户分组（初诊客户 = 规则A ∪ 规则B，与业绩口径完全一致）：
+  // 规则A：窗口内 营销部渠道 且 到访类型=初诊；规则B：营销部渠道 且 近一年无消费·新客（导入历史明细后启用）。
+  // 实现上直接用与 calculate 一致的初诊键集合（mktFirstKeysCached）过滤窗口内营销部订单。
+  const gateSet = mktFirstKeysCached();
+  // 判定依据预计算：该客户任意一笔订单 到访类型=初诊 → 规则A；否则（在集合中）→ 规则B新客
+  const chuzhenTypeKeys = new Set();
+  state.orders.forEach(r => { if(isMktChuzhenOrder(r)){ const k = mktFirstClientKey(r); if(k) chuzhenTypeKeys.add(k); } });
   const groups = new Map();
   state.orders.forEach(r=>{
-    if(!inWin(r) || !isMktChuzhenOrder(r)) return;
+    if(!inWin(r)) return;
+    if(!(chanHas(r,'营销部') || isRecToYingxiao(r))) return;
     const key = mktFirstClientKey(r);
-    if(!key || key === 'name:') return;
+    if(!key || key === 'name:' || !gateSet.has(key)) return;
     if(!groups.has(key)) groups.set(key, []);
     groups.get(key).push(r);
   });
   if(groups.size === 0){
-    el.innerHTML = '<div class="file-meta" style="padding:12px 0;">近30天（'+winStart+' ~ '+winEnd+'）暂无「营销部 + 初诊」客户</div>';
+    el.innerHTML = '<div class="file-meta" style="padding:12px 0;">近30天（'+winStart+' ~ '+winEnd+'）暂无营销部初诊客户（判定=到访类型初诊 ∪ 一年内无消费·新客）</div>';
     return;
   }
   // 来源渠道 = 渠道分类-一级渠道-二级渠道 拼接（空段跳过）
@@ -3009,6 +3166,7 @@ function renderMktFirstClients(){
     return { key, name: r0.name || '—',
       memberNo: String(r0.memberNo||'').trim() || '—',
       channel: mktChannelText(r0) || '—',
+      basis: chuzhenTypeKeys.has(key) ? '到访类型=初诊' : '一年内无消费·新客',
       firstDate: first && first.payTime ? fmtDate(first.payTime) : '—',
       cnt: state.orders.filter(r=>inWin(r) && mktFirstClientKey(r)===key).length };
   });
@@ -3106,6 +3264,7 @@ function renderMktFirstClients(){
             <div class="dc-rows">
               ${`<span>会员号</span><b>${esc(c.memberNo)}</b>`}
               ${`<span>来源渠道</span><b>${esc(c.channel)}</b>`}
+              ${`<span>判定依据</span><b>${esc(c.basis)}</b>`}
               ${`<span>初诊日期</span><b>${esc(c.firstDate)}</b>`}
               ${`<span>近30天消费笔数</span><b>${cnt}</b>`}
               ${`<span>近30天现款合计</span><b class="amt">${fmt(sum)}</b>`}
@@ -3114,7 +3273,7 @@ function renderMktFirstClients(){
         }).join('')}</div>`
       : `<div class="table-wrap" style="max-height:none;overflow:visible;border:1px solid var(--c-border);border-radius:8px;">
       <table class="data">
-        <thead><tr><th>#</th><th>客户姓名</th><th>客户会员号</th><th>来源渠道</th><th>初诊日期</th><th>近30天消费笔数</th><th>近30天现款合计</th></tr></thead>
+        <thead><tr><th>#</th><th>客户姓名</th><th>客户会员号</th><th>来源渠道</th><th>判定依据</th><th>初诊日期</th><th>近30天消费笔数</th><th>近30天现款合计</th></tr></thead>
         <tbody>${pageItems.map((c,i)=>{
           const rows = state.orders.filter(r=>inWin(r) && mktFirstClientKey(r)===c.key);
           const cnt = rows.length;
@@ -3124,6 +3283,7 @@ function renderMktFirstClients(){
             <td>${esc(c.name)}</td>
             <td>${esc(c.memberNo)}</td>
             <td>${esc(c.channel)}</td>
+            <td style="text-align:center;font-size:12px;color:${c.basis==='到访类型=初诊'?'var(--c-muted)':'#1f8a4a'};">${esc(c.basis)}</td>
             <td style="text-align:center;">${esc(c.firstDate)}</td>
             <td style="text-align:center;">${cnt}</td>
             <td style="text-align:right;">${fmt(sum)}</td>
@@ -3816,6 +3976,10 @@ function initApp(){
     if(mmBox.checked) showToast('已勾选「合并历史数据」——但这不会自动导入数据；仍需点击「📤 上传订单表」并选择 10 月的订单文件（重叠日期会覆盖，其它日期保留）', 'warn', 7000);
   });
   $('file-vab').addEventListener('change', e=>onFileVab(e.target));
+  // 近一年消费明细导入 / 清除（2026-10-16 新增：一年内无消费→初诊 新客规则数据源）
+  $('file-history').addEventListener('change', e=>onFileHistory(e.target));
+  $('clear-hist').addEventListener('click', clearHistData);
+  refreshHistMeta(); // 本地恢复后的历史明细状态文案
   $('edit-vab').addEventListener('click', toggleVabList);
   $('recompute').addEventListener('click', recompute);
   $('cutoff-date').addEventListener('change', ()=>{ persistOrders(); recompute(); }); // 切换截止日后持久化并重算月累计/每日

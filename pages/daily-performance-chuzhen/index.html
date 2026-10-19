@@ -445,6 +445,14 @@
       <button class="btn" id="edit-vab" title="展开/收起 VAB 会员清单（清单内双击单元格编辑、行尾 × 删除会员）" data-page-node-id="2vcS9kp7k74vSZfjuKUP8k">📋 编辑会员</button>
       <button class="btn btn-danger" id="clear-vab" title="清空本机保存的VAB清单（重置旧版本残留/示例数据），清空后重新上传真实会员表" data-page-node-id="clearVabBtn">🗑 清空VAB</button>
     </div>
+    <!-- 近一年消费明细（2026-10-16 新增）：「营销部顾客一年内无消费记录 → 视为初诊客户」规则数据源 -->
+    <div class="dataseg">
+      <span class="seg-label">历史明细</span>
+      <input type="file" id="file-history" accept=".xlsx,.xls" hidden />
+      <label for="file-history" class="btn" title="导入最近一年的消费明细（订单项目收退款表格式）——用于判定「营销部顾客一年内无消费记录 → 视为初诊客户」；该数据不计入业绩金额，仅本地保存">📅 上传近一年消费明细</label>
+      <span id="hist-meta" class="file-meta">未导入（新客规则停用）</span>
+      <button class="btn btn-danger" id="clear-hist" title="清除已导入的近一年消费明细并停用新客判定规则（不影响订单 / VAB 会员 / 月目标）">🗑 清除明细</button>
+    </div>
     <!-- VAB 会员清单（默认展开呈现导入会员，单元格可双击编辑、行尾可删除） -->
     <details class="vab-list-details" style="margin:0 0 10px 84px;" data-page-node-id="vabListBox">
       <summary id="vab-list-summary" class="vab-list-summary">📋 VAB 会员清单</summary>
@@ -469,7 +477,7 @@
       <span class="push"></span>
       <button class="btn btn-danger" id="clear-manual" title="清除所有手动调整的月累计/每日数据，恢复自动计算（用于修正手动改错导致的「月累计≠当日」）">🧹 清除手动调整</button>
       <button class="btn btn-danger" id="clear-date" title="清除某个指定日期（按收款时间所在日）的全部业绩记录，各统计表自动重算">🗓 清除指定日期</button>
-      <button class="btn btn-danger" id="clear-all" title="清除本机保存的订单/月目标/手动调整/列宽，重置为空后重新导入（不影响 VAB 会员）">🗑 清除全部数据</button>
+      <button class="btn btn-danger" id="clear-all" title="清除本机保存的订单/月目标/手动调整/列宽，重置为空后重新导入（不影响 VAB 会员与近一年消费明细）">🗑 清除全部数据</button>
       <a class="btn" href="../daily-performance/index.html" style="text-decoration:none;" title="切换到「每日业绩日报表」标准版页面（逻辑完全一致，数据各自独立导入）">🚀 标准版入口 →</a>
     </div>
     <div id="render-error" style="display:none;margin-top:10px;padding:10px 12px;background:#fde4e4;color:#b3261e;border:1px solid #b3261e;border-radius:6px;font-size:13px;" data-page-node-id="Cren2M9ptIxbdhlZu8Vs9i"></div>
@@ -560,7 +568,7 @@
   <div class="panel" id="panel-mkt-first">
     <details open>
       <summary>⑤ 营销部初诊客户（近30天）</summary>
-      <div class="legend" style="margin:2px 0 8px;">口径：近30天（截止日起往前30天，可跨月）内 来源渠道=营销部 且 到访类型=初诊 的客户（按客户去重，初诊日期=窗口内最早一笔初诊消费日期）· 来源渠道=渠道分类-一级渠道-二级渠道 · 支持筛选 · 点击数据行查看该客户近30天消费明细</div>
+      <div class="legend" style="margin:2px 0 8px;">口径：近30天（截止日起往前30天，可跨月）内 来源渠道=营销部 的初诊客户（按客户去重）。初诊判定 = ①到访类型=初诊（30天窗口内）∪ ②一年内无消费·新客（2026-10-16 新增：导入「近一年消费明细」后，营销部顾客若在截止日往前一年内无任何消费记录即视为初诊客户；未导入历史明细时该规则停用）· 来源渠道=渠道分类-一级渠道-二级渠道 · 支持筛选 · 点击数据行查看该客户近30天消费明细</div>
       <div id="mkt-first-clients" style="margin-top:4px;">导入订单数据后显示近30天营销部初诊客户</div>
     </details>
   </div>
@@ -613,13 +621,13 @@
    覆盖全站各页常见触发器，不存在的选择器自动跳过。 */
 (function(){
   var MAP = {
-    'file-orders':'import','file-vab':'import','fileVab':'import','fileOrder':'import',
+    'file-orders':'import','file-vab':'import','file-history':'import','fileVab':'import','fileOrder':'import',
     'fileCharge':'import','fileProjMap':'import','fileBoth':'import','fileAppt':'import',
     'file':'import','drop':'import','reimport':'import',
     'export-xlsx':'export','export-png':'export','export-store-xlsx':'export','export-store-png':'export',
     'vabExport':'export','orderExport':'export','chargeExport':'export','statsExport':'export',
     'consExport':'export','projExport':'export','projExportMap':'export','btnPng':'export','btnXlsx':'export','btnNextPng':'export','btnNextXlsx':'export',
-    'clear-vab':'clear','clear-manual':'clear','clear-date':'clear','clear-all':'clear','projClearMap':'clear','btnClearOV':'clear',
+    'clear-vab':'clear','clear-manual':'clear','clear-date':'clear','clear-all':'clear','clear-hist':'clear','projClearMap':'clear','btnClearOV':'clear',
     'edit-vab':'editVab','vab-add-save':'editVab','recompute':'recompute'
   };
   function tag(){
