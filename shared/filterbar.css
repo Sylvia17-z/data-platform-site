@@ -1,10 +1,10 @@
 /* ============================================================
-   shared/filterbar.css — 全站筛选区统一规范 (v=20261017a)
+   shared/filterbar.css — 全站筛选区统一规范 (v=20261019a)
    ------------------------------------------------------------
    设计令牌 + 数据段(.dataseg) + 筛选段(.fbar/.detail-filters)
    + 按钮三级分级 + msel/分页条/弹窗/toast 规范值
    引用方式（必须放在页面自身 <style> 之后，后加载覆盖旧值）：
-     <link rel="stylesheet" href="/shared/filterbar.css?v=20261017a">
+     <link rel="stylesheet" href="/shared/filterbar.css?v=20261019a">
    口径：改本文件必须同步 bump 全站引用版本号。
    ============================================================ */
 
@@ -41,16 +41,24 @@
 .dataseg .push{flex:1 1 0;min-width:8px;}
 .dataseg .file-meta,.dataseg .meta{font-size:11.5px;}
 
-/* ---------- 4. 筛选段 fbar：⚙折叠胶囊 + 栅格（label 上 / 控件下） ---------- */
+/* ---------- 3b. 工具栏纵向堆叠：操作行 / 筛选行 / 提示行各占整行 ----------
+   修复：筛选面板此前被 flex 挤到工具栏右侧，与操作按钮同行垂直居中，
+   造成左侧按钮下方大片留白。现统一改为纵向堆叠的协调布局。 */
+.toolbar .dataseg,.toolbar .fbar{flex:1 1 100%;min-width:0;}
+.toolbar .fbar{align-items:center;}
+
+/* ---------- 4. 筛选段 fbar：⚙折叠胶囊 + 流式字段行（label 上 / 控件下） ----------
+   字段采用 flex 流式布局：固定字段等宽排布，.span2（搜索类）自动吃掉
+   剩余宽度 —— 任何字段数量下都填满整行，不再出现 grid 空洞留白。 */
 .fbar{display:flex;flex-wrap:wrap;align-items:flex-start;gap:10px;}
 .fbar .fbody{
-  display:grid;grid-template-columns:repeat(auto-fill,minmax(186px,1fr));
-  gap:10px 12px;flex:1 1 340px;align-items:end;grid-auto-flow:row dense;
+  display:flex;flex-wrap:wrap;gap:10px 14px;flex:1 1 340px;align-items:flex-end;min-width:0;
   background:var(--fbar-bg);border:1px solid var(--fctl-border);border-radius:10px;padding:13px 16px;
 }
 .fbar.collapsed .fbody{display:none;}
 .fitem{position:relative;display:flex;flex-direction:column;gap:3px;min-width:0;
   font-size:11px;line-height:1.25;color:var(--c-muted,#7a8aa6);}
+.fbar .fitem,.detail-filters .detail-filter{flex:0 1 188px;min-width:150px;}
 .fitem > .flabel{font-size:11px;color:var(--c-muted,#7a8aa6);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .fitem select,.fitem input[type=text],.fitem input[type=number],.fitem input[type=date],
 .fitem .proj-filter-btn,.fitem .msel-btn{
@@ -63,7 +71,7 @@
   border-color:var(--c-accent,#3658d3);box-shadow:0 0 0 2px rgba(54,88,211,.18);
 }
 .fitem .proj-filter-btn{text-align:left;justify-content:flex-start;display:inline-flex;align-items:center;cursor:pointer;}
-.fitem.span2{grid-column:span 2;}
+.fitem.span2{flex:1 1 240px;}
 .ftoggle{
   display:inline-flex;align-items:center;gap:7px;background:var(--c-head,#002060);
   border:1px solid var(--c-head,#002060);color:#fff;font-size:12.5px;font-weight:600;
@@ -73,7 +81,7 @@
 .ftoggle:hover{background:var(--c-head-2,#1e3a8a);border-color:var(--c-head-2,#1e3a8a);}
 .ftoggle .ft-count{background:#fff;color:var(--c-head,#002060);border-radius:999px;font-size:10.5px;
   min-width:17px;height:17px;line-height:17px;text-align:center;font-weight:700;padding:0 4px;}
-.fres{grid-column:1/-1;justify-self:start;height:30px;padding:0 13px;font-size:12px;
+.fres{flex:0 0 auto;align-self:flex-end;height:30px;padding:0 13px;font-size:12px;
   border-radius:var(--fctl-radius);border:1px solid var(--fctl-border);background:#fff;
   color:var(--c-accent,#3658d3);cursor:pointer;font-family:inherit;}
 .fres:hover{background:var(--c-head,#002060);color:#fff;border-color:var(--c-head,#002060);}
@@ -81,8 +89,7 @@
 /* ---------- 5. detail-filters 体系（⑥明细/⑤清单：以初诊版形态为全站基准） ---------- */
 .detail-filters{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin:2px 0 10px;}
 .detail-filters .filters-body{
-  display:grid;grid-template-columns:repeat(auto-fill,minmax(186px,1fr));
-  gap:10px 12px;flex:1 1 340px;align-items:end;grid-auto-flow:row dense;
+  display:flex;flex-wrap:wrap;gap:10px 14px;flex:1 1 340px;align-items:flex-end;min-width:0;
   background:var(--fbar-bg);border:1px solid var(--fctl-border);border-radius:10px;padding:13px 16px;
 }
 .detail-filters.collapsed .filters-body{display:none;}
@@ -102,13 +109,13 @@
 .detail-reset{height:30px;padding:0 13px;font-size:12px;border-radius:var(--fctl-radius);
   border:1px solid var(--fctl-border);background:#fff;color:var(--c-accent,#3658d3);cursor:pointer;font-family:inherit;}
 .detail-reset:hover{background:var(--c-head,#002060);color:#fff;border-color:var(--c-head,#002060);}
-.span2{grid-column:span 2;}
-.num-filter{grid-column:span 2;}
+.span2{flex:1 1 240px;}
+.num-filter{flex:1 1 280px;}
 .num-line{display:flex;gap:6px;}
 .num-line .op-sel{flex:0 0 76px;width:76px;}
-.date-filter{grid-column:span 2;}
+.date-filter{flex:1 1 280px;}
 .date-line{display:flex;gap:6px;align-items:center;}
-.filters-foot{grid-column:1/-1;display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+.filters-foot{flex:1 1 100%;display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
 
 /* ---------- 6. msel 多选下拉（全站统一值，与初诊版一致） ---------- */
 .msel{position:relative;display:inline-flex;}
@@ -154,17 +161,19 @@ label.msel-item input{accent-color:var(--c-accent,#3658d3);}
   .dataseg .btn{height:var(--fbtn-h-m);width:100%;justify-content:center;}
   .dataseg .btn.full{grid-column:1/-1;}
   .dataseg .file-meta,.dataseg .meta,.dataseg label{grid-column:1/-1;}
-  /* 筛选段：单列外壳 + 2 列栅格（width:100% 防 flex 父容器收缩） */
+  /* 筛选段：单列外壳 + 字段两等分（width:100% 防 flex 父容器收缩） */
   .fbar,.detail-filters{display:block;width:100%;}
   .fbar .fbody,.detail-filters .filters-body{
-    grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;padding:10px 12px;margin-top:8px;flex:none;
+    gap:8px;padding:10px 12px;margin-top:8px;flex:none;
   }
   .fbar .ftoggle,.detail-filters .ftoggle{width:100%;justify-content:center;}
   .fitem select,.fitem input[type=text],.fitem input[type=number],.fitem input[type=date],
   .fitem .proj-filter-btn,.fitem .msel-btn,
   .detail-filter .detail-select,.detail-filter .msel-btn{height:var(--fctl-h-m);font-size:13px;}
-  .fitem.span2,.fitem.num-filter,.fitem.date-filter,
-  .detail-filter.span2,.detail-filter.num-filter,.detail-filter.date-filter{grid-column:1/-1;}
+  .fbar .fitem,.detail-filters .detail-filter{flex:1 1 calc(50% - 4px);min-width:0;}
+  .fbar .fitem.span2,.fbar .num-filter,.fbar .date-filter,
+  .detail-filter.span2,.detail-filter.num-filter,.detail-filter.date-filter{flex:1 1 100%;}
+  .fbar .fres,.detail-filters .detail-reset{flex:1 1 100%;}
   .detail-pager .pg-btn{padding:6px 12px;}
 }
 /* 电脑端微调（>640px） */
