@@ -328,7 +328,7 @@ function persistHist(){
   // 守卫：订单为空时不上传——避免「只有历史明细没有订单」的设备把云端订单覆盖为空快照。
   if(Array.isArray(state.orders) && state.orders.length > 0){
     bumpSnapTs();
-    saveOrdersToCloud();
+    saveOrdersToCloud(true); // force：导入/清除是显式落盘点，立即上传跳过 800ms 防抖（刷新会杀掉防抖任务导致云端缺失）
   }
 }
 
@@ -339,7 +339,14 @@ function restoreHist(){
   // 异步回退：IndexedDB（localStorage 为空时兜底）；恢复后使初诊键集合缓存失效
   idbGet(HIST_STORAGE_KEY).then(saved => {
     if(saved && typeof saved === 'string' && !raw && state.histOrders.length === 0){
-      if(applyHistRaw(saved)) invalidateMktKeyCaches();
+      if(applyHistRaw(saved)){
+        invalidateMktKeyCaches();
+        // 自愈：localStorage 写入失败（如配额不足）时数据只在 IDB——恢复后立即推回云端
+        if(Array.isArray(state.orders) && state.orders.length > 0){
+          bumpSnapTs();
+          saveOrdersToCloud(true);
+        }
+      }
     }
   }).catch(()=>{});
   // 桥接父窗口：向壳索取持久化数据（与壳的主动推送互补）
@@ -461,14 +468,29 @@ function cloudPayload(){
     targets: state.targets,
     manual: state.manual,
     // 近一年消费明细随快照上云（2026-10-19）：瘦行仅保留判定所需 4 字段（memberNo/name/payTime/_uid，见 histKeysCached）
-    hist: {
-      histOrders: (state.histOrders || []).map(r => ({
-        memberNo: r.memberNo || '', name: r.name || '',
-        payTime: (r.payTime instanceof Date) ? r.payTime.toISOString() : (r.payTime || ''),
-        _uid: r._uid
-      })),
-      histTs: state.histTs || 0,
-    },
+    hist: (() => {
+      const rows = state.histOrders || [];
+      if(rows.length){
+        return {
+          histOrders: rows.map(r => ({
+            memberNo: r.memberNo || '', name: r.name || '',
+            payTime: (r.payTime instanceof Date) ? r.payTime.toISOString() : (r.payTime || ''),
+            _uid: r._uid
+          })),
+          histTs: state.histTs || 0,
+        };
+      }
+      // 内存为空的两种情况（防空覆盖）：
+      //   ① 本地存有「空数组快照」= 用户显式清除 → 携带空数组同步清除云端；
+      //   ② 本地无内容（localStorage 配额写入失败 / IDB 恢复未完成）→ 不携带 hist 字段，
+      //      applyCloudObj 对缺字段不动本机 —— 防止竞态期用空 hist 覆盖云端（用户实测的丢失即此路径）。
+      let stored = null;
+      try{ const raw = localStorage.getItem(HIST_STORAGE_KEY); if(raw) stored = JSON.parse(raw); }catch(e){}
+      if(stored && Array.isArray(stored.histOrders) && stored.histOrders.length === 0){
+        return { histOrders: [], histTs: stored.ts || state.histTs || 0 };
+      }
+      return null;
+    })(),
     ts: state.snapTs || Date.now(),
   };
 }
