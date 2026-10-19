@@ -318,6 +318,39 @@ function applyHistRaw(raw){
   return false;
 }
 
+/* ---- hist 上云压缩（2026-10-19）：明细行数大（实测 2.6 万行瘦行后约 3MB，整包超云端网关请求体限制报 NetworkError），
+   用浏览器原生 CompressionStream gzip 压缩后再以 base64 存入 payload.hist.gz（明细重复度高，约压缩 10 倍）。
+   不可用环境（旧浏览器）自动降级：不上传 hist（仅本地），订单数据不受影响。 ---- */
+async function gzipToB64(obj){
+  const json = JSON.stringify(obj);
+  if(typeof CompressionStream === 'undefined') throw new Error('no CompressionStream');
+  const stream = new Blob([json]).stream().pipeThrough(new CompressionStream('gzip'));
+  const buf = new Uint8Array(await new Response(stream).arrayBuffer());
+  let bin = ''; const CH = 0x8000;
+  for(let i = 0; i < buf.length; i += CH) bin += String.fromCharCode.apply(null, buf.subarray(i, i + CH));
+  return btoa(bin);
+}
+async function b64ToObj(b64){
+  const bin = atob(b64);
+  const buf = new Uint8Array(bin.length);
+  for(let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
+  const stream = new Blob([buf]).stream().pipeThrough(new DecompressionStream('gzip'));
+  return JSON.parse(await new Response(stream).text());
+}
+// hist 压缩缓存（内存态，不持久化）：persistHist / 云端恢复 时填充，cloudPayload 同步取用
+function slimHistRows(rows){
+  return (rows || []).map(r => ({
+    memberNo: r.memberNo || '', name: r.name || '',
+    payTime: (r.payTime instanceof Date) ? r.payTime.toISOString() : (r.payTime || ''),
+    _uid: r._uid
+  }));
+}
+function queueHistGz(){
+  if(!(state.histOrders || []).length){ state.histGz = null; return; }
+  gzipToB64({ histOrders: slimHistRows(state.histOrders), ts: state.histTs || 0 })
+    .then(gz => { state.histGz = { gz, histTs: state.histTs || 0 }; })
+    .catch(() => { state.histGz = null; }); // 压缩失败：本次上传不带 hist（仅本地），订单不受影响
+}
 function persistHist(){
   state.histTs = Date.now();
   const payload = JSON.stringify({ histOrders: state.histOrders, ts: state.histTs });
@@ -328,14 +361,17 @@ function persistHist(){
   // 守卫：订单为空时不上传——避免「只有历史明细没有订单」的设备把云端订单覆盖为空快照。
   if(Array.isArray(state.orders) && state.orders.length > 0){
     bumpSnapTs();
-    saveOrdersToCloud(true); // force：导入/清除是显式落盘点，立即上传跳过 800ms 防抖（刷新会杀掉防抖任务导致云端缺失）
+    // 先压缩 hist（异步），完成后再 force 上传——确保云端拿到的是最新明细
+    gzipToB64({ histOrders: slimHistRows(state.histOrders), ts: state.histTs || 0 })
+      .then(gz => { state.histGz = { gz, histTs: state.histTs || 0 }; saveOrdersToCloud(true); })
+      .catch(() => { state.histGz = null; saveOrdersToCloud(true); }); // 压缩失败：不带 hist 上传（保订单），明细仅本机
   }
 }
 
 function restoreHist(){
   let raw = null;
   try{ raw = localStorage.getItem(HIST_STORAGE_KEY); }catch(e){ raw = null; }
-  if(raw) applyHistRaw(raw);
+  if(raw){ if(applyHistRaw(raw)) queueHistGz(); }
   // 异步回退：IndexedDB（localStorage 为空时兜底）；恢复后使初诊键集合缓存失效
   idbGet(HIST_STORAGE_KEY).then(saved => {
     if(saved && typeof saved === 'string' && !raw && state.histOrders.length === 0){
@@ -468,29 +504,7 @@ function cloudPayload(){
     targets: state.targets,
     manual: state.manual,
     // 近一年消费明细随快照上云（2026-10-19）：瘦行仅保留判定所需 4 字段（memberNo/name/payTime/_uid，见 histKeysCached）
-    hist: (() => {
-      const rows = state.histOrders || [];
-      if(rows.length){
-        return {
-          histOrders: rows.map(r => ({
-            memberNo: r.memberNo || '', name: r.name || '',
-            payTime: (r.payTime instanceof Date) ? r.payTime.toISOString() : (r.payTime || ''),
-            _uid: r._uid
-          })),
-          histTs: state.histTs || 0,
-        };
-      }
-      // 内存为空的两种情况（防空覆盖）：
-      //   ① 本地存有「空数组快照」= 用户显式清除 → 携带空数组同步清除云端；
-      //   ② 本地无内容（localStorage 配额写入失败 / IDB 恢复未完成）→ 不携带 hist 字段，
-      //      applyCloudObj 对缺字段不动本机 —— 防止竞态期用空 hist 覆盖云端（用户实测的丢失即此路径）。
-      let stored = null;
-      try{ const raw = localStorage.getItem(HIST_STORAGE_KEY); if(raw) stored = JSON.parse(raw); }catch(e){}
-      if(stored && Array.isArray(stored.histOrders) && stored.histOrders.length === 0){
-        return { histOrders: [], histTs: stored.ts || state.histTs || 0 };
-      }
-      return null;
-    })(),
+    hist: state.histGz || undefined,
     ts: state.snapTs || Date.now(),
   };
 }
@@ -528,11 +542,24 @@ function applyCloudObj(obj){
     const h = obj.hist;
   if(h && typeof h === 'object'){
     // 只有快照里确实带了 hist 字段才处理（旧版快照没有 → 不动本机，避免误清空）；
-    // 显式空数组 = 云端已清除 → 同步清空本机。分支内不调 persistHist（_applyingCloud 期间防回写）。
-    if(Array.isArray(h.histOrders)){
+    // gz = 压缩格式（现行为）；histOrders 数组 = 旧格式（直读，兼容历史快照）。
+    // 分支内不调 persistHist（_applyingCloud 期间防回写）。
+    if(h.gz){
+      b64ToObj(h.gz).then(obj2 => {
+        if(obj2 && Array.isArray(obj2.histOrders)){
+          if(applyHistRaw(JSON.stringify({ histOrders: obj2.histOrders, ts: h.histTs || Number(obj.ts) || Date.now() }))){
+            invalidateMktKeyCaches();
+            if(typeof refreshHistMeta === 'function') refreshHistMeta();
+            if(typeof recompute === 'function') recompute(); // 异步解压完成后再重算一次（⑤清单判定）
+          }
+          state.histGz = { gz: h.gz, histTs: h.histTs || 0 }; // 缓存 gz，回写时复用
+        }
+      }).catch(() => {});
+      touched = true;
+    } else if(Array.isArray(h.histOrders)){
       if(applyHistRaw(JSON.stringify({ histOrders: h.histOrders, ts: h.histTs || Number(obj.ts) || Date.now() }))){
         invalidateMktKeyCaches();
-        if(typeof refreshHistMeta === 'function') refreshHistMeta(); // 同步状态文案（已同步云端/行数）
+        if(typeof refreshHistMeta === 'function') refreshHistMeta();
         touched = true;
       }
     }
