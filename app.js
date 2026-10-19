@@ -26,6 +26,15 @@ function withVer(src) {
 // 模块注册表（与 server.js 的 MODULES 保持一致；内嵌以便纯静态部署，无需 /api/modules）
 const MODULES = [
   {
+    id: 'home',
+    name: '首页',
+    icon: '🏠',
+    group: '工作台',
+    type: 'embed',
+    src: '/pages/home/index.html',
+    desc: '平台工作台首页（本周数据/快捷入口/平台动态）'
+  },
+  {
     id: 'data-statistics',
     name: '客量业绩统计报表',
     icon: '📊',
@@ -142,6 +151,7 @@ async function boot() {
 
 /* ---------- 模块可见性（RBAC） ---------- */
 function canShowModule(m) {
+  if (m.id === 'home') return true; // 首页对所有人可见（不参与 RBAC 模块可见性）
   if (typeof RBAC === 'undefined') return true;
   if (m.id === 'account-roles') return RBAC.can('manageAcl'); // 管理入口仅 manageAcl 可见
   return RBAC.canViewModule(m.id);
