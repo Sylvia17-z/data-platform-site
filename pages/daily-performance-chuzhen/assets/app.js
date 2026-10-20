@@ -300,6 +300,8 @@ window.addEventListener('message', (e) => {
  * 与订单表相互独立：仅参与初诊判定，不计入任何业绩金额；未导入时该规则自动停用（保持既有口径）。
  * 持久化与订单同构：localStorage 同步 + IndexedDB 兜底 + 壳窗口桥接（dp:persist / dp:request）。 */
 const HIST_STORAGE_KEY = 'dailyPerformance_hist';
+// hist 是否已成功上云/从云端恢复（用于状态文案；2026-10-20 起仅明细也可上云，故不再等同「订单已导入」）
+let histClouded = false;
 
 function applyHistRaw(raw){
   if(!raw || typeof raw !== 'string') return false;
@@ -357,34 +359,59 @@ function persistHist(){
   try{ localStorage.setItem(HIST_STORAGE_KEY, payload); }catch(e){ /* 配额超限：IndexedDB 兜底 */ }
   idbSet(HIST_STORAGE_KEY, payload).catch(()=>{});
   try{ if(window.parent && window.parent !== window) window.parent.postMessage({ type:'dp:persist', key:HIST_STORAGE_KEY, payload }, '*'); }catch(e){}
-  // 云端持久化（2026-10-19）：随 dp_orders 整包快照上云（cloudPayload.hist 瘦行）。
-  // 守卫：订单为空时不上传——避免「只有历史明细没有订单」的设备把云端订单覆盖为空快照。
-  if(Array.isArray(state.orders) && state.orders.length > 0){
-    bumpSnapTs();
-    // 先压缩 hist（异步），完成后再 force 上传——确保云端拿到的是最新明细
-    gzipToB64({ histOrders: slimHistRows(state.histOrders), ts: state.histTs || 0 })
-      .then(gz => { state.histGz = { gz, histTs: state.histTs || 0 }; saveOrdersToCloud(true); })
-      .catch(() => { state.histGz = null; saveOrdersToCloud(true); }); // 压缩失败：不带 hist 上传（保订单），明细仅本机
-  }
+  if((state.histOrders||[]).length === 0) return; // 无任何明细可传
+  // 云端持久化（2026-10-20）：hist 始终上云，不再要求「必须有订单」。
+  //   有订单 → 整包上传（含 hist）；无订单（仅明细）→ 合并云端已有订单后上传，避免清空云端订单。
+  bumpSnapTs();
+  gzipToB64({ histOrders: slimHistRows(state.histOrders), ts: state.histTs || 0 })
+    .then(gz => {
+      if(Array.isArray(state.orders) && state.orders.length > 0){
+        state.histGz = { gz, histTs: state.histTs || 0 };
+        // 注意：histClouded 在 saveOrdersToCloud 真正上传成功后才置真（见其 success 分支），
+        // 不能在此处提前置真——否则无云端/未登录时会误报「已同步云端」。
+        saveOrdersToCloud(true);
+      }else{
+        saveHistOnlyToCloud(gz);
+      }
+    })
+    .catch(() => {
+      if(Array.isArray(state.orders) && state.orders.length > 0){ state.histGz = null; saveOrdersToCloud(true); }
+      // 压缩失败且无订单：明细仅留本机（IDB/localStorage），下次有订单时再上云
+    });
 }
 
+// 安全解析 localStorage/IDB 里的 hist 字符串 → { orders, ts }
+function safeParseHist(raw){
+  if(!raw || typeof raw !== 'string') return null;
+  try{ const o = JSON.parse(raw); if(o && Array.isArray(o.histOrders)) return { orders: o.histOrders, ts: Number(o.ts) || 0 }; }catch(e){}
+  return null;
+}
 function restoreHist(){
   let raw = null;
+  histClouded = false; // 本地恢复默认未上云（云端恢复会在 syncFromCloud 兜底里置真）
   try{ raw = localStorage.getItem(HIST_STORAGE_KEY); }catch(e){ raw = null; }
-  if(raw){ if(applyHistRaw(raw)) queueHistGz(); }
-  // 异步回退：IndexedDB（localStorage 为空时兜底）；恢复后使初诊键集合缓存失效
+  const lsParsed = safeParseHist(raw);
+  // 合并恢复（2026-10-20 修复「陈旧 localStorage 遮蔽新 IDB 数据」）：
+  // 同源两路——localStorage（快、但共享 5MB 配额易因其他页面数据超限而写入失败）与 IndexedDB（大容量可靠）。
+  // 两路都拿到后选「行数更多」者；IDB 优先于同等数量的 localStorage（localStorage 失败时残留的旧小快照会
+  // 遮蔽新写入的 IDB 大体积数据，表现为「导入后刷新数据被回退/清除」）。绝不直接用 localStorage 同步覆盖。
   idbGet(HIST_STORAGE_KEY).then(saved => {
-    if(saved && typeof saved === 'string' && !raw && state.histOrders.length === 0){
-      if(applyHistRaw(saved)){
+    const idbParsed = safeParseHist(saved && typeof saved === 'string' ? saved : null);
+    let chosen = null, chosenRaw = null;
+    if(idbParsed && idbParsed.orders.length){ chosen = idbParsed; chosenRaw = saved; }
+    if(lsParsed && lsParsed.orders.length && (!chosen || lsParsed.orders.length > chosen.orders.length)){ chosen = lsParsed; chosenRaw = raw; }
+    if(chosen && chosen.orders.length){
+      if(applyHistRaw(chosenRaw)){
         invalidateMktKeyCaches();
-        // 自愈：localStorage 写入失败（如配额不足）时数据只在 IDB——恢复后立即推回云端
-        if(Array.isArray(state.orders) && state.orders.length > 0){
-          bumpSnapTs();
-          saveOrdersToCloud(true);
-        }
+        if(typeof refreshHistMeta === 'function') refreshHistMeta();
+        // 自愈：数据此前只在 IDB（localStorage 写失败）→ 恢复后推回云端
+        if(Array.isArray(state.orders) && state.orders.length > 0){ bumpSnapTs(); saveOrdersToCloud(true); }
       }
     }
-  }).catch(()=>{});
+  }).catch(()=>{
+    // IDB 不可用 → 退回 localStorage
+    if(lsParsed && lsParsed.orders.length){ if(applyHistRaw(raw)){ invalidateMktKeyCaches(); if(typeof refreshHistMeta==='function') refreshHistMeta(); queueHistGz(); } }
+  });
   // 桥接父窗口：向壳索取持久化数据（与壳的主动推送互补）
   try{ if(window.parent && window.parent !== window) window.parent.postMessage({ type:'dp:request', key:HIST_STORAGE_KEY }, '*'); }catch(e){}
 }
@@ -547,16 +574,19 @@ function applyCloudObj(obj){
     if(h.gz){
       b64ToObj(h.gz).then(obj2 => {
         if(obj2 && Array.isArray(obj2.histOrders)){
+          // 先置云端标志，再刷新状态文案——否则 refreshHistMeta 在 histClouded=false 时定格为「暂仅保存在本机」
+          histClouded = true; // 从云端恢复了 hist
+          state.histGz = { gz: h.gz, histTs: h.histTs || 0 }; // 缓存 gz，回写时复用
           if(applyHistRaw(JSON.stringify({ histOrders: obj2.histOrders, ts: h.histTs || Number(obj.ts) || Date.now() }))){
             invalidateMktKeyCaches();
             if(typeof refreshHistMeta === 'function') refreshHistMeta();
             if(typeof recompute === 'function') recompute(); // 异步解压完成后再重算一次（⑤清单判定）
           }
-          state.histGz = { gz: h.gz, histTs: h.histTs || 0 }; // 缓存 gz，回写时复用
         }
       }).catch(() => {});
       touched = true;
     } else if(Array.isArray(h.histOrders)){
+      histClouded = true; // 从云端恢复了 hist（旧版未压缩路径）
       if(applyHistRaw(JSON.stringify({ histOrders: h.histOrders, ts: h.histTs || Number(obj.ts) || Date.now() }))){
         invalidateMktKeyCaches();
         if(typeof refreshHistMeta === 'function') refreshHistMeta();
@@ -682,6 +712,22 @@ async function syncFromCloud(opts){
     }else{
       setCloudStatus('已登录 · 云端暂无数据', 'ok');
     }
+    // hist 兜底（2026-10-20）：云端快照含 hist 而本机恢复后为空/陈旧 → 强制回灌，
+    // 不依赖整体 verdict（尤其 verdict==='same' 时整包不会被 applyCloudObj，会漏掉 hist，导致刷新后明细丢失）。
+    try{
+      const ch = data2.payload && data2.payload.hist;
+      if(ch && typeof ch === 'object'){
+        const chTs = Number(ch.histTs) || Number(data2.payload.ts) || 0;
+        const loTs = Number(state.histTs) || 0;
+        if((state.histOrders||[]).length === 0 || chTs > loTs){
+          applyCloudObj({ hist: ch, ts: data2.payload.ts });
+        }else{
+          // 本机已是最新（ts 持平）→ 不重复回灌，但云端确有该明细，置云端标志避免误显「暂仅保存在本机」
+          histClouded = true;
+          if(typeof refreshHistMeta === 'function') refreshHistMeta();
+        }
+      }
+    }catch(e){}
   }catch(e){
     setCloudStatus('云端同步异常：' + (e && e.message ? e.message : '网络错误'), 'err');
   }
@@ -711,6 +757,8 @@ async function saveOrdersToCloud(force){
         .select('id, updated_at, payload').order('updated_at', { ascending:false }).limit(1);
       if(selErr){ failSave('云端保存失败：' + (selErr.message || '')); return; }
       const latest = Array.isArray(rows) && rows.length ? rows[0] : null;
+      // 跨设备保护（2026-10-20）：本地无 hist 但云端已有 hist → 保留云端 hist，避免「仅订单设备」上传时把云端明细清空
+      if(!payload.hist && latest && latest.payload && latest.payload.hist){ payload.hist = latest.payload.hist; }
       if(latest && latest.id != null){
         // 跨设备保护：云端已有比本地更新的数据（如另一台设备刚写入）且非强制保存时，
         // 不用过期本地数据覆盖云端，改为拉取云端保持一致
@@ -739,11 +787,41 @@ async function saveOrdersToCloud(force){
       state.ordersTs = Number(payload.ts) || Date.now();
       state.snapTs = state.ordersTs; saveSnapTs(state.snapTs);
       setCloudStatus('已同步云端（' + payload.orders.length + ' 条 · VAB ' + (payload.vab && payload.vab.list ? payload.vab.list.length : 0) + ' 人）', 'ok');
+      // hist 随整包上云成功 → 同步置云端标志并刷新状态文案（修复「导入后状态文案滞后为『暂仅保存在本机』」）
+      if(payload.hist){ histClouded = true; }
+      if(typeof refreshHistMeta === 'function') refreshHistMeta();
     }catch(e){
       failSave('云端保存异常：' + (e && e.message ? e.message : '网络错误'));
     }
   };
   if(force){ await doSave(); } else { _cloudSaveTimer = setTimeout(doSave, 800); }
+}
+// 仅明细（无订单）时上传：把 hist 合并进云端已有订单快照后 upsert，避免「仅明细设备」把云端订单清空（2026-10-20）
+async function saveHistOnlyToCloud(gz){
+  const cloud = getCloud();
+  if(!cloud){ setCloudStatus('云端组件未就绪：明细仅保存在本机', 'err'); return; }
+  let session = null;
+  try{ const r = await cloud.auth.getSession(); session = r.data; if(r.error) session = null; }catch(e){ session = null; }
+  if(!session){ setCloudStatus('未登录云端：明细仅保存在本机', 'err'); return; }
+  try{
+    const { data: rows, error } = await cloud.database.from('dp_orders').select('id, payload').order('updated_at',{ascending:false}).limit(1);
+    if(error){ setCloudStatus('云端读取失败：'+(error.message||''), 'err'); return; }
+    const latest = Array.isArray(rows) && rows.length ? rows[0] : null;
+    const base = (latest && latest.payload && typeof latest.payload === 'object') ? latest.payload
+               : { orders: [], cutoff: null, vab: { list: [], rows: [], demo: false }, targets: {}, manual: {} };
+    const payload = Object.assign({}, base, { hist: { gz, histTs: state.histTs || 0 }, ts: state.snapTs || Date.now() });
+    if(latest && latest.id != null){
+      const { error: e2 } = await cloud.database.from('dp_orders').update({ payload, updated_at: new Date().toISOString() }).eq('id', latest.id);
+      if(e2){ setCloudStatus('云端保存失败：'+(e2.message||''), 'err'); return; }
+    }else{
+      const { error: e2 } = await cloud.database.from('dp_orders').insert({ payload, updated_at: new Date().toISOString() });
+      if(e2){ setCloudStatus('云端保存失败：'+(e2.message||''), 'err'); return; }
+    }
+    state.histGz = { gz, histTs: state.histTs || 0 };
+    histClouded = true;
+    state.ordersTs = payload.ts; state.snapTs = payload.ts; saveSnapTs(state.snapTs);
+    setCloudStatus('已同步云端（仅明细 · '+(state.histOrders||[]).length+' 行）', 'ok');
+  }catch(e){ setCloudStatus('云端同步异常：'+(e&&e.message||'网络错误'), 'err'); }
 }
 async function clearOrdersInCloud(){
   const cloud = getCloud(); if(!cloud) return;
@@ -3252,6 +3330,7 @@ function clearHistData(){
   if(!state.histOrders.length){ showToast('尚未导入近一年消费明细，无需清除', 'warn'); return; }
   if(!window.confirm('确定清除已导入的近一年消费明细？\n清除后「营销部顾客一年内无消费记录 → 初诊客户」规则将停用，业绩报表恢复既有口径（30天内 到访类型=初诊）。\n订单 / VAB 会员 / 月目标不受影响。此操作不可撤销。')) return;
   state.histOrders = [];
+  histClouded = false;
   persistHist(); // 写入空快照（含壳窗口桥接，防刷新后旧数据回灌）
   invalidateMktKeyCaches();
   refreshHistMeta();
@@ -3264,9 +3343,9 @@ function refreshHistMeta(){
   const meta = $('hist-meta');
   if(!meta) return;
   if(state.histOrders.length){
-    // 云同步状态提示：历史明细随订单整包上云；仅当订单已导入时才会推送到云端
-    const clouded = Array.isArray(state.orders) && state.orders.length > 0;
-    meta.textContent = `✔ 历史明细（${state.histOrders.length} 行）· 新客规则已启用 · ` + (clouded ? '已同步云端' : '订单未导入，暂仅保存在本机');
+    // 云同步状态提示：历史明细随订单整包上云；2026-10-20 起仅明细（无订单）也可单独上云，
+    // 故以 histClouded 标志反映真实同步状态，而非「是否导入了订单」。
+    meta.textContent = `✔ 历史明细（${state.histOrders.length} 行）· 新客规则已启用 · ` + (histClouded ? '已同步云端' : '订单未导入，暂仅保存在本机');
   }else{
     meta.textContent = '未导入（新客规则停用）';
   }
