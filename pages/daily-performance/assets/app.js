@@ -710,7 +710,7 @@ function renderVabList(){
   const headers = [];
   rows.forEach(r => Object.keys(r).forEach(k => { if(!headers.includes(k)) headers.push(k); }));
   const headHtml = headers.length
-    ? '<tr>' + headers.map(h=>`<th>${esc(h)}</th>`).join('') + '<th style="width:44px;text-align:center;">操作</th></tr>'
+    ? '<tr>' + headers.map(h=>`<th>${esc(h)}</th>`).join('') + '<th style="width:82px;text-align:center;">操作</th></tr>'
     : '';
   /* ---- 分页：默认 10 条/页 ---- */
   const total = rows.length;
@@ -724,7 +724,7 @@ function renderVabList(){
         const i = vabStart + k; // 真实行索引（编辑/删除定位 state.vabRows 用）
         const m = normalizeVab(r);
         const cells = headers.map(h=>`<td class="vab-cell" data-ri="${i}" data-field="${esc(h)}" title="双击编辑该字段">${esc(r[h] ?? '')}</td>`).join('');
-        return `<tr data-m="${esc(m)}">${cells}<td style="text-align:center;"><button class="vab-del" type="button" title="删除该会员">×</button></td></tr>`;
+        return `<tr data-m="${esc(m)}">${cells}<td style="text-align:center;white-space:nowrap;"><button class="vab-edit" type="button" data-ri="${i}" title="编辑该会员（弹窗修改全部字段）">编辑</button><button class="vab-del" type="button" title="删除该会员">×</button></td></tr>`;
       }).join('')
     : '';
   // 分页后每页行数有限：表格完整展开（显式 none 覆盖页面 CSS .table-wrap{max-height:300px}），
@@ -815,8 +815,10 @@ function startVabCellEdit(td){
   });
   input.addEventListener('blur', () => finish(true));
 }
-// 列表点击：删除按钮 / 新增按钮（事件委托到 #vab-list 容器）
+// 列表点击：编辑按钮 / 删除按钮 / 新增按钮（事件委托到 #vab-list 容器）
 function onVabListClick(e){
+  const edt = e.target.closest && e.target.closest('.vab-edit');
+  if(edt){ openEditVabModal(Number(edt.dataset.ri)); return; }
   const del = e.target.closest && e.target.closest('.vab-del');
   if(del){ const tr = del.closest('tr'); deleteVabMember(tr && tr.dataset.m); return; }
   if(e.target.id === 'vab-add-btn'){ openAddVabModal(); return; }
@@ -847,7 +849,18 @@ function buildVabHeaders(){
   if(!set.includes('会员号')) set.unshift('会员号'); // 会员号始终为首项
   return set;
 }
+/* ---- 弹窗模式：vabEditIndex=null 为新增，数字为编辑 state.vabRows[该索引]（新增/编辑共用同一弹窗） ---- */
+let vabEditIndex = null;
+function setVabModalMode(editIdx){
+  vabEditIndex = (typeof editIdx === 'number' && editIdx >= 0) ? editIdx : null;
+  const title = document.querySelector('#vab-add-modal .modal-title');
+  if(title) title.textContent = vabEditIndex === null ? '＋ 新增 VAB 会员' : '✎ 编辑 VAB 会员';
+  const save = $('vab-add-save');
+  if(save) save.textContent = vabEditIndex === null ? '💾 保存' : '💾 保存修改';
+}
+// 新增会员弹窗：按当前 VAB 字段模板生成输入项，可录入会员号/姓名/组别等全部字段
 function openAddVabModal(){
+  setVabModalMode(null);
   const fields = buildVabHeaders();
   const box = $('vab-add-fields');
   if(box) box.innerHTML = fields.map(f =>
@@ -858,12 +871,29 @@ function openAddVabModal(){
   const first = box && box.querySelector('input');
   if(first) first.focus();
 }
+// 编辑会员：复用新增弹窗，预填该行全部字段；保存仅更新该行，停留当前分页
+function openEditVabModal(ri){
+  const row = state.vabRows && state.vabRows[ri];
+  if(!row){ showToast('未找到该会员，请刷新清单后重试', 'warn'); return; }
+  setVabModalMode(ri);
+  const fields = buildVabHeaders();
+  const box = $('vab-add-fields');
+  if(box) box.innerHTML = fields.map(f =>
+    `<div class="modal-field"><label>${esc(f)}</label><input class="modal-input" data-field="${esc(f)}" type="text" value="${esc(row[f] ?? '')}" placeholder="${esc(f)}" /></div>`
+  ).join('');
+  const m = $('vab-add-modal');
+  if(m) m.style.display = 'flex';
+  const first = box && box.querySelector('input');
+  if(first){ first.focus(); first.select(); }
+}
 function closeAddVabModal(){
+  setVabModalMode(null); // 复位为新增模式，避免下次打开残留编辑态
   const m = $('vab-add-modal');
   if(m) m.style.display = 'none';
 }
-// 保存弹窗新增的会员（按字段构建整行对象，去重、持久化、联动统计）
+// 保存弹窗新增的会员（按字段构建整行对象，去重、持久化、联动统计）；编辑模式转 saveEditVabModal
 function saveAddVabModal(){
+  if(vabEditIndex !== null){ saveEditVabModal(); return; }
   const box = $('vab-add-fields');
   if(!box) return;
   const row = {};
@@ -886,6 +916,33 @@ function saveAddVabModal(){
   refreshVabStatus(); // 刷新状态条与清单（含新行）
   closeAddVabModal();
   showToast('已新增会员：'+row['会员号'], 'ok');
+}
+// 保存弹窗编辑：仅更新当前行（清空字段=删除该字段；会员号查重排除自身；停留当前分页）
+function saveEditVabModal(){
+  const box = $('vab-add-fields');
+  if(!box) return;
+  const ri = vabEditIndex;
+  const row = state.vabRows && state.vabRows[ri];
+  if(!row){ closeAddVabModal(); return; }
+  let newNo = '';
+  const vals = [];
+  box.querySelectorAll('input').forEach(inp => {
+    const f = inp.dataset.field;
+    const v = (inp.value || '').trim();
+    vals.push([f, v]);
+    if(f === '会员号') newNo = v;
+  });
+  if(!newNo){ showToast('会员号不能为空', 'warn'); return; }
+  const dup = state.vabRows.some((r, idx) => idx !== ri && String(r['会员号'] || '').toLowerCase() === newNo.toLowerCase());
+  if(dup){ showToast('会员号已存在：' + newNo, 'warn'); return; }
+  // 校验通过后再写回（失败时不留脏值）
+  vals.forEach(([f, v]) => { if(v === '') delete row[f]; else row[f] = v; });
+  setVabRows(state.vabRows); // 重建 vabList/vabSet（含新会员号）
+  persistVab();
+  recompute();
+  refreshVabStatus(); // 停留当前分页刷新清单
+  closeAddVabModal();
+  showToast('已保存会员修改：' + newNo, 'ok');
 }
 // 页面内删除单个会员（同步集合与持久化、刷新统计）
 function deleteVabMember(m){

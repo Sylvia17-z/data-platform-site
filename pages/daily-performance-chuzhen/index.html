@@ -173,6 +173,11 @@
   .vab-table-wrap td.vab-cell{cursor:cell;transition:background .12s;}
   .vab-table-wrap td.vab-cell:hover{background:#eaf0fb;}
   .vab-table-wrap td.vab-cell input{font-family:inherit;}
+  /* 操作列：编辑（文字按钮）/删除（图标按钮）成对 */
+  .vab-table-wrap td button.vab-edit{height:20px;padding:0 8px;font-size:11.5px;line-height:1;font-family:inherit;font-weight:600;border:1px solid var(--c-accent);border-radius:4px;background:#eef3fd;color:var(--c-accent);cursor:pointer;margin-right:5px;}
+  .vab-table-wrap td button.vab-edit:hover{background:var(--c-accent);color:#fff;}
+  .vab-table-wrap td button.vab-del{width:22px;height:20px;padding:0;font-size:12px;line-height:1;font-family:inherit;border:1px solid var(--c-border);border-radius:4px;background:#fff;cursor:pointer;color:var(--c-text);}
+  .vab-table-wrap td button.vab-del:hover{border-color:var(--c-error);color:var(--c-error);}
   .vab-list-head{font-size:13px;font-weight:600;color:var(--c-head);margin-bottom:8px;}
   .vab-chips{display:flex;flex-wrap:wrap;gap:6px;max-height:220px;overflow:auto;padding:2px 0;}
   .vab-chip{display:inline-block;background:#eef2fa;color:var(--c-text);border:1px solid var(--c-border);border-radius:6px;padding:3px 8px;font-size:12px;font-family:inherit;line-height:1.4;}
@@ -486,7 +491,7 @@
         <button class="btn btn-danger" id="clear-hist" title="清除已导入的近一年消费明细并停用新客判定规则（不影响订单 / VAB 会员 / 月目标）">🗑 清除明细</button>
       </span>
     </div>
-    <!-- VAB 会员清单（默认展开呈现导入会员，单元格可双击编辑、行尾可删除） -->
+    <!-- VAB 会员清单（默认展开呈现导入会员，单元格可双击编辑、行内可编辑/删除） -->
     <details class="vab-list-details" style="margin:0 0 10px;" data-page-node-id="vabListBox">
       <summary id="vab-list-summary" class="vab-list-summary">📋 VAB 会员清单</summary>
       <div id="vab-list" class="vab-list-wrap"></div>
