@@ -3,8 +3,10 @@
  * - 同源共享 SDK 会话（localStorage），一次登录全站/全部 iframe 生效
  * - 未登录：整页跳转至 /pages/login/index.html?next=<原页面>（独立登录界面）
  *   登录成功后登录页跳回 next 目标页
- * - 已登录：右下角账号徽章 → 点「账号」打开账号信息面板
+ * - 已登录：账号徽章 → 点「账号」打开账号信息面板
  *   （查看当前登录账号：邮箱/用户ID；修改密码；退出登录）
+ *   壳层（提供 #sa-badge-slot 挂载点）内联到顶栏右上角、面板从顶栏下拉；
+ *   独立打开的子页（无挂载点）徽章悬浮右下角。
  * - 解锁后广播 window 事件 site-auth-ready + localStorage 'site-auth-ping'
  *   （其他 iframe / 标签页监听该键自动解锁；退出时同样广播→各页跳登录页）
  * ================================================================ */
@@ -81,7 +83,11 @@
     + '#sa-badge b{color:#123c73;font-weight:600;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}'
     + '#sa-badge button{border:none;background:none;color:#123c73;cursor:pointer;font-size:12px;font-family:inherit;padding:2px;}'
     + '#sa-badge button:hover{text-decoration:underline;}'
+    /* 顶栏内联模式（宿主页提供 #sa-badge-slot 挂载点时）：徽章融入顶栏右上角，账号面板改从顶栏下拉 */
+    + '#sa-badge.sa-inline{position:static;box-shadow:none;border:none;background:transparent;padding:0;}'
+    + '#sa-badge.sa-inline b{max-width:160px;}'
     + '#sa-panel{position:fixed;right:12px;bottom:52px;z-index:2147483000;background:#fff;border:1px solid #d5dde7;border-radius:14px;box-shadow:0 14px 44px rgba(15,35,64,.3);padding:16px 18px;width:min(320px,92vw);font-family:inherit;color:#1c2b3a;display:none;}'
+    + '#sa-panel.sa-docked{top:56px;right:12px;bottom:auto;}'
     + '#sa-panel h4{margin:0 0 10px;font-size:14px;color:#123c73;}'
     + '#sa-panel .sa-info{background:#f4f7fb;border-radius:8px;padding:10px 12px;font-size:12px;line-height:1.9;color:#1c2b3a;}'
     + '#sa-panel .sa-info b{color:#123c73;word-break:break-all;}'
@@ -125,7 +131,16 @@
     if(_uiAppended || !document.body) return;
     _uiAppended = true;
     if(!badge || !panel) return;                            // 嵌入态：不注入 UI，避免与壳层徽章重叠
-    document.body.appendChild(badge);
+    /* 顶栏内联挂载（2026-10-20）：壳层 topbar 提供 #sa-badge-slot 时，徽章融入右上角而非悬浮右下；
+       账号面板同步改为从顶栏下拉（sa-docked）。独立打开的子页无挂载点 → 保持原右下角悬浮。 */
+    var slot = document.getElementById('sa-badge-slot');
+    if(slot){
+      badge.classList.add('sa-inline');
+      panel.classList.add('sa-docked');
+      slot.appendChild(badge);
+    } else {
+      document.body.appendChild(badge);
+    }
     document.body.appendChild(panel);
     if(user){ badge.style.display = 'flex'; fillInfo(); }   // 解锁早于 DOM 就绪时补显徽章
   }

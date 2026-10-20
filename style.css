@@ -80,6 +80,9 @@ body {
 }
 .crumb { font-size: 15px; font-weight: 600; color: var(--navy); }
 .clock { color: var(--muted); font-size: 12px; }
+/* 顶栏右侧动作区：时钟 + 账号徽章（auth-gate 内联注入 #sa-badge） */
+.top-actions { display: flex; align-items: center; gap: 14px; min-width: 0; }
+#sa-badge-slot { display: flex; align-items: center; min-width: 0; }
 .content { flex: 1; overflow: hidden; padding: 0; position: relative; min-height: 0; }
 .tab-page { position: absolute; inset: 0; display: none; }
 .tab-page.active { display: block; }
@@ -171,7 +174,10 @@ table.tbl td.right { text-align: right; }
   .overlay.show { display: block; position: fixed; inset: 0; background: rgba(15,23,42,.42); z-index: 55; }
   .main { width: 100%; }
   .topbar { padding: 0 12px; }
-  .top-actions .clock { font-size: 11px; }
+  .top-actions { gap: 10px; }
+  .top-actions .clock { display: none; }   /* 手机端顶栏空间有限：隐藏时钟，仅留账号徽章 */
+  /* 提高特异性覆盖 auth-gate 注入的 #sa-badge b{max-width:180px}（后注入者胜） */
+  #sa-badge-slot #sa-badge b { max-width: 104px; font-size: 11.5px; }
   .content { padding: 0; }
   .sidebar-toggle { display: none; }   /* 手机端用抽屉，隐藏收起按钮 */
 }

@@ -23,25 +23,30 @@
   .hero .hi small{display:block;font-size:12px;font-weight:400;color:var(--muted);margin-top:2px;}
   .hero .date{font-size:12.5px;color:var(--muted);}
 
-  /* 三栏网格：主区两列 + 右侧栏 */
-  .grid3{display:grid;grid-template-columns:1fr 1fr 300px;gap:12px;align-items:start;}
+  /* 三栏网格：主区两列 + 右侧栏（stretch：左右两栏底部对齐，公整） */
+  .grid3{display:grid;grid-template-columns:1fr 1fr 300px;gap:12px;align-items:stretch;}
   .col-main{display:grid;grid-template-columns:1fr 1fr;gap:12px;min-width:0;}
   .col-side{display:flex;flex-direction:column;gap:12px;min-width:0;}
+  .col-side .card:last-child{flex:1;}   /* 末卡（平台动态）填满剩余高度，与左列底部对齐 */
 
   .card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);
-    padding:12px 14px;box-shadow:0 1px 3px rgba(15,23,42,.05);}
-  .card-h{display:flex;align-items:center;justify-content:space-between;margin-bottom:9px;}
-  .card-h b{font-size:14.5px;color:var(--navy);}
-  .card-h a,.card-h .more{font-size:12px;color:var(--accent);cursor:pointer;text-decoration:none;}
+    padding:12px 14px;box-shadow:0 1px 3px rgba(15,23,42,.05);display:flex;flex-direction:column;min-width:0;}
+  .card-h{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:9px;flex-shrink:0;}
+  .card-h b{font-size:14.5px;color:var(--navy);white-space:nowrap;}
+  .card-h a,.card-h .more{font-size:12px;color:var(--accent);cursor:pointer;text-decoration:none;white-space:nowrap;}
+
+  /* 指标行式列表（标签左 · 数值右，flex:1 均匀分布 → 两张 KPI 卡等高且内容公整） */
+  .range-line{font-size:11.5px;color:var(--muted);margin:-4px 0 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex-shrink:0;}
+  .sub-grid{display:flex;flex-direction:column;gap:6px;margin-top:6px;flex:1;justify-content:space-evenly;}
+  .sub-grid .s{display:flex;align-items:baseline;justify-content:space-between;gap:8px;
+    font-size:12px;color:var(--muted);white-space:nowrap;}
+  .sub-grid .s b{font-size:15px;color:var(--text);font-variant-numeric:tabular-nums;}
 
   /* KPI 大数字 */
   .kpi-big{display:flex;align-items:baseline;gap:10px;margin:2px 0 0;}
   .kpi-big .num{font-size:34px;font-weight:800;color:var(--navy);font-variant-numeric:tabular-nums;}
   .kpi-big .delta{font-size:12px;font-weight:600;}
   .kpi-big .delta.up{color:var(--success);} .kpi-big .delta.down{color:var(--danger);}
-  .sub-row{display:flex;gap:14px;flex-wrap:wrap;margin-top:6px;}
-  .sub-row .s{font-size:12px;color:var(--muted);}
-  .sub-row .s b{display:block;font-size:16px;color:var(--text);margin-top:2px;font-variant-numeric:tabular-nums;}
 
   /* 环形占比（conic-gradient，无依赖） */
   .donut-row{display:flex;align-items:center;gap:14px;margin-top:9px;}
@@ -69,13 +74,6 @@
   .bar-row .track{flex:1;height:14px;background:#EEF2F8;border-radius:999px;overflow:hidden;min-width:0;}
   .bar-row .fill{height:100%;border-radius:999px;background:linear-gradient(90deg,var(--navy-3),var(--navy));min-width:2px;transition:width .4s;}
   .bar-row .val{width:90px;flex-shrink:0;font-variant-numeric:tabular-nums;color:var(--text);}
-
-  /* 右侧栏：用户卡 */
-  .user{display:flex;align-items:center;gap:12px;}
-  .avatar{width:46px;height:46px;border-radius:50%;background:linear-gradient(135deg,var(--navy),var(--navy-3));
-    color:#fff;display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:700;flex-shrink:0;}
-  .user .nm{font-size:15px;font-weight:700;color:var(--navy);}
-  .user .rl{font-size:12px;color:var(--muted);margin-top:2px;}
 
   /* 快捷入口列表 */
   .links{display:flex;flex-direction:column;gap:6px;}
@@ -106,9 +104,10 @@
     <!-- 左主区 -->
     <div class="col-main">
       <div class="card">
-        <div class="card-h"><b>本周数据</b><span class="more" id="wk-range"></span></div>
+        <div class="card-h"><b>本周数据</b></div>
+        <div class="range-line" id="wk-range"></div>
         <div class="kpi-big"><span class="num" id="wk-count">--</span><span class="delta" id="wk-delta"></span></div>
-        <div class="sub-row">
+        <div class="sub-grid">
           <div class="s">本周现款合计<b id="wk-cash">--</b></div>
           <div class="s">本周订单笔数<b id="wk-cnt2">--</b></div>
           <div class="s">VAB 会员<b id="vab-n">--</b></div>
@@ -121,12 +120,10 @@
 
       <div class="card">
         <div class="card-h"><b>本月速览</b><span class="more" id="mon-range"></span></div>
-        <div class="sub-row" style="margin-top:2px;">
+        <div class="sub-grid">
           <div class="s">本月现款合计<b id="mon-cash">--</b></div>
           <div class="s">本月订单笔数<b id="mon-cnt">--</b></div>
           <div class="s">今日笔数<b id="td-cnt">--</b></div>
-        </div>
-        <div class="sub-row">
           <div class="s">本月日均笔数<b id="mon-avg">--</b></div>
           <div class="s">渠道分类数<b id="mon-ch">--</b></div>
           <div class="s">数据更新<b id="data-ts">--</b></div>
@@ -144,14 +141,8 @@
       </div>
     </div>
 
-    <!-- 右侧栏 -->
+    <!-- 右侧栏（账号显示已迁移至壳层顶栏右上角，此处不再放用户卡） -->
     <div class="col-side">
-      <div class="card">
-        <div class="user">
-          <div class="avatar" id="avatar">?</div>
-          <div><div class="nm" id="uname">--</div><div class="rl" id="urole">--</div></div>
-        </div>
-      </div>
       <div class="card">
         <div class="card-h"><b>快捷入口</b></div>
         <div class="links" id="links"></div>
@@ -169,7 +160,7 @@
   </div>
 </div>
 
-<script src="/shared/auth-gate.js?v=20261016a"></script>
+<script src="/shared/auth-gate.js?v=20261020b"></script>
 <script>
 (function(){
   'use strict';
@@ -243,7 +234,6 @@
     $('mon-avg').textContent = mon.length ? (mon.length / now.getDate()).toFixed(1) : '0';
     $('wk-range').textContent = dstr(wkStart) + ' ~ ' + dstr(now);
     $('mon-range').textContent = dstr(monStart).slice(0,7);
-
     // 较上周（笔数）
     var dEl = $('wk-delta');
     if(lastWk.length > 0){
@@ -258,6 +248,13 @@
       var n = vab && vab.list ? vab.list.length : (vab && vab.rows ? vab.rows.length : 0);
       $('vab-n').textContent = n || 0;
     }catch(e){ $('vab-n').textContent = 0; }
+
+    // 本月渠道分类数（修复：id=mon-ch 此前从未被填充，一直显示 --）
+    try{
+      var monCh = {};
+      mon.forEach(function(r){ var c = r['客户来源渠道分类'] || '（空白）'; monCh[c] = 1; });
+      $('mon-ch').textContent = Object.keys(monCh).length;
+    }catch(e){ $('mon-ch').textContent = 0; }
 
     // 渠道分类占比（本周，top5）
     var byCls = {};
@@ -303,34 +300,6 @@
     }catch(e){ $('data-ts').textContent='--'; }
   }
 
-  /* ---------- 账户 ---------- */
-  function renderUser(){
-    var u = null, role = '';
-    try{
-      var adm = JSON.parse(localStorage.getItem('site-admin-session') || 'null');
-      if(adm && adm.user && (!adm.expiresAt || adm.expiresAt > Date.now())){ u = adm.user; role = '本地管理员'; }
-    }catch(e){}
-    if(!u){
-      try{
-        var keys = Object.keys(localStorage).filter(function(k){ return k.indexOf('workbuddy-cloud.session.') === 0; });
-        for(var i=0;i<keys.length;i++){
-          var s = JSON.parse(localStorage.getItem(keys[i]) || 'null');
-          if(s && s.user && (!s.expiresAt || s.expiresAt > Date.now())){ u = s.user; role = '已登录'; break; }
-        }
-      }catch(e){}
-    }
-    if(u){
-      var nm = u.name || u.email || u.id || '用户';
-      $('uname').textContent = nm;
-      $('urole').textContent = role || (u.email && u.email !== nm ? u.email : '已登录');
-      $('avatar').textContent = nm.slice(0,1).toUpperCase();
-    } else {
-      $('uname').textContent = '未登录';
-      $('urole').textContent = '请先登录平台';
-      $('avatar').textContent = '?';
-    }
-  }
-
   /* ---------- 快捷应用 / 入口（跳壳层 hash） ---------- */
   var APPS = [
     {nm:'日业绩报表', ico:'📈', bg:'linear-gradient(135deg,#002060,#1e3a8a)', hash:'#dp-std'},
@@ -366,7 +335,6 @@
   var h = now.getHours();
   $('greet').firstChild.textContent = (h<6?'凌晨好':h<9?'早上好':h<12?'上午好':h<14?'中午好':h<18?'下午好':'晚上好');
 
-  renderUser();
   renderApps();
   loadOrders(render);
 })();
