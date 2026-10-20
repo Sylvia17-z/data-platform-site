@@ -111,7 +111,7 @@
   panel.innerHTML = ''
     + '<h4>👤 当前登录账号</h4>'
     + '<div class="sa-info">'
-    + '邮箱：<b id="sa-info-email">—</b><br>'
+    + '账号：<b id="sa-info-email">—</b><br>'
     + '用户ID：<b id="sa-info-uid">—</b>'
     + '</div>'
     + '<div class="sa-chg-tt">修改密码</div>'
@@ -149,22 +149,27 @@
 
   function $(id){ return document.getElementById(id); }
   function msg(t, isErr){ var el = $('sa-msg'); if(el){ el.textContent = t || ''; el.style.color = isErr ? '#c0392b' : '#1a7a3a'; } }
-  /* 从会话里尽力取出一个可读账号标识：邮箱 > 用户名 > 手机号 > 昵称 > 用户ID。
-     （服务端用户模型以 username 承载邮箱；部分登录方式返回的 user 不带 email 字段，
-       旧实现此时会显示「—」，徽章看起来像坏了。） */
-  function pickName(){
+  /* 从会话里取出一个真实账号标识（邮箱/用户名/手机号/昵称等），不含用户ID 兜底：
+     用于面板「账号」行与顶栏徽章——无真实标识时返回 ''，调用方显示「—」或「账号」，
+     避免把纯数字 user.id 误当成邮箱展示（旧 pickName 兜底返回 uid 的 bug 已修）。 */
+  function pickIdentity(){
     var u = user || {}, s = session || {}, meta = u.user_metadata || {};
     var cands = [u.email, u.username, u.phone, u.name, u.nickname, u.displayName,
-                 meta.email, meta.name, meta.username, s.email, s.username, u.id];
+                 meta.email, meta.name, meta.username, s.email, s.username];
     for(var i = 0; i < cands.length; i++){ if(cands[i]) return String(cands[i]); }
-    return '—';
+    return '';
+  }
+  /* 用户ID 过长时中段省略，避免整页/面板被超长数字串撑开 */
+  function truncId(id){
+    id = String(id == null ? '' : id);
+    return id.length > 12 ? (id.slice(0, 6) + '…' + id.slice(-4)) : id;
   }
   function fillInfo(){
     var e = $('sa-info-email'), u = $('sa-info-uid'), n = $('sa-badge-name');
-    var name = pickName();
-    if(e) e.textContent = name;
-    if(u) u.textContent = (user && user.id) || '—';
-    if(n) n.textContent = name;
+    var idn = pickIdentity();
+    if(e) e.textContent = idn || '—';                 // 真实账号标识；无则「—」（不再回退到 user.id）
+    if(u) u.textContent = truncId(user && user.id);
+    if(n) n.textContent = idn || '账号';               // 顶栏徽章：无邮箱时显示「账号」二字，不显示长数字
   }
 
   var _unlocked = false;
