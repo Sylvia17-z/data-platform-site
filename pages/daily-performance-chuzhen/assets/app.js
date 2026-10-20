@@ -287,10 +287,14 @@ window.addEventListener('message', (e) => {
     if(applyOrdersRaw(m.payload)) runRestoredRecompute();
     return;
   }
-  // 近一年消费明细：壳窗口推送 / 应答恢复（恢复后初诊键集合缓存失效，待下次重算生效）
+  // 近一年消费明细：壳窗口推送 / 应答恢复（恢复后缓存失效；订单已在场时立即重算，
+  // 2026-10-20 修复「待下次重算生效」实际等不到下次重算 → 刷新后新客规则失效）
   if(m.key === HIST_STORAGE_KEY){
     if(state.histOrders.length > 0) return;
-    if(applyHistRaw(m.payload)) invalidateMktKeyCaches();
+    if(applyHistRaw(m.payload)){
+      invalidateMktKeyCaches();
+      if(state.orders.length > 0 && typeof runRestoredRecompute === 'function') runRestoredRecompute({ silent:true });
+    }
     return;
   }
 });
@@ -404,13 +408,16 @@ function restoreHist(){
       if(applyHistRaw(chosenRaw)){
         invalidateMktKeyCaches();
         if(typeof refreshHistMeta === 'function') refreshHistMeta();
+        // 2026-10-20 修复「刷新后新客规则失效」：hist 为异步恢复，订单先恢复并完成首次重算时
+        // hist 尚未就位 → 报表按「规则B停用」出数；hist 恢复后必须再重算一次，否则报表停留旧口径。
+        if(state.orders.length > 0 && typeof runRestoredRecompute === 'function') runRestoredRecompute({ silent:true });
         // 自愈：数据此前只在 IDB（localStorage 写失败）→ 恢复后推回云端
         if(Array.isArray(state.orders) && state.orders.length > 0){ bumpSnapTs(); saveOrdersToCloud(true); }
       }
     }
   }).catch(()=>{
     // IDB 不可用 → 退回 localStorage
-    if(lsParsed && lsParsed.orders.length){ if(applyHistRaw(raw)){ invalidateMktKeyCaches(); if(typeof refreshHistMeta==='function') refreshHistMeta(); queueHistGz(); } }
+    if(lsParsed && lsParsed.orders.length){ if(applyHistRaw(raw)){ invalidateMktKeyCaches(); if(typeof refreshHistMeta==='function') refreshHistMeta(); if(state.orders.length > 0 && typeof runRestoredRecompute === 'function') runRestoredRecompute({ silent:true }); queueHistGz(); } }
   });
   // 桥接父窗口：向壳索取持久化数据（与壳的主动推送互补）
   try{ if(window.parent && window.parent !== window) window.parent.postMessage({ type:'dp:request', key:HIST_STORAGE_KEY }, '*'); }catch(e){}
@@ -590,6 +597,7 @@ function applyCloudObj(obj){
       if(applyHistRaw(JSON.stringify({ histOrders: h.histOrders, ts: h.histTs || Number(obj.ts) || Date.now() }))){
         invalidateMktKeyCaches();
         if(typeof refreshHistMeta === 'function') refreshHistMeta();
+        if(state.orders.length > 0 && typeof runRestoredRecompute === 'function') runRestoredRecompute({ silent:true }); // 与 gz 分支对齐：恢复后重算
         touched = true;
       }
     }
@@ -3357,7 +3365,7 @@ function refreshHistMeta(){
   if(state.histOrders.length){
     // 云同步状态提示：历史明细随订单整包上云；2026-10-20 起仅明细（无订单）也可单独上云，
     // 故以 histClouded 标志反映真实同步状态，而非「是否导入了订单」。
-    meta.textContent = `✔ 历史明细（${state.histOrders.length} 行）· 新客规则已启用 · ` + (histClouded ? '已同步云端' : '订单未导入，暂仅保存在本机');
+    meta.textContent = `✔ 历史明细（${state.histOrders.length} 行）· 新客规则已启用 · ` + (histClouded ? '已同步云端' : '暂仅保存在本机');
   }else{
     meta.textContent = '未导入（新客规则停用）';
   }
