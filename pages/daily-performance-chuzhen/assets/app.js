@@ -50,7 +50,7 @@ function isGaoXinCashier(r){
 }
 // ② 月目标面板分组（美化：按业务板块归类，便于核对）
 const TARGET_GROUPS = [
-  {title:'营销部板块', keys:['品牌组-其他','活动组-活动支持','电商组及短视频组','品牌组-自然到店','公司支持']},
+  {title:'营销部板块', keys:['品牌组-其他','活动组-活动支持','电商组及短视频组','品牌组-自然到店','公司支持'], subtotal:true},
   {title:'商务部 / 其他', keys:['商务部','其他']},
   {title:'汇总校验', keys:['合计','基础业绩','新增业绩','管家部']},
 ];
@@ -1680,7 +1680,12 @@ function renderTargets(){
         <input class="input target-input" data-key="${k}" type="text" inputmode="decimal" value="${state.targets[k] ?? DEFAULT_TARGETS[k]}" />
         <span class="unit">万元</span>
       </div>`).join('');
-    return `<div class="target-group"><div class="target-group__title">${g.title}</div><div class="target-group__grid">${cells}</div></div>`;
+    let subtotalHtml = '';
+    if(g.subtotal){
+      const sum = items.reduce((s,k)=>s+(Number(state.targets[k])||0),0);
+      subtotalHtml = `<div class="target-subtotal" data-keys='${JSON.stringify(items)}'><span class="t-label">板块小计</span><span class="t-val">${sum}</span><span class="t-unit">万元</span></div>`;
+    }
+    return `<div class="target-group"><div class="target-group__title">${g.title}</div><div class="target-group__grid">${cells}</div>${subtotalHtml}</div>`;
   }).filter(Boolean).join('');
   el.innerHTML = html;
   el.querySelectorAll('.target-input').forEach(inp=>{
@@ -1688,6 +1693,11 @@ function renderTargets(){
       state.targets[e.target.dataset.key] = Number(e.target.value) || 0;
       persistTargets();
       renderReport();
+      // 实时刷新各板块小计（只读格随输入联动）
+      document.querySelectorAll('.target-subtotal').forEach(st=>{
+        const keys = JSON.parse(st.dataset.keys);
+        st.querySelector('.t-val').textContent = keys.reduce((s,k)=>s+(Number(state.targets[k])||0),0);
+      });
     });
   });
 }

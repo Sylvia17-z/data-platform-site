@@ -78,10 +78,11 @@
     background:linear-gradient(180deg,var(--c-head),var(--c-accent));
     flex-shrink:0;
   }
-  /* 可折叠面板的箭头与标题分居两侧 */
-  #targets-toggle{justify-content:space-between;cursor:pointer;width:100%;}
+  /* 可折叠面板的箭头与标题分居两侧（方案A：标题紧随装饰条左对齐，箭头推至最右） */
+  #targets-toggle{cursor:pointer;width:100%;}
   #targets-arrow{
     font-size:12px;color:var(--c-muted);font-weight:600;
+    margin-left:auto;
     padding:3px 10px;border:1px solid var(--c-border);border-radius:999px;background:#fff;
   }
   /* 面板内主体内容统一内边距（标题与 details 摘要除外） */
@@ -103,6 +104,23 @@
   }
   /* ③ ④ 的「标题+操作」行不做左内边距叠加 */
   .panel > .row:has(h2){padding-bottom:8px;}
+
+  /* ===== 方案A 紧凑化（2026-10-20，仅本页覆盖，不改共享 filterbar.css）=====
+     导入区各行：压缩上下内边距（原 16/18 → 7/7），行间虚线分隔，最后一行无分隔 */
+  .panel > .dataseg{
+    padding:7px 18px 7px 22px;margin:0;
+    border-bottom:1px dashed var(--c-border-soft);
+  }
+  .panel > .dataseg:last-of-type{border-bottom:none;padding-bottom:10px;}
+  .dataseg .btn{padding:5px 12px;font-size:12.5px;}
+  .dataseg .file-meta{font-size:11.5px;}
+  .dataseg .seg-status{display:flex;align-items:center;gap:10px;flex-wrap:wrap;min-width:0;}
+  @media (min-width:721px){
+    .dataseg .seg-status{margin-left:auto;justify-content:flex-end;text-align:right;}
+  }
+  @media (max-width:720px){
+    .panel > .dataseg .seg-status{grid-column:1/-1;}
+  }
 
   /* ============ 行/控件 ============ */
   .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
@@ -172,12 +190,12 @@
     padding-bottom:6px;border-bottom:1px dashed var(--c-border);
   }
   .target-group__title::before{content:"";width:6px;height:14px;border-radius:3px;background:linear-gradient(180deg,var(--c-head),var(--c-accent));}
-  .target-group__grid{display:grid;grid-template-columns:1fr 1fr;gap:8px 18px;}
+  .target-group__grid{display:grid;grid-template-columns:1fr 1fr;gap:6px 14px;}
   @media (max-width:720px){.target-group__grid{grid-template-columns:1fr;}}
   .target-row{
     display:flex;align-items:center;gap:10px;
     background:#f7f9fd;border:1px solid var(--c-border-soft);
-    border-radius:var(--radius-sm);padding:7px 12px;
+    border-radius:var(--radius-sm);padding:6px 12px;
     transition:border-color .15s,box-shadow .15s,background .15s;
   }
   .target-row:hover{border-color:var(--c-accent);box-shadow:0 2px 8px rgba(54,88,211,.10);background:#fff;}
@@ -189,6 +207,11 @@
   }
   .target-row .target-input:focus{box-shadow:0 0 0 3px rgba(0,32,96,.12);}
   .target-row .unit{font-size:12px;color:var(--c-muted);font-weight:500;min-width:28px;flex-shrink:0;}
+  /* 板块小计（只读，实时汇总本板块各项目标；用于填补两列网格右侧空洞、强化对称） */
+  .target-subtotal{display:flex;align-items:center;gap:8px;margin-top:7px;padding:6px 12px;border-radius:var(--radius-sm);background:rgba(0,32,96,.05);border:1px solid var(--c-border-soft);}
+  .target-subtotal .t-label{font-size:12px;font-weight:700;color:var(--c-head);}
+  .target-subtotal .t-val{margin-left:auto;font-size:14px;font-weight:700;color:var(--c-head);font-variant-numeric:tabular-nums;}
+  .target-subtotal .t-unit{font-size:12px;font-weight:500;color:var(--c-muted);}
 
   /* ============ 主报表舞台 ============ */
   .report-stage{padding:16px 18px 18px 22px;overflow-x:auto;max-width:100%;}
@@ -434,28 +457,34 @@
       <span class="seg-label" data-page-node-id="rcMNWKRBWP74I43ofv9dYm">订单明细</span>
       <input type="file" id="file-orders" accept=".xlsx,.xls" hidden data-page-node-id="qPfudSznaBi8SGbJMA7Tvy" />
       <label for="file-orders" class="btn btn-primary" data-page-node-id="BQzpkj18KygQmHmAUfLIfE">📁 上传订单表</label>
-      <span id="orders-meta" class="file-meta" data-page-node-id="WXC1BHVp6u6ppPQsqfxqkH">未导入</span>
-      <span id="save-status" class="file-meta" style="color:#1f8a4a;"></span>
-      <span id="cloud-status" class="file-meta"></span>
-      <label style="font-size:12px;color:var(--c-muted);" data-page-node-id="3bjnFxlhUdGSfQY30HRnDq">
-        <input type="checkbox" id="merge-mode" checked data-page-node-id="HM0RpqKy2mrDSwFwMCFHUO" /> 合并到历史数据（重叠日期覆盖，其它日期保留）
-      </label>
+      <span class="seg-status">
+        <span id="orders-meta" class="file-meta" data-page-node-id="WXC1BHVp6u6ppPQsqfxqkH">未导入</span>
+        <span id="save-status" class="file-meta" style="color:#1f8a4a;"></span>
+        <span id="cloud-status" class="file-meta"></span>
+        <label class="merge-opt" style="font-size:12px;color:var(--c-muted);" data-page-node-id="3bjnFxlhUdGSfQY30HRnDq">
+          <input type="checkbox" id="merge-mode" checked data-page-node-id="HM0RpqKy2mrDSwFwMCFHUO" /> 合并到历史数据（重叠日期覆盖，其它日期保留）
+        </label>
+      </span>
     </div>
     <div class="dataseg" data-page-node-id="GuBPinJbNcTK30VWY2G5DZ">
       <span class="seg-label" data-page-node-id="nywmf7ZKstPW3vFTFE5ORl">VAB 名单</span>
       <input type="file" id="file-vab" accept=".xlsx,.xls" hidden data-page-node-id="DXtBHsfyxdEcg3rFrb5nwS" />
       <label for="file-vab" class="btn" data-page-node-id="auLOVNlApcfoAfw3SxzTvF">👥 上传VAB会员表</label>
-      <span id="vab-meta" class="file-meta" data-page-node-id="xstmJe27hHeREDGXMIA0Ql">未导入</span>
-      <button class="btn" id="edit-vab" title="展开/收起 VAB 会员清单（清单内双击单元格编辑、行尾 × 删除会员）" data-page-node-id="2vcS9kp7k74vSZfjuKUP8k">📋 编辑会员</button>
-      <button class="btn btn-danger" id="clear-vab" title="清空本机保存的VAB清单（重置旧版本残留/示例数据），清空后重新上传真实会员表" data-page-node-id="clearVabBtn">🗑 清空VAB</button>
+      <span class="seg-status">
+        <span id="vab-meta" class="file-meta" data-page-node-id="xstmJe27hHeREDGXMIA0Ql">未导入</span>
+        <button class="btn" id="edit-vab" title="展开/收起 VAB 会员清单（清单内双击单元格编辑、行尾 × 删除会员）" data-page-node-id="2vcS9kp7k74vSZfjuKUP8k">📋 编辑会员</button>
+        <button class="btn btn-danger" id="clear-vab" title="清空本机保存的VAB清单（重置旧版本残留/示例数据），清空后重新上传真实会员表" data-page-node-id="clearVabBtn">🗑 清空VAB</button>
+      </span>
     </div>
     <!-- 近一年消费明细（2026-10-16 新增）：「营销部顾客一年内无消费记录 → 视为初诊客户」规则数据源 -->
     <div class="dataseg">
       <span class="seg-label">历史明细</span>
       <input type="file" id="file-history" accept=".xlsx,.xls" hidden />
       <label for="file-history" class="btn" title="导入最近一年的消费明细（订单项目收退款表格式）——用于判定「营销部顾客一年内无消费记录 → 视为初诊客户」；该数据不计入业绩金额，仅本地保存">📅 上传近一年消费明细</label>
-      <span id="hist-meta" class="file-meta">未导入（新客规则停用）</span>
-      <button class="btn btn-danger" id="clear-hist" title="清除已导入的近一年消费明细并停用新客判定规则（不影响订单 / VAB 会员 / 月目标）">🗑 清除明细</button>
+      <span class="seg-status">
+        <span id="hist-meta" class="file-meta">未导入（新客规则停用）</span>
+        <button class="btn btn-danger" id="clear-hist" title="清除已导入的近一年消费明细并停用新客判定规则（不影响订单 / VAB 会员 / 月目标）">🗑 清除明细</button>
+      </span>
     </div>
     <!-- VAB 会员清单（默认展开呈现导入会员，单元格可双击编辑、行尾可删除） -->
     <details class="vab-list-details" style="margin:0 0 10px;" data-page-node-id="vabListBox">
@@ -476,20 +505,21 @@
     <div class="dataseg" data-page-node-id="qlWcD1nsI8D3ZcQmFA9B4f">
       <span class="seg-label" data-page-node-id="SQGaFDln4aDjb4EwYfvV9E">截止日期</span>
       <input type="date" id="cutoff-date" class="input" data-page-node-id="3ZaYGlsyPJp2mOgfqHAvFj" />
-      <span class="file-meta" data-page-node-id="HGIi1hVHYymyUOMA4NeaFz">（仅汇总 ≤ 该日期的数据）</span>
+      <span class="seg-status">
+        <span class="file-meta" data-page-node-id="HGIi1hVHYymyUOMA4NeaFz">（仅汇总 ≤ 该日期的数据）</span>
       <button class="btn" id="recompute" data-page-node-id="pOgl6nqAh86a9vsgpK848M">🔄 重新计算</button>
-      <span class="push"></span>
       <button class="btn btn-danger" id="clear-manual" title="清除所有手动调整的月累计/每日数据，恢复自动计算（用于修正手动改错导致的「月累计≠当日」）">🧹 清除手动调整</button>
       <button class="btn btn-danger" id="clear-date" title="清除某个指定日期（按收款时间所在日）的全部业绩记录，各统计表自动重算">🗓 清除指定日期</button>
       <button class="btn btn-danger" id="clear-all" title="清除本机保存的订单/月目标/手动调整/列宽，重置为空后重新导入（不影响 VAB 会员与近一年消费明细）">🗑 清除全部数据</button>
-      <a class="btn" href="../daily-performance/index.html" style="text-decoration:none;" title="切换到「每日业绩日报表」标准版页面（逻辑完全一致，数据各自独立导入）">🚀 标准版入口 →</a>
+        <a class="btn" href="../daily-performance/index.html" style="text-decoration:none;" title="切换到「每日业绩日报表」标准版页面（逻辑完全一致，数据各自独立导入）">🚀 标准版入口 →</a>
+      </span>
     </div>
     <div id="render-error" style="display:none;margin-top:10px;padding:10px 12px;background:#fde4e4;color:#b3261e;border:1px solid #b3261e;border-radius:6px;font-size:13px;" data-page-node-id="Cren2M9ptIxbdhlZu8Vs9i"></div>
   </div>
 
   <!-- 月目标维护 -->
   <div class="panel" data-page-node-id="pXf3CltNWJHY6uO6qeGxN3">
-    <h2 style="display:flex;justify-content:space-between;align-items:center;cursor:pointer;margin:0 0 12px;" id="targets-toggle" title="点击收起/展开" data-page-node-id="etinOZHukLHvezBGc120rG">
+    <h2 style="display:flex;align-items:center;cursor:pointer;margin:0 0 12px;" id="targets-toggle" title="点击收起/展开" data-page-node-id="etinOZHukLHvezBGc120rG">
       <span data-page-node-id="yaUlflTRv8u8npKybRBGgT">② 月目标（单位：万元）</span>
       <span class="btn" id="targets-arrow" style="padding:4px 10px;" data-page-node-id="0u0AvXzbyBEwz5Q95DbfAj">▲ 收起</span>
     </h2>
