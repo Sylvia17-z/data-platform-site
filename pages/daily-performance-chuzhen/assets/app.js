@@ -1431,7 +1431,8 @@ function histKeysCached(cutoff){
   if(_histKeysCache.sig !== sig || _histKeysCache.date !== d){
     const s = new Set();
     if(d && (state.histOrders||[]).length){
-      const start = fmtDate(new Date(cutoff.getTime() - 365*86400000));
+      // 近一年窗口：cutoff 往前推 366 天（含容差，避免闰年/导出口径漂移把临界消费挡在窗外）
+      const start = fmtDate(new Date(cutoff.getTime() - 366*86400000));
       state.histOrders.forEach(r => {
         if(!r.payTime) return;
         const dd = fmtDate(r.payTime);
@@ -2498,7 +2499,8 @@ function mktFirstKeysCached(){
   const sig = month + '|' + (state.orders||[]).length + '|' + (state.ordersTs||0)
     + '|H' + (state.histOrders||[]).length + '|' + (state.histTs||0);
   if(_mktKeysCache.sig !== sig){
-    const cutoff = state.cutoffDate ? new Date(state.cutoffDate) : null;
+    // cutoff 未设置时默认 today（与 renderMktFirstClients 对齐），避免 gateSet 静默为空导致⑤清单空白
+    const cutoff = state.cutoffDate ? new Date(state.cutoffDate) : new Date();
     _mktKeysCache = { sig, set: buildMktFirstKeys(state.orders, cutoff) };
   }
   return _mktKeysCache.set;
@@ -3381,8 +3383,19 @@ function mktWindow(cutoffOverride){
   if(isNaN(cutoff.getTime())) return { start:'', end:'' };
   return { start: fmtDate(new Date(cutoff.getTime() - 29*86400000)), end: fmtDate(cutoff) };
 }
+// 客户键归一化（2026-10-20 修复「历史明细会员号格式与订单不一致 → 新客规则失效」）：
+// 订单表与历史明细导出的会员号常带 V 前缀 / 前导零 / 空格（如 M26374801 vs V26374801 vs 026374801），
+// 原 mktFirstClientKey 用原始字符串精确匹配 → 永远 mismatch → 规则B 误把回头老客也判成新客。
+// 在此统一「去非数字 + 去前导零」（与 VAB buildVabSet 同思路），使历史↔订单跨格式可靠匹配；
+// 无会员号时回退到「name:姓名」。histKeysCached 与 buildMktFirstKeys 两侧均经此函数 → 对称一致。
+function normMemberKey(no){
+  const s = String(no == null ? '' : no).trim().toLowerCase();
+  const d = s.replace(/\D/g, '');
+  return d ? d.replace(/^0+/, '') : '';
+}
 function mktFirstClientKey(r){
-  return String(r.memberNo||'').trim() || ('name:'+String(r.name||'').trim());
+  const nk = normMemberKey(r.memberNo);
+  return nk ? nk : ('name:'+String(r.name||'').trim());
 }
 function isMktChuzhenOrder(r){
   return (chanHas(r,'营销部') || isRecToYingxiao(r)) && (r.visitType||'').trim() === '初诊';
