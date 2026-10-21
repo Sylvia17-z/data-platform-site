@@ -562,7 +562,7 @@
         +'<td class="num">'+fmt(g.subtotal.cash)+'</td><td class="num">'+fmtInt(g.subtotal.cap)+'</td></tr>';
     });
     html+='<tr class="total" data-drill="all" data-dlabel="全院合计"><td colspan="3" class="sum-lbl">全院合计</td>'
-      +'<td class="num">'+fmt(a.total.cash)+'</td><td class="num">'+fmtInt(a.deptCapSum)+'</td></tr>';
+      +'<td class="num">'+fmt(a.total.cash)+'</td><td class="num">'+fmtInt(a.total.cap)+'</td></tr>';
     html+='</tbody>';
     document.getElementById('tblDept').innerHTML=html;
   }
@@ -727,7 +727,7 @@
     document.getElementById('deptNote').textContent=
       '口径：表结构按【科室-医生名册】固定输出（名册内医生当月无业绩时显示 0；名册外的医生按其主科室追加，不丢数据）。'
       +'业绩＝该分诊医生当月全部订单的「收款金额-现款支付」合计（跨科室合并，行内不再拆分），展示归属按名册；容量＝该医生全部订单去重会员号数。'
-      +'部门合计＝该部门各医生行直加（业绩、容量均相加）；前台「其他」＝全院合计−健管部合计−诊疗部合计−营销部−团检；全院合计＝部门合计＋前台三行（容量＝各部门合计相加，前台不统计容量）。'
+      +'部门合计＝该部门各医生行直加（业绩、容量均相加）；前台「其他」＝全院合计−健管部合计−诊疗部合计−营销部−团检；全院合计＝部门合计＋前台三行（全院容量为全院去重会员号数，不等于各部门相加）。'
       +'「关联订单信息-订单开单科室」为口腔科的订单，业绩全部计入安志国；无分诊医生名的行按开单科室归入前台组（营销部/团检/其他，不列医生明细）。'
       +'点击任意一行可下钻查看对应的订单明细。月份以「日期」列为准，未匹配时回退「收款时间」。';
     document.getElementById('mgrNote').textContent=
@@ -764,7 +764,7 @@
       merge(aoa.length-1,0,aoa.length-1,1);
       merge(r0,0,aoa.length-1,0);
     });
-    aoa.push(['','','全院合计',a.total.cash,a.deptCapSum]);
+    aoa.push(['','','全院合计',a.total.cash,a.total.cap]);
     merge(aoa.length-1,0,aoa.length-1,2);
     return {aoa:aoa,merges:merges};
   }
