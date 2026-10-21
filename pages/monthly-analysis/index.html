@@ -271,6 +271,34 @@
     '健管部':['预防医学科','营养科','健管三组','特需科','特需治疗科'],
     '诊疗部':['全科','国际门诊','新妇科','儿科','中医科','口腔科','专家组','体检科']
   };
+  /* 科室-医生名册（2026-10-21 用户要求「不要改变表结构、没有业绩的行显示为 0」）：
+     表A 的科室分组与医生行按此名册固定输出 —— 名单内的医生即使当月无业绩也保留一行并显示 0；
+     数据里出现但名册未收录的医生，按其主科室追加到该科室末尾（不丢数据）。
+     维护提示：新增/调整医生归属时改这里即可（科室名用业务口径，如「特需治疗科」）。 */
+  var CLINIC_ROSTER={
+    '健管部':[
+      ['预防医学科',['宋媛媛','牟花妮']],
+      ['营养科',['张婳','王玺']],
+      ['健管三组',['展婷']],
+      ['特需治疗科',['徐仕鑫','李欣睿']]
+    ],
+    '诊疗部':[
+      ['全科',['宋蔚婕']],
+      ['国际门诊',['赵慧仁']],
+      ['新妇科',['李云']],
+      ['儿科',['杨敏']],
+      ['中医科',['姜朝霞','白建鹏','原杰','程庆凯']],
+      ['口腔科',['安志国']],
+      ['专家组',['权晓娟','付刚']]
+    ]
+  };
+  // 名册 → 医生归属科室（名册优先于数据推导的主科室）
+  var ROSTER_CLINIC_OF={};
+  Object.keys(CLINIC_ROSTER).forEach(function(dept){
+    CLINIC_ROSTER[dept].forEach(function(pair){ pair[1].forEach(function(n){ ROSTER_CLINIC_OF[n]=pair[0]; }); });
+  });
+  var ROSTER_DEPT_OF={};   // 名册科室 → 部门
+  Object.keys(CLINIC_ROSTER).forEach(function(dept){ ROSTER_DEPT_OF[dept]=dept; });
   var FRONT_ROWS=['营销部','团检','其他'];   // 前台组只出合计行，不列医生明细
   var ORAL_DOCTOR='安志国';                 // 订单开单科室=口腔科 → 业绩全部计入安志国
   var MANAGER_ROSTER=['白雪花','赵静','严淑杰','黄果','李方媛','王勤红','房雨倩','刘梓珺'];
@@ -402,13 +430,19 @@
       }
     });
 
-    // 医生主科室决定展示归属：主科室属科室类 → 进对应部门；否则（前台/无/未归类等）并入前台「其他」
+    // 医生展示归属：名册优先（固定组织归属，与参考图一致）→ 否则主科室 → 否则前台「其他」
+    // 归属科室（名册或主科室）决定进哪个部门；部门容量 = 该部门医生容量的并集
+    var docClinicOf={};
+    Object.keys(docs).forEach(function(name){
+      var d=docs[name];
+      docClinicOf[name] = ROSTER_CLINIC_OF[name] || d.deptPrimary || d.primary;
+    });
     var frontDocCash={}, frontDocMem={};
     FRONT_ROWS.forEach(function(f){ frontDocCash[f]=0; frontDocMem[f]=new Set(); });
     Object.keys(docs).forEach(function(name){
       var d=docs[name];
-      var primary = d.deptPrimary || d.primary;      // 科室类优先，否则退回任意科室
-      var dept=DEPT_OF_CLINIC[primary]||null;
+      var primary = docClinicOf[name];
+      var dept=DEPT_OF_CLINIC[primary]||ROSTER_DEPT_OF[primary]||null;
       if(dept){
         deptCash[dept]+=d.cash;
         d.mem.forEach(function(m){ deptMem[dept].add(m); });
@@ -429,19 +463,40 @@
         })});
         return;
       }
+      // 按名册固定结构输出：名册医生（含 0 元行）按名册顺序；名册外医生按主科室追加到对应科室末尾
       var byClinic={};
-      Object.keys(docs).forEach(function(name){
-        var d=docs[name];
-        var primary = d.deptPrimary || d.primary;
-        if(DEPT_OF_CLINIC[primary]!==dept) return;
-        (byClinic[primary]=byClinic[primary]||[]).push({name:name,cash:d.cash,cap:d.mem.size});
+      var clinicOrder=[];
+      (CLINIC_ROSTER[dept]||[]).forEach(function(pair){
+        var clinic=pair[0];
+        clinicOrder.push(clinic);
+        byClinic[clinic]=[];
+        pair[1].forEach(function(name){
+          var d=docs[name];
+          byClinic[clinic].push(d
+            ? {name:name,cash:d.cash,cap:d.mem.size,roster:true}
+            : {name:name,cash:0,cap:0,roster:true});      // 名册内但当月无业绩 → 显示 0
+        });
       });
-      var names=Object.keys(byClinic);
-      var ordered=(CLINIC_ORDER[dept]||[]).filter(function(c){ return names.indexOf(c)>=0; });
-      names.forEach(function(c){ if(ordered.indexOf(c)<0) ordered.push(c); });
+      var extraByClinic={};
+      Object.keys(docs).forEach(function(name){
+        if(ROSTER_CLINIC_OF[name]) return;                  // 名册已收录
+        var primary = docClinicOf[name];
+        if(DEPT_OF_CLINIC[primary]!==dept && ROSTER_DEPT_OF[primary]!==dept) return;
+        (extraByClinic[primary]=extraByClinic[primary]||[]).push({name:name,cash:docs[name].cash,cap:docs[name].mem.size,roster:false});
+      });
+      Object.keys(extraByClinic).forEach(function(c){
+        if(!byClinic[c]){ byClinic[c]=[]; clinicOrder.push(c); }
+        byClinic[c]=byClinic[c].concat(extraByClinic[c].sort(function(a,b){ return b.cash-a.cash; }));
+      });
+      // 名册科室在 CLINIC_ORDER 中的位置优先，其余按数据出现顺序
+      var ord=(CLINIC_ORDER[dept]||[]);
+      var ordered=clinicOrder.slice().sort(function(x,y){
+        var ix=ord.indexOf(x), iy=ord.indexOf(y);
+        if(ix<0) ix=999; if(iy<0) iy=999;
+        return ix-iy;
+      });
       var clinics=ordered.map(function(c){
-        var list=byClinic[c].sort(function(a,b){ return b.cash-a.cash; });   // 0 元行保留，排最后
-        return {clinic:c,label:CLINIC_LABEL[c]||c,docs:list};
+        return {clinic:c,label:CLINIC_LABEL[c]||c,docs:byClinic[c]||[]};
       });
       var docCount=0; clinics.forEach(function(c){ docCount+=c.docs.length; });
       groups.push({
@@ -635,7 +690,8 @@
     document.getElementById('deptTag').textContent=scopeLabel;
     document.getElementById('mgrTag').textContent=scopeLabel;
     document.getElementById('deptNote').textContent=
-      '口径：业绩＝该分诊医生当月全部订单的「收款金额-现款支付」合计（跨科室合并，行内不再拆分），展示时归到其金额最大的科室；容量＝该医生全部订单去重会员号数。'
+      '口径：表结构按【科室-医生名册】固定输出（名册内医生当月无业绩时显示 0；名册外的医生按其主科室追加，不丢数据）。'
+      +'业绩＝该分诊医生当月全部订单的「收款金额-现款支付」合计（跨科室合并，行内不再拆分），展示归属按名册；容量＝该医生全部订单去重会员号数。'
       +'部门合计＝该部门医生行合计（容量为医生容量并集，非相加）；全院合计＝部门合计＋前台三行。'
       +'「关联订单信息-订单开单科室」为口腔科的订单，业绩全部计入安志国；无分诊医生名的行按开单科室归入前台组（营销部/团检/其他，不列医生明细）。'
       +'月份以「日期」列为准，未匹配时回退「收款时间」。';
