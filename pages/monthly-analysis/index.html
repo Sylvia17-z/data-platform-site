@@ -108,6 +108,18 @@
   table.mt tr.wu-row td.doc{color:var(--ink-soft);}
   .ref-mark{display:inline-block;margin-left:5px;padding:0 5px;font-size:10px;font-style:normal;line-height:15px;border-radius:3px;background:#eceff3;color:var(--ink-soft);border:1px solid #dfe3e8;vertical-align:1px;}
 
+  /* 明细下钻：行可点击 + 弹层 */
+  table.mt tbody tr[data-drill]{cursor:pointer;}
+  table.mt tbody tr[data-drill]:hover td{filter:brightness(.93);}
+  .drill-mask{position:fixed;inset:0;background:rgba(15,35,64,.45);z-index:60;display:none;align-items:flex-start;justify-content:center;padding:40px 16px;}
+  .drill-card{background:#fff;border-radius:10px;max-width:920px;width:100%;max-height:84vh;display:flex;flex-direction:column;box-shadow:0 12px 40px rgba(0,0,0,.28);}
+  .drill-head{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--navy-100);font-weight:700;color:var(--navy-900);font-size:14px;}
+  .drill-head button{border:1px solid var(--navy-100);background:var(--navy-50);border-radius:6px;width:26px;height:26px;cursor:pointer;color:var(--navy);font-size:13px;line-height:1;}
+  .drill-head button:hover{background:var(--navy);color:#fff;border-color:var(--navy);}
+  .drill-meta{padding:8px 16px;font-size:12.5px;color:var(--ink-soft);border-bottom:1px solid var(--line);}
+  .drill-body{overflow:auto;padding:0 16px 16px;}
+  .drill-body table.mt thead th{position:sticky;top:0;}
+
   /* 目标输入框 */
   .tgt-input{
     width:110px;height:26px;padding:0 8px;text-align:right;font-family:inherit;font-size:12.5px;
@@ -177,6 +189,14 @@
   </div>
 
   <div id="placeholder" class="empty">尚未导入数据 —— 请先选择 Excel 文件。</div>
+
+  <div class="drill-mask" id="drillMask">
+    <div class="drill-card">
+      <div class="drill-head"><span id="drillTitle">明细下钻</span><button type="button" id="drillClose" title="关闭（Esc）">✕</button></div>
+      <div class="drill-meta" id="drillMeta"></div>
+      <div class="drill-body"><table class="mt" id="drillTbl"></table></div>
+    </div>
+  </div>
 </div>
 
 <script src="/shared/kpi-cloud-sync.js?v=20261016a"></script>
@@ -401,8 +421,9 @@
     var deptCash={}, deptMem={};
     DEPT_ORDER.forEach(function(d){ deptCash[d]=0; deptMem[d]=new Set(); });
     FRONT_ROWS.forEach(function(f){ frontCash[f]=0; frontMem[f]=new Set(); });
+    var idx={};   // 下钻桶：doc:医生 / front:前台键 / dept:部门 / all → 订单行号数组
 
-    rows.forEach(function(r){
+    rows.forEach(function(r,i){
       var cash=num(r[map.cash]||0);
       totalCash+=cash;
       var mem=strVal(r[map.member]);
@@ -422,11 +443,13 @@
         // 主科室优先取【科室类】中金额最大的（无科室/前台类不算医生归属科室），
         // 否则像「展婷」这类以 U=空 金额更大的医生会被错误挪进前台组
         if(DEPT_OF_CLINIC[clinic] && cash>d.deptPrimaryCash){ d.deptPrimaryCash=cash; d.deptPrimary=clinic; }
+        (idx['doc:'+doctor]=idx['doc:'+doctor]||[]).push(i);
       }else{
         // 无分诊医生名 → 前台组按开单科室归集
         var fk=(clinic==='营销部'||clinic==='团检')?clinic:'其他';
         frontCash[fk]+=cash;
         if(hasMem) frontMem[fk].add(mem);
+        (idx['front:'+fk]=idx['front:'+fk]||[]).push(i);
       }
     });
 
@@ -443,23 +466,27 @@
       var d=docs[name];
       var primary = docClinicOf[name];
       var dept=DEPT_OF_CLINIC[primary]||ROSTER_DEPT_OF[primary]||null;
+      var di=idx['doc:'+name]||[];
       if(dept){
         deptCash[dept]+=d.cash;
         d.mem.forEach(function(m){ deptMem[dept].add(m); });
+        idx['dept:'+dept]=(idx['dept:'+dept]||[]).concat(di);
       }else{
         var fk=(primary==='营销部'||primary==='团检')?primary:'其他';
         frontDocCash[fk]+=d.cash;
         d.mem.forEach(function(m){ frontDocMem[fk].add(m); });
+        idx['front:'+fk]=(idx['front:'+fk]||[]).concat(di);
       }
     });
 
     var groups=[];
     DEPT_ORDER.forEach(function(dept){
       if(dept==='前台'){
+        // 前台「其他」＝残差：全院合计−健管部合计−诊疗部合计−营销部−团检（2026-10-21 用户口径）
+        var otherRes=totalCash-(deptCash['健管部']||0)-(deptCash['诊疗部']||0)
+                    -(frontCash['营销部']+frontDocCash['营销部'])-(frontCash['团检']+frontDocCash['团检']);
         groups.push({dept:'前台',front:FRONT_ROWS.map(function(f){
-          var mem=new Set(); frontMem[f].forEach(function(m){ mem.add(m); });
-          frontDocMem[f].forEach(function(m){ mem.add(m); });
-          return {clinic:f,cash:frontCash[f]+frontDocCash[f],cap:mem.size};
+          return {clinic:f,cash:(f==='其他')?otherRes:(frontCash[f]+frontDocCash[f]),cap:0};
         })});
         return;
       }
@@ -498,13 +525,16 @@
       var clinics=ordered.map(function(c){
         return {clinic:c,label:CLINIC_LABEL[c]||c,docs:byClinic[c]||[]};
       });
-      var docCount=0; clinics.forEach(function(c){ docCount+=c.docs.length; });
+      // 部门合计＝各明细行直加（业绩、容量均相加；2026-10-21 用户口径：合计必须等于明细相加）
+      var docCount=0, subCash=0, subCap=0;
+      clinics.forEach(function(c){ docCount+=c.docs.length; c.docs.forEach(function(d){ subCash+=d.cash; subCap+=d.cap; }); });
       groups.push({
         dept:dept, clinics:clinics, docCount:docCount,
-        subtotal:{cash:deptCash[dept],cap:deptMem[dept].size}
+        subtotal:{cash:subCash,cap:subCap}
       });
     });
-    return {groups:groups, total:{cash:totalCash,cap:totalMem.size}, doctorCount:Object.keys(docs).length};
+    var deptCapSum=0; groups.forEach(function(g){ if(!g.front) deptCapSum+=g.subtotal.cap; });
+    return {groups:groups, total:{cash:totalCash,cap:totalMem.size}, deptCapSum:deptCapSum, doctorCount:Object.keys(docs).length, idx:idx};
   }
 
   function renderDeptTable(a){
@@ -512,8 +542,8 @@
     a.groups.forEach(function(g){
       if(g.front){
         g.front.forEach(function(fr,i){
-          if(i===0) html+='<tr><td rowspan="'+g.front.length+'" class="dept">前台</td>';
-          else html+='<tr>';
+          if(i===0) html+='<tr data-drill="front:'+escapeHtml(fr.clinic)+'" data-dlabel="前台·'+escapeHtml(fr.clinic)+'"><td rowspan="'+g.front.length+'" class="dept">前台</td>';
+          else html+='<tr data-drill="front:'+escapeHtml(fr.clinic)+'" data-dlabel="前台·'+escapeHtml(fr.clinic)+'">';
           html+='<td class="clinic">'+escapeHtml(fr.clinic)+'</td><td class="doc-lbl">合计</td>'
             +'<td class="num">'+fmt(fr.cash)+'</td><td class="num dim">/</td></tr>';
         });
@@ -522,17 +552,17 @@
       var rowspan=g.docCount+1;   // 医生行 + 部门合计行
       g.clinics.forEach(function(c,ci){
         c.docs.forEach(function(d,di){
-          if(ci===0&&di===0) html+='<tr><td rowspan="'+rowspan+'" class="dept">'+escapeHtml(g.dept)+'</td>';
-          else html+='<tr>';
+          if(ci===0&&di===0) html+='<tr data-drill="doc:'+escapeHtml(d.name)+'" data-dlabel="'+escapeHtml(d.name)+'"><td rowspan="'+rowspan+'" class="dept">'+escapeHtml(g.dept)+'</td>';
+          else html+='<tr data-drill="doc:'+escapeHtml(d.name)+'" data-dlabel="'+escapeHtml(d.name)+'">';
           if(di===0) html+='<td rowspan="'+c.docs.length+'" class="clinic">'+escapeHtml(c.label)+'</td>';
           html+='<td class="doc">'+escapeHtml(d.name)+'</td><td class="num">'+fmt(d.cash)+'</td><td class="num">'+fmtInt(d.cap)+'</td></tr>';
         });
       });
-      html+='<tr class="sum"><td colspan="2" class="sum-lbl">'+escapeHtml(g.dept)+'合计</td>'
+      html+='<tr class="sum" data-drill="dept:'+escapeHtml(g.dept)+'" data-dlabel="'+escapeHtml(g.dept)+'合计"><td colspan="2" class="sum-lbl">'+escapeHtml(g.dept)+'合计</td>'
         +'<td class="num">'+fmt(g.subtotal.cash)+'</td><td class="num">'+fmtInt(g.subtotal.cap)+'</td></tr>';
     });
-    html+='<tr class="total"><td colspan="3" class="sum-lbl">全院合计</td>'
-      +'<td class="num">'+fmt(a.total.cash)+'</td><td class="num">'+fmtInt(a.total.cap)+'</td></tr>';
+    html+='<tr class="total" data-drill="all" data-dlabel="全院合计"><td colspan="3" class="sum-lbl">全院合计</td>'
+      +'<td class="num">'+fmt(a.total.cash)+'</td><td class="num">'+fmtInt(a.deptCapSum)+'</td></tr>';
     html+='</tbody>';
     document.getElementById('tblDept').innerHTML=html;
   }
@@ -540,13 +570,15 @@
   /* ================= 表B：月度管家业绩统计分析（健康管家） ================= */
   function aggregateManager(rows,map){
     var mgr={}, totalCash=0, totalMem=new Set();
-    rows.forEach(function(r){
+    var idx={};   // 下钻桶：mgr:咨询师 → 订单行号数组
+    rows.forEach(function(r,i){
       var cash=num(r[map.cash]||0);
       totalCash+=cash;
       var mem=strVal(r[map.member]);
       if(map.member!=null && isRealMember(mem)) totalMem.add(mem);
       var name=strVal(r[map.consultant])||'无';
       if(map.consultant==null) name='（未匹配到开单咨询师列）';
+      (idx['mgr:'+name]=idx['mgr:'+name]||[]).push(i);
       var m=mgr[name];
       if(!m){ m=mgr[name]={cash:0,mem:new Set()}; mgr[name]=m; }
       m.cash+=cash;
@@ -573,7 +605,9 @@
     rowsOut=rowsOut.concat(extra);
     var rosterSum=0;
     rowsOut.forEach(function(r){ if(r.kind==='roster') rosterSum+=r.cash; });
-    return {rows:rowsOut, rosterSum:rosterSum, none:mgr['无']?mgr['无'].cash:0, total:{cash:totalCash,cap:totalMem.size}, mgr:mgr};
+    var rosterIdx=[];
+    MANAGER_ROSTER.forEach(function(n){ rosterIdx=rosterIdx.concat(idx['mgr:'+n]||[]); });
+    return {rows:rowsOut, rosterSum:rosterSum, none:mgr['无']?mgr['无'].cash:0, total:{cash:totalCash,cap:totalMem.size}, mgr:mgr, idx:idx, rosterIdx:rosterIdx};
   }
 
   function tgtStore(){ try{ return JSON.parse(localStorage.getItem(TGT_KEY))||{}; }catch(e){ return {}; } }
@@ -605,14 +639,14 @@
       var rt=rateText(r.cash,tgt);
       var cls=r.kind==='ref'?' class="ref-row"':'';
       var nameHtml=escapeHtml(r.name)+(r.kind==='ref'?'<i class="ref-mark">参考</i>':'');
-      html+='<tr'+cls+'><td class="doc'+(r.kind==='ref'?' ref-name':'')+'">'+nameHtml+'</td>'
+      html+='<tr'+cls+' data-drill="mgr:'+escapeHtml(r.name)+'" data-dlabel="'+escapeHtml(r.name)+(r.kind==='ref'?'（参考）':'')+'"><td class="doc'+(r.kind==='ref'?' ref-name':'')+'">'+nameHtml+'</td>'
         +'<td class="tgt-cell"><input class="tgt-input" type="number" step="0.01" min="0" data-rbac="editTargets" data-name="'+escapeHtml(r.name)+'" value="'+(tgt||'')+'" title="月业绩目标（可手工编辑，按月保存）"></td>'
         +'<td class="num rate bad">'+fmt(r.cash)+'</td>'
         +'<td class="num rate '+rt.cls+'" data-rate-for="'+escapeHtml(r.name)+'">'+rt.txt+'</td></tr>';
     });
     // 「无」行：未填开单咨询师的订单
     var noneTgt=tgtGet(scope,'无'), noneRt=rateText(b.none,noneTgt);
-    html+='<tr class="wu-row"><td class="doc">无</td>'
+    html+='<tr class="wu-row" data-drill="mgr:无" data-dlabel="无（未填开单咨询师）"><td class="doc">无</td>'
       +'<td class="tgt-cell"><input class="tgt-input" type="number" step="0.01" min="0" data-rbac="editTargets" data-name="无" value="'+(noneTgt||'')+'" title="月业绩目标（可手工编辑，按月保存）"></td>'
       +'<td class="num rate bad">'+fmt(b.none)+'</td>'
       +'<td class="num rate '+noneRt.cls+'" data-rate-for="无">'+noneRt.txt+'</td></tr>';
@@ -620,13 +654,13 @@
     var sumTgt=0;
     b.rows.forEach(function(r){ if(r.kind==='roster') sumTgt+=tgtGet(scope,r.name); });
     var sumRt=rateText(b.rosterSum,sumTgt);
-    html+='<tr class="sum"><td class="doc">管家合计</td>'
+    html+='<tr class="sum" data-drill="mgrsum" data-dlabel="管家合计（名册）"><td class="doc">管家合计</td>'
       +'<td class="num">'+(sumTgt?fmt(sumTgt):'0')+'</td>'
       +'<td class="num rate bad">'+fmt(b.rosterSum)+'</td>'
       +'<td class="num rate '+sumRt.cls+'" data-rate-for="管家合计">'+sumRt.txt+'</td></tr>';
     // 全院合计
     var allTgt=tgtGet(scope,'全院合计'), allRt=rateText(b.total.cash,allTgt);
-    html+='<tr class="total"><td class="doc">全院合计</td>'
+    html+='<tr class="total" data-drill="all" data-dlabel="全院合计"><td class="doc">全院合计</td>'
       +'<td class="tgt-cell"><input class="tgt-input" type="number" step="0.01" min="0" data-rbac="editTargets" data-name="全院合计" value="'+(allTgt||'')+'" title="月业绩目标（可手工编辑，按月保存）"></td>'
       +'<td class="num rate bad">'+fmt(b.total.cash)+'</td>'
       +'<td class="num rate '+allRt.cls+'" data-rate-for="全院合计">'+allRt.txt+'</td></tr>';
@@ -686,19 +720,21 @@
     renderDeptTable(a);
     var b=aggregateManager(inScope,map);
     renderManagerTable(b,monthLabel);
+    dash.aggA=a; dash.aggB=b;   // 供明细下钻取订单桶
 
     document.getElementById('deptTag').textContent=scopeLabel;
     document.getElementById('mgrTag').textContent=scopeLabel;
     document.getElementById('deptNote').textContent=
       '口径：表结构按【科室-医生名册】固定输出（名册内医生当月无业绩时显示 0；名册外的医生按其主科室追加，不丢数据）。'
       +'业绩＝该分诊医生当月全部订单的「收款金额-现款支付」合计（跨科室合并，行内不再拆分），展示归属按名册；容量＝该医生全部订单去重会员号数。'
-      +'部门合计＝该部门医生行合计（容量为医生容量并集，非相加）；全院合计＝部门合计＋前台三行。'
+      +'部门合计＝该部门各医生行直加（业绩、容量均相加）；前台「其他」＝全院合计−健管部合计−诊疗部合计−营销部−团检；全院合计＝部门合计＋前台三行（容量＝各部门合计相加，前台不统计容量）。'
       +'「关联订单信息-订单开单科室」为口腔科的订单，业绩全部计入安志国；无分诊医生名的行按开单科室归入前台组（营销部/团检/其他，不列医生明细）。'
-      +'月份以「日期」列为准，未匹配时回退「收款时间」。';
+      +'点击任意一行可下钻查看对应的订单明细。月份以「日期」列为准，未匹配时回退「收款时间」。';
     document.getElementById('mgrNote').textContent=
       '口径：实际完成＝「关联订单信息-开单咨询师」名下的现款支付合计；「无」＝未填开单咨询师的订单；'
       +'营销部 / 吴雅琴 / 许顺华 / 张帆 不纳入管家统计；'+MGR_REFERENCE.join(' / ')+' 为参考行（显示但不计入管家合计）。'
-      +'月业绩目标可手工编辑，按月份分别保存并同步云端；完成率＝实际完成 ÷ 月业绩目标，目标 ≤0 显示「/」。';
+      +'月业绩目标可手工编辑，按月份分别保存并同步云端；完成率＝实际完成 ÷ 月业绩目标，目标 ≤0 显示「/」。'
+      +'点击任意一行可下钻查看对应的订单明细。';
   }
 
   /* ================= 导出 ================= */
@@ -728,7 +764,7 @@
       merge(aoa.length-1,0,aoa.length-1,1);
       merge(r0,0,aoa.length-1,0);
     });
-    aoa.push(['','','全院合计',a.total.cash,a.total.cap]);
+    aoa.push(['','','全院合计',a.total.cash,a.deptCapSum]);
     merge(aoa.length-1,0,aoa.length-1,2);
     return {aoa:aoa,merges:merges};
   }
@@ -789,6 +825,53 @@
   }
   document.getElementById('btnXlsxDept').addEventListener('click',function(){ exportTable('dept'); });
   document.getElementById('btnXlsxMgr').addEventListener('click',function(){ exportTable('mgr'); });
+
+  /* ---------- 明细下钻：点击统计表任意行（含合计行）查看对应订单 ---------- */
+  function drillDate(r,map){
+    var d=rowDateKey(r,map); if(d) return d;
+    var v=(map.ym!=null)?r[map.ym]:((map.date!=null)?r[map.date]:'');
+    return String(v==null?'':v);
+  }
+  function openDrill(key,label){
+    if(!dash.rows||!dash.rows.length||!dash.map) return;
+    var inScope = dash.scope==='__all__' ? dash.rows : dash.rows.filter(function(r){ return rowMonth(r,dash.map)===dash.scope; });
+    var idxs=null;
+    if(key==='all'){ idxs=inScope.map(function(_,i){ return i; }); }
+    else if(key==='mgrsum'){ idxs=(dash.aggB&&dash.aggB.rosterIdx)||null; }
+    else if(dash.aggA&&dash.aggA.idx&&dash.aggA.idx[key]) idxs=dash.aggA.idx[key];
+    else if(dash.aggB&&dash.aggB.idx&&dash.aggB.idx[key]) idxs=dash.aggB.idx[key];
+    if(!idxs) idxs=[];
+    var map=dash.map, sum=0;
+    var body=idxs.map(function(i){
+      var r=inScope[i]; if(!r) return '';
+      var cash=num(r[map.cash]||0); sum+=cash;
+      return '<tr>'
+        +'<td class="doc">'+escapeHtml(drillDate(r,map))+'</td>'
+        +'<td class="doc">'+escapeHtml(map.dept!=null?String(r[map.dept]==null?'':r[map.dept]):'')+'</td>'
+        +'<td class="doc">'+escapeHtml(map.doctor!=null?String(r[map.doctor]==null?'':r[map.doctor]):'')+'</td>'
+        +'<td class="doc">'+escapeHtml(map.consultant!=null?String(r[map.consultant]==null?'':r[map.consultant]):'')+'</td>'
+        +'<td class="doc">'+escapeHtml(map.member!=null?String(r[map.member]==null?'':r[map.member]):'')+'</td>'
+        +'<td class="num">'+fmt(cash)+'</td></tr>';
+    }).join('');
+    document.getElementById('drillTitle').textContent='明细下钻 · '+label;
+    document.getElementById('drillMeta').textContent=fmtInt(idxs.length)+' 笔订单 · 现款支付合计 ¥'+fmt(sum);
+    document.getElementById('drillTbl').innerHTML=
+      '<thead><tr><th>日期</th><th>开单科室</th><th>分诊医生</th><th>开单咨询师</th><th>会员号</th><th>现款支付（元）</th></tr></thead><tbody>'
+      +(body||'<tr><td colspan="6" style="text-align:center;padding:24px 0;color:var(--ink-soft);">该行没有对应订单。</td></tr>')
+      +'</tbody>';
+    document.getElementById('drillMask').style.display='flex';
+  }
+  function closeDrill(){ document.getElementById('drillMask').style.display='none'; }
+  ['tblDept','tblMgr'].forEach(function(id){
+    document.getElementById(id).addEventListener('click',function(e){
+      if(e.target.tagName==='INPUT') return;                 // 目标输入框不触发下钻
+      var tr=e.target.closest('tr[data-drill]');
+      if(tr) openDrill(tr.getAttribute('data-drill'), tr.getAttribute('data-dlabel')||'');
+    });
+  });
+  document.getElementById('drillClose').addEventListener('click',closeDrill);
+  document.getElementById('drillMask').addEventListener('click',function(e){ if(e.target===this) closeDrill(); });
+  document.addEventListener('keydown',function(e){ if(e.key==='Escape') closeDrill(); });
 
   /* ---------- 云端持久化（WorkBuddy Cloud Service，按账号隔离） ----------
    * 目的：导入的明细与聚合结果不随浏览器/设备丢失。整包 JSONB 快照存 dp_monthly，
