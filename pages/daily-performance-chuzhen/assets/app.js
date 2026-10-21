@@ -2562,6 +2562,12 @@ function isRecToShangwu(r){
 // ===== 报表归属（部门类别）：明细表可手动指定，未指定按渠道规则自动归属 =====
 // 与 calculate 的 r1~r6b 规则镜像（仅用于展示/排序/筛选，金额计算仍以 calculate 为准）
 const DEPT_OPTIONS = ['品牌组-其他','活动组-活动支持','电商组','新媒体组','短视频组','品牌组-自然到店','商务部','其他'];
+// 营销部板块内的部门类别（手动把某行归属到这些类别时，该行也应在「营销部」页签可见）
+const YX_DEPT_KEYS = ['品牌组-其他','活动组-活动支持','电商组','新媒体组','短视频组','品牌组-自然到店'];
+// 该明细是否被手动指定为某部门类别（只看覆盖值，不含自动归属）
+function deptOverrideIs(r, dept){ return String(r.deptOverride||'').trim() === dept; }
+// 该明细是否被手动指定到营销部板块（渠道可能是公司所有/商务部等，与报表归属无关）
+function isYxDeptOverride(r){ return YX_DEPT_KEYS.indexOf(String(r.deptOverride||'').trim()) >= 0; }
 // 「30天内营销部初诊客户」键集合（带缓存，按 截止月+订单数+时间戳 失效）——与 calculate 口径一致
 let _mktKeysCache = { sig:'', set:null };
 function mktFirstKeysCached(){
@@ -2693,7 +2699,7 @@ function filterOrdersByTab(key, opts){
   else if(key === 'today') list = orders.slice(); // 当日口径由日期筛选（默认当日）承担
   else if(key === 'today_gaoxin')  list = orders.filter(r => isGaoXinCashier(r));
   else if(key === 'today_beijiao') list = orders.filter(r => !isGaoXinCashier(r));
-  else if(key === 'shangwu') list = orders.filter(r => chanHas(r,'商务部') || chanHas(r,'市场部') || isRecToShangwu(r));
+  else if(key === 'shangwu') list = orders.filter(r => chanHas(r,'商务部') || chanHas(r,'市场部') || isRecToShangwu(r) || deptOverrideIs(r,'商务部'));
   else if(key === 'newperf')  list = orders.filter(r => isVabMember(r.memberNo));
   else if(key === 'bigspend'){
     // 按日 + 单会员号 聚合现款，≥20000 的(日,会员)组整组显示（单会员号现款消费≥两万）
@@ -2707,7 +2713,7 @@ function filterOrdersByTab(key, opts){
     const hit = new Set([...sumMap.entries()].filter(([k,v])=>v>=20000).map(([k])=>k));
     list = orders.filter(r=>{ const m=String(r.memberNo||'').trim(); return m && hit.has(fmtDate(r.payTime)+'|'+m); });
   }
-  else if(key === 'yingxiao') list = orders.filter(r => chanHas(r,'营销部') || isRecToYingxiao(r));
+  else if(key === 'yingxiao') list = orders.filter(r => chanHas(r,'营销部') || isRecToYingxiao(r) || isYxDeptOverride(r));
   // 营销部·初诊：与 ③ 报表每日列口径完全一致——
   // 以「筛选日期」为截止日构建「30天内营销部初诊客户」集合（buildMktFirstKeys 语义：
   // 窗口内有任一营销部初诊的客户即入集合），集合内客户的【全部】营销部订单明细计入
