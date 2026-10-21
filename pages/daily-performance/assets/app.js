@@ -2169,8 +2169,11 @@ function applyDetailSort(list){
 }
 
 // 按标签筛选导入订单；"当日"=数据中的最新日期（latestOrderDate）；月度/日期筛选叠加取交集
-function filterOrdersByTab(key){
+function filterOrdersByTab(key, opts){
   const orders = state.orders || [];
+  // opts.ignoreFilters=true：只按页签自身口径取全量数据（忽略月度/日期/字段/金额/VAB 筛选），
+  // 用于「导出全部页签」——每个页签导出其完整数据，不受当前筛选状态影响。
+  const ignoreFilters = !!(opts && opts.ignoreFilters);
   const latest = latestOrderDate();
   const isToday = r => fmtDate(r.payTime) === latest;
   let list;
@@ -2203,18 +2206,22 @@ function filterOrdersByTab(key){
   else if(key === 'steward')  list = orders.filter(r => isSteward(r)); // 管家部：开单咨询师口径 + 渠道兜底（全月审计，不限于当日）
   else list = orders.slice();
   // 月度 / 日期 筛选叠加（与标签取交集）：多选数组命中；'__blank__' 匹配收款时间为空白的行
-  if(detailMonth.length) list = list.filter(r => {
+  if(!ignoreFilters && detailMonth.length) list = list.filter(r => {
     const m = r.payTime ? fmtMonth(r.payTime) : '';
     if(m) return detailMonth.includes(m);
     return detailMonth.includes(MS_BLANK);
   });
-  if(detailDate.length)  list = list.filter(r => {
+  if(!ignoreFilters && detailDate.length)  list = list.filter(r => {
     const d = r.payTime ? fmtDate(r.payTime) : '';
     if(d) return detailDate.includes(d);
     return detailDate.includes(MS_BLANK);
   });
   // 字段筛选叠加（展示的全部字段）：姓名/会员号模糊包含，其余多选精确命中；收款时间用月度/日期承担，VAB 按命中状态
   const f = detailFilters || {};
+  if(ignoreFilters){
+    // 导出全部页签：跳过下方全部字段/金额/VAB 筛选，仅保留页签口径
+    return list;
+  }
   if(f.name){ const q=String(f.name).toLowerCase(); list=list.filter(r=>String(r.name||'').toLowerCase().includes(q)); }
   if(f.memberNo){ const q=String(f.memberNo).toLowerCase(); list=list.filter(r=>String(r.memberNo||'').toLowerCase().includes(q)); }
   // 多选命中：空数组=不过滤；'__blank__' 匹配「字段值为空白」的行，其余按 trim 后精确匹配
@@ -2233,6 +2240,82 @@ function filterOrdersByTab(key){
     else if(miss && !hit) list=list.filter(r=>!isVabMember(r.memberNo));
   }
   return list;
+}
+
+// ===== 「导入数据明细」导出（各页签均可导出，2026-10-21）=====
+// 表头与页面列一致：# / 姓名 / 会员号 / 渠道分类 / 一级渠道 / 二级渠道 / 咨询师 /
+// 收款员工 / 收款时间 / 现款支付 / VAB（标准版无「报表归属」「到访类型」列）
+const DETAIL_EXPORT_HEAD = ['#','姓名','会员号','渠道分类','一级渠道','二级渠道','咨询师','收款员工','收款时间','现款支付','VAB'];
+const DETAIL_EXPORT_COLW = [6,12,16,12,14,16,12,12,18,14,8];
+
+function detailExportRow(r, idx){
+  return [
+    idx+1,
+    r.name||'', r.memberNo||'', r.channelClass||'', r.channelL1||'', r.channelL2||'',
+    r.consultant||'', r.cashier||'',
+    r.payTime?r.payTime.toLocaleString('zh-CN'):'',
+    Number(r.cashPay)||0,
+    isVabMember(r.memberNo)?'✔':''
+  ];
+}
+
+// 生成导出用的二维表（末行附合计）
+function detailExportRows(list){
+  const rows = [DETAIL_EXPORT_HEAD.slice()];
+  list.forEach((r,i)=>rows.push(detailExportRow(r,i)));
+  const total = list.reduce((a,b)=>a+(Number(b.cashPay)||0),0);
+  const foot = new Array(DETAIL_EXPORT_HEAD.length).fill('');
+  foot[0] = '合计';
+  foot[1] = list.length + ' 行';
+  foot[9] = total;
+  rows.push(foot);
+  return rows;
+}
+
+// 导出当前页签（所见即所得：含当前筛选与排序；带样式单 sheet）
+async function exportDetailCurrent(){
+  const list = applyDetailSort(filterOrdersByTab(detailTab));
+  if(!list.length){ showToast('当前页签没有可导出的数据','warn'); return; }
+  const tabLabel = (DETAIL_TABS.find(t=>t.key===detailTab)||{label:'明细'}).label;
+  try{
+    await ensureXlsxStyled();
+    const raw = detailExportRows(list);
+    const rows = raw.map((r,ri)=> r.map((v,ci)=>{
+      if(ri===0) return cell(v,'s','subhead');
+      if(ri===raw.length-1) return cell(v, typeof v==='number'?'n':'s', ci===9?'num':'cat');
+      if(ci===9) return cell(v,'n','num');
+      return cell(v,'s','');
+    }));
+    const blob = await buildStyledXlsx({ sheetName:'导入数据明细', rows, merges:[], colWidths:DETAIL_EXPORT_COLW });
+    downloadBlob(blob, `日业绩明细-${tabLabel}-${state.cutoffDate||todayIso()}.xlsx`);
+    showToast(`已导出「${tabLabel}」页签 ${list.length} 行`, 'ok');
+  }catch(e){
+    console.error(e);
+    showToast('导出失败：'+e.message,'err');
+  }
+}
+
+// 导出全部页签（每个页签一个 sheet；忽略当前筛选，导出各页签完整数据）
+async function exportDetailAll(){
+  if(!(state.orders||[]).length){ showToast('尚未导入订单数据','err'); return; }
+  try{
+    await ensureXlsx();
+    const wb = XLSX.utils.book_new();
+    let totalRows = 0;
+    DETAIL_TABS.forEach(t=>{
+      const list = applyDetailSort(filterOrdersByTab(t.key, {ignoreFilters:true}));
+      totalRows += list.length;
+      const aoa = detailExportRows(list);
+      const ws = XLSX.utils.aoa_to_sheet(aoa);
+      ws['!cols'] = DETAIL_EXPORT_COLW.map(w=>({wch:w}));
+      XLSX.utils.book_append_sheet(wb, ws, t.label.replace(/[\\\/\?\*\[\]:]/g,'_').slice(0,28));
+    });
+    XLSX.writeFile(wb, `日业绩明细-全部页签-${state.cutoffDate||todayIso()}.xlsx`);
+    showToast(`已导出全部 ${DETAIL_TABS.length} 个页签（共 ${totalRows} 行）`, 'ok');
+  }catch(e){
+    console.error(e);
+    showToast('导出失败：'+e.message,'err');
+  }
 }
 
 // 导入明细分页状态
@@ -2453,6 +2536,13 @@ function renderImportDetails(){
       </div>
     </div>`;
   const tabs = DETAIL_TABS.map(t=>`<button class="detail-tab ${t.key===detailTab?'active':''}" data-tab="${t.key}">${t.label}</button>`).join('');
+  // 导出区（2026-10-21 需求：各页签数据均支持导出）
+  const exportOps = `<div class="detail-export-ops">
+      <button type="button" class="btn btn-sm" id="detail-export-current" data-rbac="export"
+        title="导出当前页签的全部明细（含当前筛选与排序），带样式 Excel">⬇ 导出本页签</button>
+      <button type="button" class="btn btn-sm" id="detail-export-all" data-rbac="export"
+        title="一次导出全部页签（每个页签一个 sheet），忽略当前筛选">⬇ 导出全部页签</button>
+    </div>`;
   // 表头：# 与 操作 不排序，其余列点击排序（当前排序列显示 ▲升序 / ▼降序）
   const sortThs = ['<th>#</th>']
     .concat(DETAIL_SORT_COLS.map(([k,label])=>{
@@ -2496,7 +2586,10 @@ function renderImportDetails(){
     : '';
   el.innerHTML = `
     ${filterBar}
-    <div class="detail-tabs">${tabs}</div>
+    <div class="detail-tabs-row">
+      <div class="detail-tabs">${tabs}</div>
+      ${exportOps}
+    </div>
     ${mobileSort}
     <div style="padding:6px 0 10px;color:var(--c-muted);font-size:12px;">
       当前标签「${tabLabel}」· ${filterNote}共 ${list.length} 行 · 现款支付合计 ¥${fmt(total)} · 命中VAB ${vabCount} 行${rangeNote}
@@ -2528,6 +2621,11 @@ function onImportDetailsClick(e){
   if(del){ deleteOrder(del.dataset.uid); return; }
   const tab = e.target.closest && e.target.closest('.detail-tab');
   if(tab){ detailTab = tab.dataset.tab; detailPage = 1; renderImportDetails(); return; }
+  // 导出当前页签 / 全部页签（2026-10-21 需求）
+  const exCur = e.target.closest && e.target.closest('#detail-export-current');
+  if(exCur){ exportDetailCurrent(); return; }
+  const exAll = e.target.closest && e.target.closest('#detail-export-all');
+  if(exAll){ exportDetailAll(); return; }
   // 分页按钮（含上一页/下一页/页码）：data-page 为 1 基页码
   const pg = e.target.closest && e.target.closest('[data-page]');
   if(pg){ detailPage = parseInt(pg.dataset.page, 10) || 1; renderImportDetails(); return; }

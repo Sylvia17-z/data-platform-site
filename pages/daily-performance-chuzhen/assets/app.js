@@ -1627,7 +1627,13 @@ function calculate(orders, vabSet, cutoff, mktFirstKeysPre){
   //      市场部数据并入商务部统一核算，故不再单独落入"其他"；不适用初诊客户门槛） ---
   //      注：渠道分类=推荐 的订单改由下方 r6b 单独处理，避免与 chanHas 商务部/市场部 重复计入，
   //      故此处先把推荐类排除，r6b 再并入商务部，二者互不重叠。
-  const r6 = auto.filter(r => (chanHas(r, '商务部') || chanHas(r, '市场部')) && (r.channelClass||'').trim() !== '推荐');
+  //      ⚠ 手动「报表归属」=商务部 的行必须并入 r6（ov）：
+  //      覆盖行已从 auto 中剔除，若 r6 不拼 ov('商务部')，该行金额既不进商务部也不进 r6b，
+  //      会被残差「其他」吞掉 → 表现为「改了报表归属，业绩报表没同步」。
+  const r6 = [
+    ...auto.filter(r => (chanHas(r, '商务部') || chanHas(r, '市场部')) && (r.channelClass||'').trim() !== '推荐'),
+    ...ov('商务部'),
+  ];
 
   // --- 6b. 推荐渠道补充（新增逻辑，不动 r1~r6 原有规则）---
   // 渠道分类=推荐 且 一级分类包含「营销部」→ 计入营销部业绩（同样受初诊客户门槛约束）：
@@ -2671,8 +2677,11 @@ function applyDetailSort(list){
 // 按标签筛选导入订单。
 // 日期口径说明：所有页签不再内置"当日"过滤，统一由下方日期筛选承担 ——
 // detailDate 默认 '__latest__'（=数据中最新日期，即"当日"），可通过日期下拉切换到其他日期或"全部日期"。
-function filterOrdersByTab(key){
+function filterOrdersByTab(key, opts){
   const orders = state.orders || [];
+  // opts.ignoreFilters=true：只按页签自身口径取全量数据（忽略月度/日期/字段/金额/VAB 筛选），
+  // 用于「导出全部页签」——每个页签导出其完整数据，不受当前筛选状态影响。
+  const ignoreFilters = !!(opts && opts.ignoreFilters);
   const latest = latestOrderDate();
   // 日期筛选的生效日期需【先于】页签筛选算出：营销部·初诊页签的初诊客户集合
   // 以「筛选日期」为截止日构建（与 ③ 报表每日列 calculate(g, cutoff=当日) 完全一致）。
@@ -2722,14 +2731,18 @@ function filterOrdersByTab(key){
   else list = orders.slice();
   // 月度 / 日期 筛选叠加（与标签取交集）。effDate 已在函数开头算出（供 yx_chuzhen 集合门控复用）
   // 月度筛选叠加（与标签取交集）：多选数组命中；'__blank__' 匹配收款时间为空白的行
-  if(detailMonth.length) list = list.filter(r => {
+  if(!ignoreFilters && detailMonth.length) list = list.filter(r => {
     const m = r.payTime ? fmtMonth(r.payTime) : '';
     if(m) return detailMonth.includes(m);
     return detailMonth.includes(MS_BLANK);
   });
-  if(effDate) list = list.filter(r => r.payTime && fmtDate(r.payTime) === effDate);
+  if(effDate && !ignoreFilters) list = list.filter(r => r.payTime && fmtDate(r.payTime) === effDate);
   // 字段筛选叠加（展示的全部字段）：姓名/会员号模糊包含，其余多选精确命中；收款时间用月度/日期承担，VAB 按命中状态
   const f = detailFilters || {};
+  if(ignoreFilters){
+    // 导出全部页签：跳过下方全部字段/金额/VAB 筛选，仅保留页签口径
+    return list;
+  }
   if(f.name){ const q=String(f.name).toLowerCase(); list=list.filter(r=>String(r.name||'').toLowerCase().includes(q)); }
   if(f.memberNo){ const q=String(f.memberNo).toLowerCase(); list=list.filter(r=>String(r.memberNo||'').toLowerCase().includes(q)); }
   // 多选命中：空数组=不过滤；'__blank__' 匹配「字段值为空白」的行，其余按 trim 后精确匹配
@@ -2757,6 +2770,109 @@ function filterOrdersByTab(key){
     else if(miss && !hit) list=list.filter(r=>!isVabMember(r.memberNo));
   }
   return list;
+}
+
+// ===== 「⑥ 导入数据明细」导出（各页签均可导出）=====
+// 表头与页面列一致：# / 姓名 / 会员号 / 渠道分类 / 一级渠道 / 二级渠道 / 到访类型 /
+// 咨询师 / 收款员工 / 收款时间 / 现款支付 / 资产抵扣金额 / 报表归属 / VAB
+const DETAIL_EXPORT_HEAD = ['#','姓名','会员号','渠道分类','一级渠道','二级渠道','到访类型','咨询师','收款员工','收款时间','现款支付','资产抵扣金额','报表归属','VAB'];
+const DETAIL_EXPORT_COLW = [6,12,16,12,14,16,10,12,12,12,14,14,16,8];
+
+function detailExportRow(r, idx){
+  return [
+    idx+1,
+    r.name||'', r.memberNo||'', r.channelClass||'', r.channelL1||'', r.channelL2||'',
+    r.visitType||'', r.consultant||'', r.cashier||'',
+    r.payTime?fmtDate(r.payTime):'',
+    Number(r.cashPay)||0, Number(r.assetDeduct)||0,
+    effectiveDept(r),                 // 报表归属：手动覆盖优先，否则自动归属
+    isVabMember(r.memberNo)?'✔':''
+  ];
+}
+
+// 生成导出用的二维表（末行附合计）
+function detailExportRows(list, tabLabel){
+  const rows = [DETAIL_EXPORT_HEAD.slice()];
+  list.forEach((r,i)=>rows.push(detailExportRow(r,i)));
+  const total = list.reduce((a,b)=>a+(Number(b.cashPay)||0),0);
+  const totalAsset = list.reduce((a,b)=>a+(Number(b.assetDeduct)||0),0);
+  const foot = new Array(DETAIL_EXPORT_HEAD.length).fill('');
+  foot[0] = '合计';
+  foot[1] = list.length + ' 行';
+  foot[10] = total;
+  foot[11] = totalAsset;
+  rows.push(foot);
+  return rows;
+}
+
+// 导出当前页签（所见即所得：含当前筛选与排序；带样式单 sheet）
+async function exportDetailCurrent(){
+  const list = applyDetailSort(filterOrdersByTab(detailTab));
+  if(!list.length){ showToast('当前页签没有可导出的数据','warn'); return; }
+  const tabLabel = (DETAIL_TABS.find(t=>t.key===detailTab)||{label:'明细'}).label;
+  try{
+    await ensureXlsxStyled();
+    const raw = detailExportRows(list, tabLabel);
+    const rows = raw.map((r,ri)=> r.map((v,ci)=>{
+      if(ri===0) return cell(v,'s','subhead');
+      if(ri===raw.length-1) return cell(v, typeof v==='number'?'n':'s', ci===10||ci===11?'num':'cat');
+      if(ci===10||ci===11) return cell(v,'n','num');
+      return cell(v,'s', ci===12?'cat':'');
+    }));
+    const blob = await buildStyledXlsx({ sheetName:'导入数据明细', rows, merges:[], colWidths:DETAIL_EXPORT_COLW });
+    downloadBlob(blob, `日业绩明细-${tabLabel}-${state.cutoffDate||todayIso()}.xlsx`);
+    showToast(`已导出「${tabLabel}」页签 ${list.length} 行`, 'ok');
+  }catch(e){
+    console.error(e);
+    showToast('导出失败：'+e.message,'err');
+  }
+}
+
+// 导出全部页签（每个页签一个 sheet；忽略当前筛选，导出各页签完整数据）
+async function exportDetailAll(){
+  if(!(state.orders||[]).length){ showToast('尚未导入订单数据','err'); return; }
+  try{
+    await ensureXlsx();
+    const wb = XLSX.utils.book_new();
+    let totalRows = 0;
+    DETAIL_TABS.forEach(t=>{
+      const list = applyDetailSort(filterOrdersByTab(t.key, {ignoreFilters:true}));
+      totalRows += list.length;
+      const aoa = detailExportRows(list, t.label);
+      const ws = XLSX.utils.aoa_to_sheet(aoa);
+      ws['!cols'] = DETAIL_EXPORT_COLW.map(w=>({wch:w}));
+      XLSX.utils.book_append_sheet(wb, ws, t.label.replace(/[\\\/\?\*\[\]:]/g,'_').slice(0,28));
+    });
+    XLSX.writeFile(wb, `日业绩明细-全部页签-${state.cutoffDate||todayIso()}.xlsx`);
+    showToast(`已导出全部 ${DETAIL_TABS.length} 个页签（共 ${totalRows} 行）`, 'ok');
+  }catch(e){
+    console.error(e);
+    showToast('导出失败：'+e.message,'err');
+  }
+}
+
+// ===== 手动覆盖（双击单元格）与「报表归属」改动的联动 =====
+// 报表的月累计/每日列允许双击手动覆盖（state.manual.month / state.manual.daily），
+// 手动值优先级高于自动计算。若用户此前做过手动调整，随后在明细表改了「报表归属」，
+// 被手动覆盖的单元格仍显示旧手动值 → 表现为「报表没跟着更新」。
+// 因此：改动归属/到访类型后，清除受影响部门行（含残差「其他」）的手动覆盖，让报表回到自动口径。
+function clearManualForDeptKeys(keys){
+  const want = new Set((keys||[]).map(k=>String(k||'')).filter(Boolean));
+  if(!want.size) return 0;
+  let n = 0;
+  const sweep = (bag)=>{
+    Object.keys(bag||{}).forEach(k=>{
+      const inner = bag[k] || {};
+      Object.keys(inner).forEach(kk=>{
+        if(want.has(String(kk))){ delete inner[kk]; n++; }
+      });
+      if(!Object.keys(inner).length) delete bag[k];
+    });
+  };
+  sweep(state.manual.month);
+  sweep(state.manual.daily);
+  if(n) writeManualLocal();
+  return n;
 }
 
 // 导入明细分页状态（2026-10-13 需求：所有页签默认每页 10 条）
@@ -3027,6 +3143,13 @@ function renderImportDetails(){
       </div>
     </div>`;
   const tabs = DETAIL_TABS.map(t=>`<button class="detail-tab ${t.key===detailTab?'active':''}" data-tab="${t.key}">${t.label}</button>`).join('');
+  // 导出区（2026-10-21 需求：各页签数据均支持导出）
+  const exportOps = `<div class="detail-export-ops">
+      <button type="button" class="btn btn-sm" id="detail-export-current" data-rbac="export"
+        title="导出当前页签的全部明细（含当前筛选与排序），带样式 Excel">⬇ 导出本页签</button>
+      <button type="button" class="btn btn-sm" id="detail-export-all" data-rbac="export"
+        title="一次导出全部页签（每个页签一个 sheet），忽略当前筛选">⬇ 导出全部页签</button>
+    </div>`;
   // 表头：# 与 操作 不排序，其余列点击排序（当前排序列显示 ▲升序 / ▼降序）
   const sortThs = ['<th>#</th>']
     .concat(DETAIL_SORT_COLS.map(([k,label])=>{
@@ -3081,7 +3204,10 @@ function renderImportDetails(){
     : '';
   el.innerHTML = `
     ${filterBar}
-    <div class="detail-tabs">${tabs}</div>
+    <div class="detail-tabs-row">
+      <div class="detail-tabs">${tabs}</div>
+      ${exportOps}
+    </div>
     ${mobileSort}
     <div style="padding:6px 0 10px;color:var(--c-muted);font-size:12px;">
       当前标签「${tabLabel}」· ${mktTabNote}${filterNote}共 ${list.length} 行 · 现款支付合计 ¥${fmt(total)} · 资产抵扣合计 ¥${fmt(totalAsset)} · 命中VAB ${vabCount} 行${rangeNote}
@@ -3122,6 +3248,11 @@ function onImportDetailsClick(e){
   }
   const tab = e.target.closest && e.target.closest('.detail-tab');
   if(tab){ detailTab = tab.dataset.tab; detailPage = 1; renderImportDetails(); return; }
+  // 导出当前页签 / 全部页签（2026-10-21 需求）
+  const exCur = e.target.closest && e.target.closest('#detail-export-current');
+  if(exCur){ exportDetailCurrent(); return; }
+  const exAll = e.target.closest && e.target.closest('#detail-export-all');
+  if(exAll){ exportDetailAll(); return; }
   // 分页按钮（含上一页/下一页/页码）：data-page 为 1 基页码
   const pg = e.target.closest && e.target.closest('[data-page]');
   if(pg){ detailPage = parseInt(pg.dataset.page, 10) || 1; renderImportDetails(); return; }
@@ -3180,11 +3311,16 @@ function onImportDetailsChange(e){
     const row = state.orders.find(r => String(r._uid) === String(ds.dataset.uid));
     if(row){
       const v = String(ds.value||'').trim();
+      const oldDept = effectiveDept(row);            // 改前生效归属（手动覆盖优先）
       if(DEPT_OPTIONS.includes(v)) row.deptOverride = v;
       else delete row.deptOverride; // 恢复自动归属
+      const newDept = effectiveDept(row);
+      // 清除受影响部门行（含残差「其他」）的手动覆盖 → 报表立即回到按新归属自动计算的值
+      const cleared = clearManualForDeptKeys([oldDept, newDept, '其他']);
       persistOrders(); // 归属覆盖随订单持久化（localStorage/IndexedDB/云端）
       recompute(); // 重算 ③主表 / ④门店表 / ⑥明细，报表归属立即生效
-      showToast(v ? `该明细报表归属已改为「${v}」，各统计表已重新计算` : '已恢复自动归属，各统计表已重新计算', 'ok');
+      const tip = v ? `该明细报表归属已改为「${v}」` : '已恢复自动归属';
+      showToast(tip + '，各统计表已重新计算' + (cleared ? `（已清除 ${cleared} 处手动调整以恢复自动口径）` : ''), 'ok');
     }
     return;
   }
@@ -3196,9 +3332,12 @@ function onImportDetailsChange(e){
       const old = String(row.visitType||'').trim();
       if(v !== old){
         row.visitType = v;
+        // 到访类型会改变营销部初诊门槛 → 该行归属可能变化，同样清除相关手动覆盖
+        const cleared = clearManualForDeptKeys([effectiveDept(row), '其他']);
         persistOrders(); // 到访类型随订单持久化（localStorage/IndexedDB/云端）
         recompute(); // 到访类型影响：营销部初诊门槛 / ⑤清单 / 营销部·初诊与类型空白页签，全联动重算
-        showToast(v ? `该明细到访类型已改为「${v}」，各统计表已重新计算` : '已清空该明细到访类型，各统计表已重新计算', 'ok');
+        showToast((v ? `该明细到访类型已改为「${v}」` : '已清空该明细到访类型') + '，各统计表已重新计算'
+          + (cleared ? `（已清除 ${cleared} 处手动调整以恢复自动口径）` : ''), 'ok');
       }
     }
     return;

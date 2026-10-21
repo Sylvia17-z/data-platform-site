@@ -266,6 +266,15 @@
   details > summary::-webkit-details-marker{display:none;}
   details[open] > summary{margin-bottom:4px;}
   .detail-tabs{margin:2px 0 12px;display:flex;flex-wrap:wrap;gap:6px;padding-top:10px;border-top:1px dashed var(--c-border);}
+  /* 页签行：左侧页签 + 右侧导出按钮组 */
+  .detail-tabs-row{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:nowrap;}
+  .detail-tabs-row .detail-tabs{margin-bottom:12px;flex:1 1 auto;min-width:0;}
+  .detail-export-ops{display:flex;gap:6px;flex-wrap:nowrap;flex:0 0 auto;padding-top:10px;margin-bottom:12px;}
+  .detail-export-ops .btn{padding:4px 10px;font-size:12px;white-space:nowrap;}
+  @media(max-width:900px){
+    .detail-tabs-row{flex-wrap:wrap;}
+    .detail-export-ops{width:100%;flex-wrap:wrap;padding-top:0;}
+  }
   .detail-tab{cursor:pointer;border:1px solid var(--c-border);background:#fff;color:var(--c-text);padding:5px 12px;border-radius:999px;font-size:12px;margin:0;font-family:inherit;font-weight:500;transition:all .15s;}
   .detail-tab:hover{border-color:var(--c-head);color:var(--c-head);}
   .detail-tab.active{background:var(--c-head);color:#fff;border-color:var(--c-head);font-weight:600;}
