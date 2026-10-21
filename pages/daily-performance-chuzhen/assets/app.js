@@ -2564,10 +2564,33 @@ function isRecToShangwu(r){
 const DEPT_OPTIONS = ['品牌组-其他','活动组-活动支持','电商组','新媒体组','短视频组','品牌组-自然到店','商务部','其他'];
 // 营销部板块内的部门类别（手动把某行归属到这些类别时，该行也应在「营销部」页签可见）
 const YX_DEPT_KEYS = ['品牌组-其他','活动组-活动支持','电商组','新媒体组','短视频组','品牌组-自然到店'];
+// ③ 报表中「营销部-部门业绩」实际展示的 4 行（品牌组-自然到店/电商组/新媒体组）+「公司支持」2 行
+//   = 品牌组-其他 / 活动组-活动支持 / 电商组 / 新媒体组 / 品牌组-自然到店。
+//   注意：「短视频组」行报表已隐藏（2026-10-19）且金额并入残差「其他」，故不属部门业绩口径。
+const REPORT_YX_KEYS = ['品牌组-其他','活动组-活动支持','电商组','新媒体组','品牌组-自然到店'];
 // 该明细是否被手动指定为某部门类别（只看覆盖值，不含自动归属）
 function deptOverrideIs(r, dept){ return String(r.deptOverride||'').trim() === dept; }
 // 该明细是否被手动指定到营销部板块（渠道可能是公司所有/商务部等，与报表归属无关）
 function isYxDeptOverride(r){ return YX_DEPT_KEYS.indexOf(String(r.deptOverride||'').trim()) >= 0; }
+// 该明细在「③ 报表 → 营销部 → 部门业绩/公司支持」中的归属（镜像 calculate 的 r1/r2/r3/r3b/r3c/r3d/r5/r5b）
+// 返回 null = 不计入部门业绩（短视频组已隐藏并入「其他」、营销部渠道但无对应部门类别、
+//                 非初诊客户的营销部订单），用于让「营销部·初诊」明细与报表部门业绩合计严格一致。
+function yxReportDept(r, gateSet){
+  const ov = String(r.deptOverride||'').trim();
+  if(REPORT_YX_KEYS.indexOf(ov) >= 0) return ov;   // 手动指定优先（calculate 的 ov 不受初诊门槛约束）
+  const cc=(r.channelClass||'').trim(), l1=(r.channelL1||'').trim(), l2=(r.channelL2||'').trim();
+  if(!(cc==='营销部' || isRecToYingxiao(r))) return null;
+  const gate = gateSet || mktFirstKeysCached();
+  const yxGate = gate.has(mktFirstClientKey(r));
+  if(cc==='营销部' && l1==='品牌组' && (['微信小程序','微信公众号','客服手机','前台座机'].includes(l2) || (l2.includes('阿里') && l2.includes('高德')))) return yxGate?'品牌组-其他':null;
+  if(cc==='营销部' && l1==='活动组' && l2==='活动支持') return yxGate?'活动组-活动支持':null;
+  if(cc==='营销部' && ['电商组','客户转介绍','企业团检'].includes(l1)) return yxGate?'电商组':null;
+  if(cc==='营销部' && l1==='新媒体组') return yxGate?'新媒体组':null;
+  if(cc==='营销部' && l1==='品牌组' && l2.includes('线上400')) return yxGate?'电商组':null;
+  if(cc==='营销部' && l1==='品牌组' && l2.includes('自然到店')) return yxGate?'品牌组-自然到店':null;
+  if(isRecToYingxiao(r)) return yxGate ? (l2.includes('自然到店') ? '品牌组-自然到店' : '电商组') : null;
+  return null;  // 营销部渠道但不属于任何部门类别（如一级=商务合作、二级=外拓活动、短视频组）→ 报表「其他」
+}
 // 「30天内营销部初诊客户」键集合（带缓存，按 截止月+订单数+时间戳 失效）——与 calculate 口径一致
 let _mktKeysCache = { sig:'', set:null };
 function mktFirstKeysCached(){
@@ -2721,7 +2744,11 @@ function filterOrdersByTab(key, opts){
   // 日期筛选=某日 d 时 → 集合截止=d，与报表 d 日列逐笔一致；全部日期 → 集合截止=报表截止日（月累计口径）。
   else if(key === 'yx_chuzhen'){
     const gateSet = effDate ? buildMktFirstKeys(orders, new Date(effDate)) : mktFirstKeysCached();
-    list = orders.filter(r => (chanHas(r,'营销部') || isRecToYingxiao(r)) && gateSet.has(mktFirstClientKey(r)));
+    // 口径与「③ 报表 → 营销部 → 公司支持/部门业绩」严格一致（2026-10-21 用户反馈）：
+    // 原先只按「营销部渠道 + 初诊客户」筛选，会把短视频组（报表已隐藏并入「其他」）、
+    // 一级渠道=商务合作 / 二级=外拓活动（报表无对应部门类别）等行也算进来 → 明细合计 > 报表部门业绩合计。
+    // 现在用 yxReportDept 精确镜像 calculate 的部门归属：null = 不计入部门业绩，不展示。
+    list = orders.filter(r => yxReportDept(r, gateSet) !== null);
   }
   // 营销部·类型空白：审计视图——营销部渠道下到访类型空白（未填写）的【全部】订单，
   // 不受「30天初诊客户」集合限制（2026-10-13 需求：10月闫语函/冯梓芯/魏周朝等无初诊记录的
@@ -3175,9 +3202,11 @@ function renderImportDetails(){
   const noteCut = (() => { try { return (detailDate==='__latest__'?latest:(detailDate||'')) || (state.cutoffDate||''); } catch(e){ return ''; } })();
   const mwNote = noteCut ? mktWindow(new Date(noteCut)) : mktWindow();
   const mktTabNote = detailTab === 'yx_chuzhen'
-    ? ('口径：30天内初诊客户·多次到访均计初诊业绩（窗口 ' + mwNote.start + ' ~ ' + mwNote.end + '，随筛选日期联动，与③报表当日列一致）· ')
+    ? ('口径：与③报表「营销部→公司支持/部门业绩」严格一致（30天内初诊客户·多次到访均计初诊业绩，窗口 ' + mwNote.start + ' ~ ' + mwNote.end + '，随筛选日期联动；短视频组及营销部渠道中无对应部门类别的行已排除）· ')
     : (detailTab === 'yx_blank'
-      ? '口径：营销部渠道·到访类型空白（全部订单审计视图，不受初诊客户集合限制）· ' : '');
+      ? '口径：营销部渠道·到访类型空白（全部订单审计视图，不受初诊客户集合限制）· '
+      : (detailTab === 'yingxiao'
+        ? '口径：营销部渠道全量（审计视图，含不计入部门业绩的行）· ' : ''));
   // 手机端排序条（桌面端隐藏，由表格表头排序代替）
   const mobileSort = `
     <div class="detail-mobile-bar">
