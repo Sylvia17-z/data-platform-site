@@ -2572,6 +2572,18 @@ const REPORT_YX_KEYS = ['品牌组-其他','活动组-活动支持','电商组',
 function deptOverrideIs(r, dept){ return String(r.deptOverride||'').trim() === dept; }
 // 该明细是否被手动指定到营销部板块（渠道可能是公司所有/商务部等，与报表归属无关）
 function isYxDeptOverride(r){ return YX_DEPT_KEYS.indexOf(String(r.deptOverride||'').trim()) >= 0; }
+// 按【收款日】缓存「30天内营销部初诊客户」集合 —— 与 ③ 报表每日列
+//   calculate(当日订单, vabSet, 当日, buildMktFirstKeys(state.orders, 当日)) 完全同源。
+// 明细页签用它逐笔判定，避免「用单一窗口过滤整月」把初诊前的消费算进来（2026-10-21 用户反馈）。
+let _mktGateByDate = { sig:'', map:new Map() };
+function mktGateSetByDate(orders, dateStr){
+  const sig = (state.orders||[]).length + '|' + (state.ordersTs||0)
+    + '|H' + (state.histOrders||[]).length + '|' + (state.histTs||0);
+  if(_mktGateByDate.sig !== sig){ _mktGateByDate.sig = sig; _mktGateByDate.map = new Map(); }
+  let s = _mktGateByDate.map.get(dateStr);
+  if(!s){ s = buildMktFirstKeys(orders, new Date(dateStr)); _mktGateByDate.map.set(dateStr, s); }
+  return s;
+}
 // 该明细在「③ 报表 → 营销部 → 部门业绩/公司支持」中的归属（镜像 calculate 的 r1/r2/r3/r3b/r3c/r3d/r5/r5b）
 // 返回 null = 不计入部门业绩（短视频组已隐藏并入「其他」、营销部渠道但无对应部门类别、
 //                 非初诊客户的营销部订单），用于让「营销部·初诊」明细与报表部门业绩合计严格一致。
@@ -2743,12 +2755,16 @@ function filterOrdersByTab(key, opts){
   // （不限到访类型：初诊/复诊/空白均计入，即"30天内有初诊的客户多次到访都核算为初诊业绩"）。
   // 日期筛选=某日 d 时 → 集合截止=d，与报表 d 日列逐笔一致；全部日期 → 集合截止=报表截止日（月累计口径）。
   else if(key === 'yx_chuzhen'){
-    const gateSet = effDate ? buildMktFirstKeys(orders, new Date(effDate)) : mktFirstKeysCached();
-    // 口径与「③ 报表 → 营销部 → 公司支持/部门业绩」严格一致（2026-10-21 用户反馈）：
-    // 原先只按「营销部渠道 + 初诊客户」筛选，会把短视频组（报表已隐藏并入「其他」）、
-    // 一级渠道=商务合作 / 二级=外拓活动（报表无对应部门类别）等行也算进来 → 明细合计 > 报表部门业绩合计。
-    // 现在用 yxReportDept 精确镜像 calculate 的部门归属：null = 不计入部门业绩，不展示。
-    list = orders.filter(r => yxReportDept(r, gateSet) !== null);
+    // 口径与「③ 报表 → 营销部 → 公司支持/部门业绩」严格一致（2026-10-21 用户两次反馈）：
+    //  ① 部门维度：原先只按「营销部渠道 + 初诊客户」筛选，短视频组（报表行已隐藏、金额并入残差「其他」）、
+    //     一级渠道=商务合作、二级=外拓活动等行会进明细但不进报表 → 明细合计 > 报表部门业绩合计。
+    //     现用 yxReportDept 精确镜像 calculate 的部门归属：null = 不计入部门业绩，不展示。
+    //  ② 初诊门槛维度：③ 报表每个每日列用【各自的日期】构建初诊集合
+    //     （calculate(当日订单, ..., buildMktFirstKeys(state.orders, 当日))，见 renderReportInner），
+    //     而本页签原先用【筛选日/最新日】一次性 gateSet 过滤整月 →
+    //     「初诊发生在某次消费之后」的客户，其初诊前的消费会被明细算进来、报表却不算 → 仍不一致。
+    //     现改为按每笔订单的【收款日】判定，与报表每日列逐日口径逐笔对齐。
+    list = orders.filter(r => r.payTime && yxReportDept(r, mktGateSetByDate(orders, fmtDate(r.payTime))) !== null);
   }
   // 营销部·类型空白：审计视图——营销部渠道下到访类型空白（未填写）的【全部】订单，
   // 不受「30天初诊客户」集合限制（2026-10-13 需求：10月闫语函/冯梓芯/魏周朝等无初诊记录的
@@ -3197,12 +3213,9 @@ function renderImportDetails(){
   const activeFieldCount = activeFilterEntries.length;
   const filterNote = (detailMonth.length?('月度选'+detailMonth.length+'项 · '):'')+dateNote
     +(activeFieldCount?('字段筛选 '+activeFieldCount+' 项 · '):'');
-  // 营销部两类页签的口径说明：初诊=30天内初诊客户（窗口随筛选日期联动，与③报表每日列一致）；
-  // 类型空白=审计视图（全部空白类型订单）
-  const noteCut = (() => { try { return (detailDate==='__latest__'?latest:(detailDate||'')) || (state.cutoffDate||''); } catch(e){ return ''; } })();
-  const mwNote = noteCut ? mktWindow(new Date(noteCut)) : mktWindow();
+  // 营销部两类页签的口径说明见下方 mktTabNote（初诊=与③报表每日列同源、逐笔按收款日判定）
   const mktTabNote = detailTab === 'yx_chuzhen'
-    ? ('口径：与③报表「营销部→公司支持/部门业绩」严格一致（30天内初诊客户·多次到访均计初诊业绩，窗口 ' + mwNote.start + ' ~ ' + mwNote.end + '，随筛选日期联动；短视频组及营销部渠道中无对应部门类别的行已排除）· ')
+    ? ('口径：与③报表「营销部→公司支持/部门业绩」严格一致（逐笔按【该笔收款日】的30天初诊窗口判定，与③报表每日列同源；短视频组及营销部渠道中无对应部门类别的行已排除）· ')
     : (detailTab === 'yx_blank'
       ? '口径：营销部渠道·到访类型空白（全部订单审计视图，不受初诊客户集合限制）· '
       : (detailTab === 'yingxiao'
