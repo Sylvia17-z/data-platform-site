@@ -173,9 +173,12 @@
   /* 可排序表头 + 搜索框 + 分页器（性能：仅渲染当前页，避免大表卡顿） */
   .toolbar .inp{font-family:var(--font);font-size:13px;border:1px solid var(--navy-100);
     border-radius:7px;padding:6px 10px;background:#fff;color:var(--ink);min-width:190px;}
-  table.tbl thead th[data-sort]{cursor:pointer;user-select:none;}
-  table.tbl thead th[data-sort]:hover{background:var(--navy-700);}
+  table.tbl thead th[data-sort]{cursor:pointer;user-select:none;}  table.tbl thead th[data-sort]:hover{background:var(--navy-700);}
   table.tbl thead th.sorted{background:var(--navy-700);}
+  /* 下钻明细弹窗：筛选框 + 合计行（2026-10-21） */
+  .detail-filter{flex:1;max-width:260px;height:26px;padding:0 9px;margin-left:10px;border:1px solid var(--navy-100);border-radius:6px;font-family:inherit;font-size:12px;color:var(--ink);background:#fff;}
+  .detail-filter:focus{outline:none;border-color:var(--navy-700);box-shadow:0 0 0 2px rgba(10,78,163,.15);}
+  table.tbl tr.dsum td{background:var(--navy-100);font-weight:700;border-top:2px solid var(--navy);}
   .detail-pager{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:10px 0 4px;font-size:12px;color:var(--ink-soft);}
   .detail-pager .pg-btn{font-family:var(--font);font-size:12px;border:1px solid var(--navy-100);background:#fff;color:var(--navy);
     border-radius:6px;padding:3px 9px;cursor:pointer;min-width:30px;}
@@ -602,6 +605,7 @@
       <div class="modal" style="width:min(760px,94vw);">
         <div class="modal-head">
           <span id="statsDetailTitle">命中的客户明细</span>
+          <input type="text" id="statsDetailFilter" class="detail-filter" placeholder="筛选：姓名/会员号/品项/日期…" style="display:none;">
           <button type="button" class="modal-x" id="statsDetailClose" aria-label="关闭">×</button>
         </div>
         <div class="modal-body" id="statsDetailBody"></div>
@@ -1836,7 +1840,7 @@ function exportXlsx(mod){
     }
     document.getElementById('statsDetailTitle').textContent = (row._dimLabel||'') + '「' + row.维度 + '」— 会员消费汇总';
     const body = document.getElementById('statsDetailBody');
-    body.innerHTML = html;
+    setDetailBody(html);
     bindConsBody(body);
     document.getElementById('statsDetailModal').style.display = 'flex';
   }
@@ -1857,7 +1861,7 @@ function exportXlsx(mod){
     html += consDetailSectionHtml(det.filter(d=>d.source==='收费'), '收费明细', false);
     document.getElementById('statsDetailTitle').textContent = '会员「' + esc(info.客户姓名||info.会员号||key) + '」— 消费明细';
     const body = document.getElementById('statsDetailBody');
-    body.innerHTML = html;
+    setDetailBody(html);
     bindConsBody(body);
     document.getElementById('statsDetailModal').style.display = 'flex';
   }
@@ -2816,7 +2820,7 @@ const PROJ_EXCLUDE = {
     const uncovered = row.total - row.covered;
     if(uncovered>0) html += '<div class="muted" style="font-size:12px;">另有 '+uncovered+' 户该类别考核窗口内无消费记录（未列出）。</div>';
     document.getElementById('statsDetailTitle').textContent = (row._dimLabel||'') + '「' + row.维度 + '」· ' + row.类别 + ' — 命中户主';
-    document.getElementById('statsDetailBody').innerHTML = html;
+    setDetailBody(html);
     document.getElementById('statsDetailModal').style.display = 'flex';
   }
   // 第二级：某命中户主的逐笔明细
@@ -2837,7 +2841,7 @@ const PROJ_EXCLUDE = {
     });
     html += '</tbody></table></div>';
     document.getElementById('statsDetailTitle').textContent = '户主「' + house + '」· ' + row.类别 + ' — 消费明细';
-    document.getElementById('statsDetailBody').innerHTML = html;
+    setDetailBody(html);
     document.getElementById('statsDetailModal').style.display = 'flex';
   }
   function bindProjDetailBody(body){
@@ -2900,7 +2904,7 @@ const PROJ_EXCLUDE = {
     const uncovered = row.total - row.covered;
     if(uncovered>0) html += '<div class="muted" style="font-size:12px;">另有 '+uncovered+' 户该类别考核窗口内无消费记录。</div>';
     document.getElementById('statsDetailTitle').textContent = (row._dimLabel||'') + '「' + row.维度 + '」· ' + row.类别 + ' — 执行项目明细';
-    document.getElementById('statsDetailBody').innerHTML = html;
+    setDetailBody(html);
     document.getElementById('statsDetailModal').style.display = 'flex';
   }
 
@@ -2993,7 +2997,7 @@ const PROJ_EXCLUDE = {
 
     document.getElementById('statsDetailTitle').textContent = dimLabel + '「' + k + '」命中的客户明细';
     const body = document.getElementById('statsDetailBody');
-    body.innerHTML = html;
+    setDetailBody(html);
     _statsCurRow = row;                          // 记住当前维度行，供第二级下钻取订单明细
     bindStatsBody(body);
     document.getElementById('statsDetailModal').style.display = 'flex';
@@ -3068,13 +3072,73 @@ const PROJ_EXCLUDE = {
     }
     document.getElementById('statsDetailTitle').textContent = '客户「' + esc(house) + '」· ' + esc(row.维度) + ' — 订单明细';
     const body = document.getElementById('statsDetailBody');
-    body.innerHTML = html;
+    setDetailBody(html);
     bindStatsBody(body);
     document.getElementById('statsDetailModal').style.display = 'flex';
   }
   function closeStatsDetail(){
     const m = document.getElementById('statsDetailModal');
     if(m) m.style.display = 'none';
+    const f=document.getElementById('statsDetailFilter'); if(f) f.value='';
+  }
+
+  /* ---------- 下钻明细通用增强：合计行 + 关键字筛选（2026-10-21） ----------
+   * 所有经由 setDetailBody() 渲染的下钻明细表（会员消费汇总/逐笔明细/命中户主/订单明细/项目明细）
+   * 自动追加列级合计行（仅对纯数值列求和），并支持弹窗头部关键字筛选（实时过滤行并重算合计）。
+   * 非数值列（日期/星期/会员号等）合计格留空。 */
+  const DETAIL_NUM_RE = /^-?\d{1,3}(,\d{3})+(\.\d+)?$|^-?\d+(\.\d+)?$/;
+  const DETAIL_NONSUM_RE = /会员号|电话|星期|日期|编号|占比|率/;
+  function detailRowsOf(tbl){
+    return Array.from(tbl.querySelectorAll('tbody tr')).filter(tr=>!tr.classList.contains('dsum'));
+  }
+  function detailSumCell(rows, c, head){
+    if(DETAIL_NONSUM_RE.test(head||'')) return '';
+    let ok=false, has=false, sum=0;
+    for(const tr of rows){
+      const td=tr.children[c]; if(!td) continue;
+      const t=td.textContent.trim();
+      if(t===''||t==='—') continue;
+      has=true;
+      if(DETAIL_NUM_RE.test(t)) sum+=parseFloat(t.replace(/,/g,''));
+      else { ok=false; break; }
+      ok=true;
+    }
+    return (ok&&has) ? money(sum) : '';
+  }
+  function buildDetailSumRow(tbl, rowsSubset){
+    const rows = rowsSubset || detailRowsOf(tbl);
+    const old = tbl.querySelector('tr.dsum'); if(old) old.remove();
+    if(!rows.length) return;
+    const heads = Array.from(tbl.querySelectorAll('thead th')).map(th=>th.textContent.trim());
+    const nCols = Math.max(heads.length, rows[0].children.length);
+    let html='<tr class="dsum"><td>合计</td>';
+    for(let c=1;c<nCols;c++) html+='<td class="'+(rows[0].children[c]&&rows[0].children[c].classList.contains('num')?'num':'')+'">'+detailSumCell(rows,c,heads[c])+'</td>';
+    html+='</tr>';
+    rows[rows.length-1].insertAdjacentHTML('afterend', html);
+  }
+  function applyDetailFilter(){
+    const f=document.getElementById('statsDetailFilter'); if(!f) return;
+    const q=f.value.trim().toLowerCase();
+    document.querySelectorAll('#statsDetailBody table.tbl').forEach(tbl=>{
+      const rows=detailRowsOf(tbl);
+      const vis=[];
+      rows.forEach(tr=>{
+        const hit=!q||tr.textContent.toLowerCase().indexOf(q)>=0;
+        tr.style.display=hit?'':'none';
+        if(hit) vis.push(tr);
+      });
+      buildDetailSumRow(tbl, vis);
+    });
+  }
+  function setDetailBody(html){
+    const body=document.getElementById('statsDetailBody');
+    body.innerHTML=html;
+    const f=document.getElementById('statsDetailFilter');
+    if(f){ f.value=''; }
+    const tbls=Array.from(body.querySelectorAll('table.tbl'));
+    const hasRows=tbls.some(t=>detailRowsOf(t).length>0);
+    if(f) f.style.display=hasRows?'':'none';
+    tbls.forEach(t=>buildDetailSumRow(t,null));
   }
 
   /* ---------- VAB 会员：增 / 改 / 删 / 查看 / 模板 / 导出 ---------- */
@@ -3481,6 +3545,8 @@ const PROJ_EXCLUDE = {
 
   /* 统计表：命中客户明细弹窗 关闭 */
   document.getElementById('statsDetailClose').addEventListener('click', closeStatsDetail);
+  // 下钻明细筛选框：实时过滤 + 重算合计（2026-10-21）
+  document.getElementById('statsDetailFilter').addEventListener('input', applyDetailFilter);
   // 重点项目下钻事件绑定（命中户主列表 ↔ 户主逐笔明细）
   bindProjDetailBody(document.getElementById('statsDetailBody'));
   document.getElementById('statsDetailModal').addEventListener('click', (e)=>{ if(e.target.id==='statsDetailModal') closeStatsDetail(); });
