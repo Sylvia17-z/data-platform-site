@@ -16,8 +16,8 @@
     --ink:#0f172a;
     --ink-soft:#5b6472;
     --line:#000000;
-    --up:#c0392b;      /* 业绩上涨=红（中式习惯） */
-    --down:#0a7d3b;    /* 下降=绿 */
+    --up:#c0392b;      /* 上涨/注意=红（中式习惯） */
+    --down:#0a7d3b;    /* 下降/达标=绿 */
     --font:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei","Hiragino Sans GB",Helvetica,Arial,sans-serif;
   }
   *{box-sizing:border-box;}
@@ -78,49 +78,59 @@
   .status.ok{color:#0a7d3b;}
   .status.err{color:#c0392b;}
 
-  /* ===== KPI 仪表卡 ===== */
-  .kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:14px;}
-  .kpi{
-    background:#fff;border:1px solid var(--navy-100);border-radius:12px;padding:14px 16px;
-    position:relative;overflow:hidden;box-shadow:0 1px 3px rgba(1,65,139,.06);
-  }
-  .kpi::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--navy);}
-  .kpi .label{font-size:12px;color:var(--ink-soft);}
-  .kpi .val{font-size:24px;font-weight:700;color:var(--navy-900);margin-top:4px;font-variant-numeric:tabular-nums;letter-spacing:.3px;}
-  .kpi .val small{font-size:12px;font-weight:500;color:var(--ink-soft);margin-left:2px;}
-  .kpi .sub{font-size:11.5px;color:var(--ink-soft);margin-top:5px;}
-  .kpi .sub .up{color:var(--up);font-weight:600;}
-  .kpi .sub .down{color:var(--down);font-weight:600;}
-
-  /* ===== 图表 Bento 网格 ===== */
-  .charts{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:14px;}
-  .card{background:#fff;border:1px solid var(--navy-100);border-radius:12px;padding:14px 16px;box-shadow:0 1px 3px rgba(1,65,139,.06);}
-  .card.wide{grid-column:span 2;}
-  .card h3{margin:0 0 10px;font-size:14px;color:var(--navy-900);display:flex;align-items:center;justify-content:space-between;}
+  /* ===== 表卡壳 ===== */
+  .card{background:#fff;border:1px solid var(--navy-100);border-radius:12px;padding:14px 16px;box-shadow:0 1px 3px rgba(1,65,139,.06);margin-bottom:16px;}
+  .card h3{margin:0 0 10px;font-size:14px;color:var(--navy-900);display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;}
   .card h3 .t{display:flex;align-items:center;}
   .card h3 .bar{display:inline-block;width:4px;height:14px;background:var(--navy);border-radius:2px;margin-right:8px;vertical-align:-2px;}
   .card h3 .tag{font-size:11px;color:var(--ink-soft);font-weight:400;}
-  svg{width:100%;height:auto;display:block;}
-  .legend{font-size:11.5px;color:var(--ink-soft);margin-top:6px;}
-  .donut-wrap{display:flex;align-items:center;gap:14px;}
-  .donut-legend{display:flex;flex-direction:column;gap:6px;font-size:12px;color:var(--ink-soft);}
-  .donut-legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px;vertical-align:-1px;}
-  .donut-legend b{color:var(--ink);font-variant-numeric:tabular-nums;}
+  .tbl-ops{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+  .btn{
+    border:1px solid var(--navy-100);background:var(--navy-50);color:var(--navy);
+    border-radius:7px;padding:4px 12px;font-size:12px;font-family:inherit;cursor:pointer;white-space:nowrap;
+  }
+  .btn:hover{background:var(--navy);color:#fff;border-color:var(--navy);}
+  .btn:disabled{opacity:.5;cursor:not-allowed;}
+  .table-card{overflow:auto;border-radius:8px;}
+  .mt-note{margin-top:8px;font-size:11.5px;color:var(--ink-soft);line-height:1.6;}
 
-  /* ===== 表 ===== */
-  .table-card{background:#fff;border:1px solid var(--navy-100);border-radius:12px;padding:14px 16px;overflow:auto;box-shadow:0 1px 3px rgba(1,65,139,.06);}
-  table{border-collapse:collapse;width:100%;font-size:12.5px;font-variant-numeric:tabular-nums;}
-  th,td{border:1px solid var(--line);padding:5px 8px;text-align:right;white-space:nowrap;}
-  th{background:var(--navy);color:#fff;position:sticky;top:0;}
-  td.lbl,th.lbl{text-align:left;background:var(--navy-50);color:var(--navy-900);font-weight:600;}
-  tbody tr:nth-child(even) td{background:var(--navy-50);}
-  tbody tr.hl td{background:var(--light-blue) !important;font-weight:600;}
+  /* ===== 统计表（按用户参考图版式） ===== */
+  table.mt{border-collapse:collapse;width:100%;font-size:12.5px;font-variant-numeric:tabular-nums;min-width:640px;}
+  table.mt th,table.mt td{border:1px solid var(--line);padding:5px 8px;text-align:right;white-space:nowrap;}
+  table.mt thead th{background:var(--navy);color:#fff;font-weight:600;text-align:center;position:sticky;top:0;z-index:1;}
+  table.mt td.dept{background:var(--navy-100);color:var(--navy-900);font-weight:700;text-align:center;vertical-align:middle;}
+  table.mt td.clinic{background:var(--navy-50);color:var(--navy-900);font-weight:600;text-align:center;}
+  table.mt td.doc,table.mt td.doc-lbl{text-align:left;background:#fff;color:var(--ink);}
+  table.mt tbody tr:nth-child(even) td.doc,
+  table.mt tbody tr:nth-child(even) td.doc-lbl{background:#fbfcfe;}
+  table.mt td.num{text-align:right;}
+  table.mt td.dim{color:var(--ink-soft);}
+  table.mt tr.sum td{background:var(--light-blue);font-weight:700;}
+  table.mt tr.sum td.sum-lbl{text-align:center;}
+  table.mt tr.total td{background:var(--navy-100);font-weight:700;}
+  table.mt tr.total td.sum-lbl{text-align:center;}
+  table.mt td.ref-name{color:var(--ink-soft);}
+  table.mt tr.ref-row td{background:#f7f7f7;color:var(--ink-soft);font-style:italic;}
+  table.mt tr.wu-row td.doc{color:var(--ink-soft);}
+  .ref-mark{display:inline-block;margin-left:5px;padding:0 5px;font-size:10px;font-style:normal;line-height:15px;border-radius:3px;background:#eceff3;color:var(--ink-soft);border:1px solid #dfe3e8;vertical-align:1px;}
+
+  /* 目标输入框 */
+  .tgt-input{
+    width:110px;height:26px;padding:0 8px;text-align:right;font-family:inherit;font-size:12.5px;
+    border:1px solid var(--navy-100);border-radius:5px;background:#fff;color:var(--ink);
+  }
+  .tgt-input:focus{outline:none;border-color:var(--navy-700);box-shadow:0 0 0 2px rgba(10,78,163,.15);}
+  .tgt-input:disabled{background:#f4f5f7;color:var(--ink-soft);cursor:not-allowed;}
+  td.tgt-cell{text-align:center;}
+  .rate{font-weight:600;}
+  .rate.good{color:var(--down);}
+  .rate.bad{color:var(--up);}
+
   .empty{color:var(--ink-soft);text-align:center;padding:60px 0;font-size:14px;}
-  @media(max-width:900px){ .charts{grid-template-columns:1fr 1fr;} .card.wide{grid-column:span 2;} }
   @media(max-width:640px){
-    .charts{grid-template-columns:1fr;} .card.wide{grid-column:span 1;}
-    .topbar{align-items:flex-start;}
-    .kpi .val{font-size:20px;}
+    table.mt{min-width:560px;}
+    .tgt-input{width:92px;}
+    .tbl-ops{width:100%;}
   }
 </style>
 <link rel="stylesheet" href="/shared/filterbar.css?v=20261019a">
@@ -137,7 +147,7 @@
 <div class="wrap">
   <div class="topbar">
     <h1>月度分析面板</h1>
-    <span class="sub">按月聚合业绩 / 渠道 / 科室 / 到访维度 · 支持单月聚焦</span>
+    <span class="sub">科室业绩 / 健康管家业绩双表分析 · 支持单月聚焦</span>
     <span class="month-chips" id="chips" style="display:none;"></span>
   </div>
 
@@ -153,19 +163,25 @@
       <span class="fmeta" id="fMeta"></span>
       <button type="button" class="reimport" id="reimport">重新导入</button>
     </div>
-    <div class="schema">期望字段（按关键字自动匹配）：<code>收款时间</code> <code>收款金额-现款支付</code> <code>收款金额-合计</code> <code>实际收款合计</code> <code>充值金额</code> <code>客户来源一级渠道</code> <code>开单科室</code> <code>开单咨询师</code> <code>到访类型</code> <code>会员号</code> <code>收款单号</code></div>
+    <div class="schema">期望字段（按关键字自动匹配）：<code>日期/收款时间</code> <code>收款金额-现款支付</code> <code>关联订单信息-订单开单科室</code> <code>订单所属-订单分诊医生</code> <code>关联订单信息-开单咨询师</code> <code>关联客户信息-会员号</code></div>
     <div class="status" id="status"></div>
   </div>
 
-  <div id="dashboard" style="display:none">
-    <div class="kpi-grid" id="kpi"></div>
-    <div class="charts">
-      <div class="card wide"><h3><span class="t"><span class="bar"></span>月度收款趋势（现款支付）</span><span class="tag" id="trendTag"></span></h3><div id="chartTrend"></div></div>
-      <div class="card"><h3><span class="t"><span class="bar"></span>一级渠道分布</span><span class="tag" id="chTag"></span></h3><div id="chartCh"></div><div class="legend">按现款支付汇总，取 Top10</div></div>
-      <div class="card"><h3><span class="t"><span class="bar"></span>开单科室分布</span><span class="tag" id="deptTag"></span></h3><div id="chartDept"></div><div class="legend">按现款支付汇总，取 Top10</div></div>
-      <div class="card wide"><h3><span class="t"><span class="bar"></span>月度 × 一级渠道 现款支付明细</span></h3><div id="table"></div></div>
-      <div class="card"><h3><span class="t"><span class="bar"></span>到访类型构成</span><span class="tag" id="visitTag"></span></h3><div class="donut-wrap"><div id="chartVisit" style="flex:0 0 168px;"></div><div class="donut-legend" id="visitLegend"></div></div></div>
-    </div>
+  <div id="tables" style="display:none">
+    <section class="card" id="cardDept">
+      <h3><span class="t"><span class="bar"></span>月度各科室业绩统计分析</span>
+        <span class="tbl-ops"><span class="tag" id="deptTag"></span>
+        <button type="button" class="btn" id="btnXlsxDept" title="导出表A（SheetJS 社区版不保留单元格样式，仅结构与数据）">导出表A</button></span></h3>
+      <div class="table-card"><table class="mt" id="tblDept"></table></div>
+      <div class="mt-note" id="deptNote"></div>
+    </section>
+    <section class="card" id="cardMgr">
+      <h3><span class="t"><span class="bar"></span>月度管家业绩统计分析（健康管家）</span>
+        <span class="tbl-ops"><span class="tag" id="mgrTag"></span>
+        <button type="button" class="btn" id="btnXlsxMgr" title="导出表B（SheetJS 社区版不保留单元格样式）">导出表B</button></span></h3>
+      <div class="table-card"><table class="mt" id="tblMgr"></table></div>
+      <div class="mt-note" id="mgrNote"></div>
+    </section>
   </div>
 
   <div id="placeholder" class="empty">尚未导入数据 —— 请先选择 Excel 文件。</div>
@@ -188,40 +204,96 @@
 
   function setStatus(msg,type){ status.textContent=msg; status.className='status'+(type?(' '+type):''); }
 
-  var COLS={ date:'收款时间', cash:'收款金额-现款支付', total:'收款金额-合计', actual:'实际收款合计',
-    recharge:'充值金额', ch1:'客户来源一级渠道', ch2:'客户来源二级渠道', dept:'开单科室',
-    consultant:'开单咨询师', dev:'客户开发人', visit:'到访类型', member:'会员号', receipt:'收款单号' };
+  /* ---------- 列头解析：别名数组 + 精确优先 + 包含兜底 + 命中锁定 ---------- */
+  var COLS={
+    ym:['日期','收款时间','收款日期'],
+    cash:['收款金额-现款支付','现款支付'],
+    dept:['关联订单信息-订单开单科室','订单开单科室','开单科室'],
+    doctor:['订单所属-订单分诊医生','订单分诊医生','分诊医生'],
+    consultant:['关联订单信息-开单咨询师','订单开单咨询师','开单咨询师'],
+    member:['关联客户信息-会员号','会员号']
+  };
 
   function resolveHeaders(headers){
-    var map={};
-    Object.keys(COLS).forEach(function(k){
-      var kw=COLS[k];
-      var idx=headers.findIndex(function(h){ return h && String(h).indexOf(kw)>=0; });
-      if(idx>=0) map[k]=headers[idx]; // 存表头名（sheet_to_json 的每行对象以表头名为键）
+    var map={}, used={}, keys=Object.keys(COLS);
+    function lock(i,key){ used[i]=1; map[key]=headers[i]; }
+    // pass1：按别名顺序做精确匹配（别名数组顺序即优先级）
+    keys.forEach(function(k){
+      var kws=COLS[k];
+      for(var a=0;a<kws.length;a++){
+        for(var i=0;i<headers.length;i++){
+          if(!headers[i]||used[i]) continue;
+          if(String(headers[i])===kws[a]){ lock(i,k); return; }
+        }
+      }
+    });
+    // pass2：包含兜底（跳过已被其他字段占用的表头，防止一列两吃）
+    keys.forEach(function(k){
+      if(map[k]!=null) return;
+      var kws=COLS[k];
+      for(var a=0;a<kws.length;a++){
+        for(var i=0;i<headers.length;i++){
+          if(!headers[i]||used[i]) continue;
+          if(String(headers[i]).indexOf(kws[a])>=0){ lock(i,k); return; }
+        }
+      }
     });
     return map;
   }
+
   function num(v){ if(v===null||v===undefined||v==='') return 0; var n=parseFloat(String(v).replace(/,/g,'')); return isNaN(n)?0:n; }
-  function monthKey(s){
-    if(s==null||s==='') return null;
-    var d=new Date(String(s).replace(/\.\d+$/,''));
-    if(isNaN(d.getTime())){
-      var m=String(s).match(/(\d{4})[-/年](\d{1,2})/); if(m) return m[1]+'-'+('0'+m[2]).slice(-2);
-      return null;
-    }
-    return d.getFullYear()+'-'+('0'+(d.getMonth()+1)).slice(-2);
+  function strVal(v){ return v==null?'':String(v).trim(); }
+  function excelMonth(n){
+    var d=new Date(Date.UTC(1899,11,30)+Math.floor(n)*86400000);
+    return d.getUTCFullYear()+'-'+('0'+(d.getUTCMonth()+1)).slice(-2);
+  }
+  /* Excel 日期序列号（如 46293）必须按 1899-12-30 基准换算，
+     否则 new Date("46293") 会被解析成公元 46293 年 → 产生大量假月份 */
+  function monthKey(v){
+    if(v===null||v===undefined||v==='') return null;
+    if(typeof v==='number'){ if(v>20000&&v<80000) return excelMonth(v); }
+    var s=String(v).trim();
+    if(/^\d+(\.\d+)?$/.test(s)){ var n=parseFloat(s); if(n>20000&&n<80000) return excelMonth(n); }
+    var m=s.match(/(\d{4})[-/年.](\d{1,2})/);
+    if(m) return m[1]+'-'+('0'+m[2]).slice(-2);
+    return null;
+  }
+  function rowMonth(r,map){
+    var v = (map.ym!=null) ? r[map.ym] : ((map.date!=null) ? r[map.date] : null);
+    return monthKey(v);
   }
   function fmt(n){ return n.toLocaleString('zh-CN',{minimumFractionDigits:2,maximumFractionDigits:2}); }
   function fmtInt(n){ return n.toLocaleString('zh-CN'); }
+  function escapeHtml(s){ return String(s).replace(/[&<>]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;'}[c];}); }
+  function isRealMember(m){ return m && m!=='公司所有' && m!=='无' && m!=='未归类'; }
 
   /* ---------- 仪表盘状态 ---------- */
   var dash={ rows:null, map:null, fname:'', months:[], scope:'__all__' };  // scope: '__all__' | 'YYYY-MM'
 
-  /* 数据落地 + UI 切换：本地导入与「云端恢复」共用同一条路径，保证两端表现一致 */
+  /* ---------- 口径常量 ---------- */
+  var DEPT_ORDER=['健管部','诊疗部','前台'];
+  var DEPT_OF_CLINIC={
+    '营养科':'健管部','预防医学科':'健管部','健管三组':'健管部','特需科':'健管部','特需治疗科':'健管部',
+    '全科':'诊疗部','国际门诊':'诊疗部','新妇科':'诊疗部','儿科':'诊疗部','中医科':'诊疗部',
+    '口腔科':'诊疗部','专家组':'诊疗部','体检科':'诊疗部'
+  };
+  var CLINIC_LABEL={'特需科':'特需治疗科'};
+  var CLINIC_ORDER={
+    '健管部':['预防医学科','营养科','健管三组','特需科','特需治疗科'],
+    '诊疗部':['全科','国际门诊','新妇科','儿科','中医科','口腔科','专家组','体检科']
+  };
+  var FRONT_ROWS=['营销部','团检','其他'];   // 前台组只出合计行，不列医生明细
+  var ORAL_DOCTOR='安志国';                 // 订单开单科室=口腔科 → 业绩全部计入安志国
+  var MANAGER_ROSTER=['白雪花','赵静','严淑杰','黄果','李方媛','王勤红','房雨倩','刘梓珺'];
+  var MGR_EXCLUDE=['营销部','吴雅琴','许顺华','张帆'];  // 不展示、不计入
+  var MGR_REFERENCE=['徐美琪','张亚超'];                // 展示为参考行，不计入管家合计
+  var TGT_KEY='monthly_mgr_targets_v1';
+  var TGT_DEFAULT={'无':300000,'全院合计':3000000};
+
+  /* ---------- 数据落地 + UI 切换：本地导入与「云端恢复」共用同一条路径 ---------- */
   function applyData(rows, map, fname, fromCloud){
     dash.rows=rows; dash.map=map; dash.fname=fname; dash.scope='__all__';
-    dash.months=(function(){ var s=new Set(); rows.forEach(function(r){ var m=monthKey(r[map.date]); if(m) s.add(m); }); return Array.from(s).sort(); })();
-    // 导入成功：导入卡收窄为状态条
+    dash.months=(function(){ var s=new Set(); rows.forEach(function(r){ var m=rowMonth(r,map); if(m) s.add(m); }); return Array.from(s).sort(); })();
     importCard.classList.add('mini');
     document.getElementById('drop').style.display='none';
     miniBar.style.display='flex';
@@ -243,9 +315,16 @@
         if(!rows.length){ setStatus('工作表为空，请检查数据。','err'); return; }
         var headers=Object.keys(rows[0]);
         var map=resolveHeaders(headers);
-        if(map.date==null||map.cash==null){ setStatus('未匹配到关键列（收款时间 / 收款金额-现款支付），请确认文件结构。','err'); return; }
+        if(map.cash==null){ setStatus('未匹配到关键列（收款金额-现款支付），请确认文件结构。','err'); return; }
+        if(map.ym==null&&map.date==null){ setStatus('未匹配到月份列（日期 / 收款时间），请确认文件结构。','err'); return; }
+        var miss=[];
+        if(map.dept==null) miss.push('订单开单科室');
+        if(map.doctor==null) miss.push('订单分诊医生');
+        if(map.consultant==null) miss.push('开单咨询师');
+        if(map.member==null) miss.push('会员号');
         applyData(rows, map, f.name, false);
-        if(window.KpiCloudSync) window.KpiCloudSync.markDirty();   // 数据变更 → 触发云端上传
+        if(miss.length) setStatus('已导入 '+fmtInt(rows.length)+' 行；未匹配到：'+miss.join(' / ')+'（相关表将部分为空）','ok');
+        if(window.KpiCloudSync) window.KpiCloudSync.markDirty();
       }catch(err){ setStatus('解析失败：'+err.message,'err'); }
     };
     reader.readAsArrayBuffer(f);
@@ -265,172 +344,352 @@
     });
   }
 
-  /* ---------- 仪表盘渲染 ---------- */
+  /* ================= 表A：月度各科室业绩统计分析 ================= */
+  /* 结构：部门 → 科室 → 医生；部门末出合计行；前台组仅 营销部/团检/其他 三行合计；全院合计行。
+     业绩=收款金额-现款支付；容量=去重会员号（医生为跨科室合并去重，合计行各自重新去重，故≠相加）。 */
+  function aggregateDept(rows,map){
+    var docs={}, frontCash={}, totalCash=0, totalMem=new Set();
+    var deptCash={}, deptMem={};
+    DEPT_ORDER.forEach(function(d){ deptCash[d]=0; deptMem[d]=new Set(); });
+    FRONT_ROWS.forEach(function(f){ frontCash[f]=0; });
+
+    rows.forEach(function(r){
+      var cash=num(r[map.cash]||0);
+      totalCash+=cash;
+      var mem=strVal(r[map.member]);
+      if(map.member!=null && isRealMember(mem)) totalMem.add(mem);
+      var clinic=strVal(r[map.dept])||'未归类';
+      var doctor=strVal(r[map.doctor])||'未归类';
+      if(clinic==='口腔科') doctor=ORAL_DOCTOR;      // 口腔科全部归安志国
+      var dept=DEPT_OF_CLINIC[clinic]||null;
+      if(dept){
+        deptCash[dept]+=cash;
+        if(map.member!=null && isRealMember(mem)) deptMem[dept].add(mem);
+        var d=docs[doctor];
+        if(!d){ d=docs[doctor]={cash:0,mem:new Set(),clinics:{},primary:null,primaryCash:-1}; docs[doctor]=d; }
+        d.cash+=cash;
+        if(map.member!=null && isRealMember(mem)) d.mem.add(mem);
+        d.clinics[clinic]=(d.clinics[clinic]||0)+cash;
+        if(cash>d.primaryCash){ d.primaryCash=cash; d.primary=clinic; }
+      }else{
+        // 前台类：营销部 / 团检 / 其他（前台、无、未归类、空、未映射科室）
+        var fk=(clinic==='营销部'||clinic==='团检')?clinic:'其他';
+        frontCash[fk]+=cash;
+      }
+    });
+
+    // 医生剔除无名行（无/未归类），只保留可归属到科室的医生
+    Object.keys(docs).forEach(function(k){ if(k==='无'||k==='未归类'||k==='') delete docs[k]; });
+
+    var groups=[];
+    DEPT_ORDER.forEach(function(dept){
+      if(dept==='前台'){
+        groups.push({dept:'前台',front:FRONT_ROWS.map(function(f){ return {clinic:f,cash:frontCash[f]}; })});
+        return;
+      }
+      var byClinic={};
+      Object.keys(docs).forEach(function(name){
+        var d=docs[name];
+        var cl=d.primary;
+        if(DEPT_OF_CLINIC[cl]!==dept) return;
+        (byClinic[cl]=byClinic[cl]||[]).push({name:name,cash:d.cash,cap:d.mem.size});
+      });
+      var names=Object.keys(byClinic);
+      var ordered=(CLINIC_ORDER[dept]||[]).filter(function(c){ return names.indexOf(c)>=0; });
+      names.forEach(function(c){ if(ordered.indexOf(c)<0) ordered.push(c); });
+      var clinics=ordered.map(function(c){
+        var list=byClinic[c].sort(function(a,b){ return b.cash-a.cash; });   // 0 元行保留，排最后
+        return {clinic:c,label:CLINIC_LABEL[c]||c,docs:list};
+      });
+      var docCount=0; clinics.forEach(function(c){ docCount+=c.docs.length; });
+      groups.push({
+        dept:dept, clinics:clinics, docCount:docCount,
+        subtotal:{cash:deptCash[dept],cap:deptMem[dept].size}
+      });
+    });
+    return {groups:groups, total:{cash:totalCash,cap:totalMem.size}, doctorCount:Object.keys(docs).length};
+  }
+
+  function renderDeptTable(a){
+    var html='<thead><tr><th colspan="3" class="hd-l">科室</th><th>业绩（单位：元）</th><th>容量（单位：人）</th></tr></thead><tbody>';
+    a.groups.forEach(function(g){
+      if(g.front){
+        g.front.forEach(function(fr,i){
+          if(i===0) html+='<tr><td rowspan="'+g.front.length+'" class="dept">前台</td>';
+          else html+='<tr>';
+          html+='<td class="clinic">'+escapeHtml(fr.clinic)+'</td><td class="doc-lbl">合计</td>'
+            +'<td class="num">'+fmt(fr.cash)+'</td><td class="num dim">/</td></tr>';
+        });
+        return;
+      }
+      var rowspan=g.docCount+1;   // 医生行 + 部门合计行
+      g.clinics.forEach(function(c,ci){
+        c.docs.forEach(function(d,di){
+          if(ci===0&&di===0) html+='<tr><td rowspan="'+rowspan+'" class="dept">'+escapeHtml(g.dept)+'</td>';
+          else html+='<tr>';
+          if(di===0) html+='<td rowspan="'+c.docs.length+'" class="clinic">'+escapeHtml(c.label)+'</td>';
+          html+='<td class="doc">'+escapeHtml(d.name)+'</td><td class="num">'+fmt(d.cash)+'</td><td class="num">'+fmtInt(d.cap)+'</td></tr>';
+        });
+      });
+      html+='<tr class="sum"><td colspan="2" class="sum-lbl">'+escapeHtml(g.dept)+'合计</td>'
+        +'<td class="num">'+fmt(g.subtotal.cash)+'</td><td class="num">'+fmtInt(g.subtotal.cap)+'</td></tr>';
+    });
+    html+='<tr class="total"><td colspan="3" class="sum-lbl">全院合计</td>'
+      +'<td class="num">'+fmt(a.total.cash)+'</td><td class="num">'+fmtInt(a.total.cap)+'</td></tr>';
+    html+='</tbody>';
+    document.getElementById('tblDept').innerHTML=html;
+  }
+
+  /* ================= 表B：月度管家业绩统计分析（健康管家） ================= */
+  function aggregateManager(rows,map){
+    var mgr={}, totalCash=0, totalMem=new Set();
+    rows.forEach(function(r){
+      var cash=num(r[map.cash]||0);
+      totalCash+=cash;
+      var mem=strVal(r[map.member]);
+      if(map.member!=null && isRealMember(mem)) totalMem.add(mem);
+      var name=strVal(r[map.consultant])||'无';
+      if(map.consultant==null) name='（未匹配到开单咨询师列）';
+      var m=mgr[name];
+      if(!m){ m=mgr[name]={cash:0,mem:new Set()}; mgr[name]=m; }
+      m.cash+=cash;
+      if(map.member!=null && isRealMember(mem)) m.mem.add(mem);
+    });
+    var rowsOut=[];
+    MANAGER_ROSTER.forEach(function(n){
+      var m=mgr[n];
+      rowsOut.push({name:n,cash:m?m.cash:0,kind:'roster'});
+    });
+    MGR_REFERENCE.forEach(function(n){
+      var m=mgr[n];
+      if(!m) return;
+      rowsOut.push({name:n,cash:m.cash,kind:'ref'});
+    });
+    // 其余未在名册/参考/排除名单内的开单咨询师，按业绩降序补充展示（不计入管家合计）
+    var extra=[];
+    Object.keys(mgr).forEach(function(n){
+      if(MANAGER_ROSTER.indexOf(n)>=0||MGR_REFERENCE.indexOf(n)>=0||MGR_EXCLUDE.indexOf(n)>=0) return;
+      if(n==='无') return;
+      extra.push({name:n,cash:mgr[n].cash,kind:'extra'});
+    });
+    extra.sort(function(x,y){ return y.cash-x.cash; });
+    rowsOut=rowsOut.concat(extra);
+    var rosterSum=0;
+    rowsOut.forEach(function(r){ if(r.kind==='roster') rosterSum+=r.cash; });
+    return {rows:rowsOut, rosterSum:rosterSum, none:mgr['无']?mgr['无'].cash:0, total:{cash:totalCash,cap:totalMem.size}, mgr:mgr};
+  }
+
+  function tgtStore(){ try{ return JSON.parse(localStorage.getItem(TGT_KEY))||{}; }catch(e){ return {}; } }
+  function tgtGet(scope,name){
+    var s=tgtStore(), b=s[scope]||{};
+    var v=b[name];
+    if(v==null||v==='') return (TGT_DEFAULT[name]!=null?TGT_DEFAULT[name]:0);
+    var n=Number(v); return isNaN(n)?0:n;
+  }
+  function tgtSet(scope,name,v){
+    var s=tgtStore();
+    s[scope]=s[scope]||{};
+    s[scope][name]=v;
+    try{ localStorage.setItem(TGT_KEY,JSON.stringify(s)); }catch(e){}
+  }
+  function rateText(actual,target){
+    if(!(target>0)) return {txt:'/',cls:''};
+    var p=actual/target*100;
+    return {txt:p.toFixed(1)+'%',cls:p>=100?'good':'bad'};
+  }
+
+  function renderManagerTable(b,monthLabel){
+    var scope=dash.scope;
+    var html='<thead>'
+      +'<tr><th rowspan="2" class="hd-l">健康管家</th><th colspan="3">'+escapeHtml(monthLabel)+'</th></tr>'
+      +'<tr><th>月业绩目标</th><th>实际完成</th><th>月完成率</th></tr></thead><tbody>';
+    b.rows.forEach(function(r){
+      var tgt=tgtGet(scope,r.name);
+      var rt=rateText(r.cash,tgt);
+      var cls=r.kind==='ref'?' class="ref-row"':'';
+      var nameHtml=escapeHtml(r.name)+(r.kind==='ref'?'<i class="ref-mark">参考</i>':'');
+      html+='<tr'+cls+'><td class="doc'+(r.kind==='ref'?' ref-name':'')+'">'+nameHtml+'</td>'
+        +'<td class="tgt-cell"><input class="tgt-input" type="number" step="0.01" min="0" data-rbac="editTargets" data-name="'+escapeHtml(r.name)+'" value="'+(tgt||'')+'" title="月业绩目标（可手工编辑，按月保存）"></td>'
+        +'<td class="num rate bad">'+fmt(r.cash)+'</td>'
+        +'<td class="num rate '+rt.cls+'" data-rate-for="'+escapeHtml(r.name)+'">'+rt.txt+'</td></tr>';
+    });
+    // 「无」行：未填开单咨询师的订单
+    var noneTgt=tgtGet(scope,'无'), noneRt=rateText(b.none,noneTgt);
+    html+='<tr class="wu-row"><td class="doc">无</td>'
+      +'<td class="tgt-cell"><input class="tgt-input" type="number" step="0.01" min="0" data-rbac="editTargets" data-name="无" value="'+(noneTgt||'')+'" title="月业绩目标（可手工编辑，按月保存）"></td>'
+      +'<td class="num rate bad">'+fmt(b.none)+'</td>'
+      +'<td class="num rate '+noneRt.cls+'" data-rate-for="无">'+noneRt.txt+'</td></tr>';
+    // 管家合计（名册口径）
+    var sumTgt=0;
+    b.rows.forEach(function(r){ if(r.kind==='roster') sumTgt+=tgtGet(scope,r.name); });
+    var sumRt=rateText(b.rosterSum,sumTgt);
+    html+='<tr class="sum"><td class="doc">管家合计</td>'
+      +'<td class="num">'+(sumTgt?fmt(sumTgt):'0')+'</td>'
+      +'<td class="num rate bad">'+fmt(b.rosterSum)+'</td>'
+      +'<td class="num rate '+sumRt.cls+'" data-rate-for="管家合计">'+sumRt.txt+'</td></tr>';
+    // 全院合计
+    var allTgt=tgtGet(scope,'全院合计'), allRt=rateText(b.total.cash,allTgt);
+    html+='<tr class="total"><td class="doc">全院合计</td>'
+      +'<td class="tgt-cell"><input class="tgt-input" type="number" step="0.01" min="0" data-rbac="editTargets" data-name="全院合计" value="'+(allTgt||'')+'" title="月业绩目标（可手工编辑，按月保存）"></td>'
+      +'<td class="num rate bad">'+fmt(b.total.cash)+'</td>'
+      +'<td class="num rate '+allRt.cls+'" data-rate-for="全院合计">'+allRt.txt+'</td></tr>';
+    html+='</tbody>';
+    var tbl=document.getElementById('tblMgr');
+    tbl.innerHTML=html;
+    tbl.querySelectorAll('.tgt-input').forEach(function(inp){
+      inp.addEventListener('input',function(){
+        var name=inp.dataset.name, v=parseFloat(inp.value);
+        tgtSet(dash.scope,name,isNaN(v)?0:v);
+        refreshManagerRates(b);
+        if(window.KpiCloudSync) window.KpiCloudSync.markDirty();
+      });
+    });
+  }
+
+  /* 目标输入后只刷新完成率与合计目标，不整表重绘（避免输入框失焦） */
+  function refreshManagerRates(b){
+    var scope=dash.scope;
+    var tbl=document.getElementById('tblMgr');
+    b.rows.forEach(function(r){
+      var rt=rateText(r.cash,tgtGet(scope,r.name));
+      var cell=tbl.querySelector('[data-rate-for="'+cssEsc(r.name)+'"]');
+      if(cell){ cell.textContent=rt.txt; cell.className='num rate '+rt.cls; }
+    });
+    var noneRt=rateText(b.none,tgtGet(scope,'无'));
+    var nc=tbl.querySelector('[data-rate-for="无"]');
+    if(nc){ nc.textContent=noneRt.txt; nc.className='num rate '+noneRt.cls; }
+    var sumTgt=0;
+    b.rows.forEach(function(r){ if(r.kind==='roster') sumTgt+=tgtGet(scope,r.name); });
+    var sumRt=rateText(b.rosterSum,sumTgt);
+    var sumTgtCell=tbl.querySelector('tr.sum td.num');
+    if(sumTgtCell) sumTgtCell.textContent=sumTgt?fmt(sumTgt):'0';
+    var sc=tbl.querySelector('[data-rate-for="管家合计"]');
+    if(sc){ sc.textContent=sumRt.txt; sc.className='num rate '+sumRt.cls; }
+    var allRt=rateText(b.total.cash,tgtGet(scope,'全院合计'));
+    var ac=tbl.querySelector('[data-rate-for="全院合计"]');
+    if(ac){ ac.textContent=allRt.txt; ac.className='num rate '+allRt.cls; }
+  }
+  function cssEsc(s){ return String(s).replace(/"/g,'\\"'); }
+
+  /* ---------- 总渲染入口 ---------- */
   function renderDashboard(){
     var all=dash.rows, map=dash.map;
     if(!all||!all.length) return;
     renderChips();
-    var inScope = dash.scope==='__all__' ? all : all.filter(function(r){ return monthKey(r[map.date])===dash.scope; });
+    var inScope = dash.scope==='__all__' ? all : all.filter(function(r){ return rowMonth(r,map)===dash.scope; });
+    var monthLabel = dash.scope==='__all__'
+      ? (dash.months.length ? (parseInt(dash.months[dash.months.length-1].slice(5),10)+'月') : '全部月份')
+      : (parseInt(dash.scope.slice(5),10)+'月');
     var scopeLabel = dash.scope==='__all__' ? '全部月份' : dash.scope;
 
-    // ===== 聚合（作用域内） =====
-    var byCh={}, byDept={}, byVisit={}, custSet=new Set(), recvSet=new Set();
-    var sumCash=0,sumTotal=0,sumActual=0,sumRecharge=0,cnt=0;
-    inScope.forEach(function(r){
-      var cash=num(r[map.cash]); sumCash+=cash; cnt++;
-      if(map.total!=null) sumTotal+=num(r[map.total]);
-      if(map.actual!=null) sumActual+=num(r[map.actual]);
-      if(map.recharge!=null) sumRecharge+=num(r[map.recharge]);
-      if(map.ch1!=null){ var c=String(r[map.ch1]||'未归类'); byCh[c]=(byCh[c]||0)+cash; }
-      if(map.dept!=null){ var d=String(r[map.dept]||'未归类'); byDept[d]=(byDept[d]||0)+cash; }
-      if(map.visit!=null){ var v=String(r[map.visit]||'未归类'); byVisit[v]=(byVisit[v]||0)+1; }
-      if(map.member!=null){ var m=String(r[map.member]).trim(); if(m && m!=='公司所有' && m!=='无' && m!=='未归类') custSet.add(m); }
-      if(map.receipt!=null){ var rc=String(r[map.receipt]||'').trim(); if(rc) recvSet.add(rc); }
-    });
-
-    // ===== 月度序列（趋势恒为全量，用于环比与高亮） =====
-    var byMonth={};
-    all.forEach(function(r){
-      var mk=monthKey(r[map.date]); if(!mk) return;
-      byMonth[mk]=byMonth[mk]||{cash:0}; byMonth[mk].cash+=num(r[map.cash]);
-    });
-    var months=Object.keys(byMonth).sort();
-
     document.getElementById('placeholder').style.display='none';
-    document.getElementById('dashboard').style.display='block';
+    document.getElementById('tables').style.display='block';
 
-    // ===== KPI（含现款收款环比） =====
-    var kpiLabelCash = dash.scope==='__all__' ? '总现款收款' : '当月现款收款';
-    var subCash='';
-    var scopeIdx = dash.scope==='__all__' ? months.length-1 : months.indexOf(dash.scope);
-    if(months.length>=2 && scopeIdx>0){
-      var cur=byMonth[months[scopeIdx]].cash, prev=byMonth[months[scopeIdx-1]].cash;
-      if(prev>0){
-        var pct=(cur-prev)/prev*100;
-        var cls=pct>=0?'up':'down', arrow=pct>=0?'▲':'▼';
-        var base = dash.scope==='__all__' ? ('最新月 '+months[scopeIdx]) : ('环比上月 '+months[scopeIdx-1]);
-        subCash = base+'：<span class="'+cls+'">'+arrow+' '+Math.abs(pct).toFixed(1)+'%</span>';
-      }
-    } else if(dash.scope==='__all__' && months.length){
-      subCash='最新月 '+months[months.length-1]+'：'+fmt(byMonth[months[months.length-1]].cash)+' 元';
-    }
-    var kpis=[
-      {label:kpiLabelCash,val:fmt(sumCash),unit:'元',sub:subCash},
-      {label: dash.scope==='__all__'?'收款笔数':'当月收款笔数',val:fmtInt(recvSet.size||cnt),unit:'笔'},
-      {label: dash.scope==='__all__'?'客户数(去重)':'当月客户数',val:fmtInt(custSet.size),unit:'人'},
-      {label: dash.scope==='__all__'?'总合计收款':'当月合计收款',val:fmt(sumTotal),unit:'元'},
-      {label: dash.scope==='__all__'?'总实际收款':'当月实际收款',val:fmt(sumActual),unit:'元'},
-      {label: dash.scope==='__all__'?'总充值金额':'当月充值金额',val:fmt(sumRecharge),unit:'元'}
-    ];
-    document.getElementById('kpi').innerHTML=kpis.map(function(k){
-      return '<div class="kpi"><div class="label">'+k.label+'</div><div class="val">'+k.val+' <small>'+k.unit+'</small></div>'
-        + (k.sub?'<div class="sub">'+k.sub+'</div>':'') + '</div>';
-    }).join('');
+    var a=aggregateDept(inScope,map);
+    renderDeptTable(a);
+    var b=aggregateManager(inScope,map);
+    renderManagerTable(b,monthLabel);
 
-    // ===== 趋势（恒为全量月份；作用域月高亮） =====
-    var hl = dash.scope==='__all__' ? months.length-1 : months.indexOf(dash.scope);
-    document.getElementById('trendTag').textContent = dash.scope==='__all__' ? '全部月份' : ('高亮 '+dash.scope);
-    drawTrend('chartTrend', months.map(function(m,i){return {label:m.slice(5)+'月',value:byMonth[m].cash,hl:i===hl};}));
-
-    // ===== 分布图（作用域内） =====
-    document.getElementById('chTag').textContent=scopeLabel;
     document.getElementById('deptTag').textContent=scopeLabel;
-    document.getElementById('visitTag').textContent=scopeLabel;
-    var chTop=Object.keys(byCh).map(function(k){return {label:k,value:byCh[k]};}).sort(function(a,b){return b.value-a.value;}).slice(0,10);
-    drawBars('chartCh', chTop);
-    var deptTop=Object.keys(byDept).map(function(k){return {label:k,value:byDept[k]};}).sort(function(a,b){return b.value-a.value;}).slice(0,10);
-    drawBars('chartDept', deptTop);
-    var visitArr=Object.keys(byVisit).map(function(k){return {label:k,value:byVisit[k]};}).sort(function(a,b){return b.value-a.value;});
-    drawDonut('chartVisit', visitArr);
-    document.getElementById('visitLegend').innerHTML = visitArr.map(function(d,i){
-      return '<div><i style="background:'+PALETTE[i%PALETTE.length]+'"></i>'+escapeHtml(d.label)+' <b>'+fmtInt(d.value)+'</b> 笔 · '+(cnt?(d.value/cnt*100).toFixed(1):0)+'%</div>';
-    }).join('');
-
-    // ===== 矩阵表（恒为全月；作用域月高亮行） =====
-    drawMatrix(months, byCh, inScope, map, dash.scope);
+    document.getElementById('mgrTag').textContent=scopeLabel;
+    document.getElementById('deptNote').textContent=
+      '口径：业绩＝收款金额-现款支付合计；容量＝去重会员号数（医生容量为该医生全部订单跨科室合并去重，部门/全院合计为各自重新去重，故不等于各行相加）。'
+      +'「关联订单信息-订单开单科室」为口腔科的订单，业绩全部计入安志国。前台组（营销部/团检/其他）不列医生明细，容量不统计。'
+      +'月份以「日期」列为准，未匹配时回退「收款时间」。';
+    document.getElementById('mgrNote').textContent=
+      '口径：实际完成＝「关联订单信息-开单咨询师」名下的现款支付合计；「无」＝未填开单咨询师的订单；'
+      +'营销部 / 吴雅琴 / 许顺华 / 张帆 不纳入管家统计；'+MGR_REFERENCE.join(' / ')+' 为参考行（显示但不计入管家合计）。'
+      +'月业绩目标可手工编辑，按月份分别保存并同步云端；完成率＝实际完成 ÷ 月业绩目标，目标 ≤0 显示「/」。';
   }
 
-  var PALETTE=['#01418B','#0a4ea3','#3f74b8','#6f9bd1','#9cc0e8','#c2d7ef','#5588b8','#2f5f9e','#87a9d4','#b0c8e8'];
-
-  function maxVal(arr){ return arr.reduce(function(m,x){return Math.max(m,x.value);},0)||1; }
-
-  function drawTrend(id,data){
-    var W=560,H=210,padL=10,padB=24,padT=12,padR=10;
-    var n=data.length||1, bw=Math.max(18,(W-padL-padR)/n*0.6), gap=(W-padL-padR)/n;
-    var mx=maxVal(data), svg='';
-    data.forEach(function(d,i){
-      var h=mx? (d.value/mx)*(H-padB-padT):0;
-      var x=padL+gap*i+(gap-bw)/2, y=H-padB-h;
-      svg+='<rect x="'+x.toFixed(1)+'" y="'+y.toFixed(1)+'" width="'+bw.toFixed(1)+'" height="'+h.toFixed(1)+'" fill="'+(d.hl?'#01418B':'#9cc0e8')+'" rx="2"></rect>';
-      svg+='<text x="'+(x+bw/2).toFixed(1)+'" y="'+(y-4).toFixed(1)+'" font-size="10" fill="#003366" text-anchor="middle">'+shortNum(d.value)+'</text>';
-      svg+='<text x="'+(x+bw/2).toFixed(1)+'" y="'+(H-8)+'" font-size="10.5" fill="'+(d.hl?'#01418B':'#5b6472')+'" text-anchor="middle" '+(d.hl?'font-weight="700"':'')+'>'+d.label+'</text>';
-    });
-    document.getElementById(id).innerHTML='<svg viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="xMidYMid meet">'+svg+'</svg>';
-  }
-
-  function drawBars(id,data){
-    var rowH=22,gap=4,W=520,padL=92,padR=58;
-    var H=Math.max(1,data.length)*(rowH+gap)+8, mx=maxVal(data), svg='';
-    if(!data.length){ svg='<text x="'+(W/2)+'" y="40" font-size="12" fill="#5b6472" text-anchor="middle">该范围无数据</text>'; }
-    data.forEach(function(d,i){
-      var y=8+i*(rowH+gap);
-      var w=mx? (d.value/mx)*(W-padL-padR):0;
-      var label=d.label.length>7?d.label.slice(0,7)+'…':d.label;
-      svg+='<text x="'+(padL-6)+'" y="'+(y+rowH/2+4)+'" font-size="11.5" fill="#0f172a" text-anchor="end">'+escapeHtml(label)+'</text>';
-      svg+='<rect x="'+padL+'" y="'+y+'" width="'+Math.max(1,w).toFixed(1)+'" height="'+rowH+'" fill="#0a4ea3" rx="3"></rect>';
-      svg+='<text x="'+(padL+Math.max(1,w)+6)+'" y="'+(y+rowH/2+4)+'" font-size="10.5" fill="#5b6472">'+shortNum(d.value)+'</text>';
-    });
-    document.getElementById(id).innerHTML='<svg viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="xMidYMid meet">'+svg+'</svg>';
-  }
-
-  // 到访类型环形图（仪表盘风格）
-  function drawDonut(id,data){
-    var W=168,H=168,cx=W/2,cy=H/2,r=64,sw=26;
-    var total=data.reduce(function(a,b){return a+b.value;},0), svg='';
-    if(!total){
-      svg='<text x="'+cx+'" y="'+cy+'" font-size="12" fill="#5b6472" text-anchor="middle">无数据</text>';
-    } else {
-      var angle=-Math.PI/2;
-      data.forEach(function(d,i){
-        var frac=d.value/total, a2=angle+frac*Math.PI*2;
-        var large=frac>0.5?1:0;
-        var x1=cx+r*Math.cos(angle), y1=cy+r*Math.sin(angle);
-        var x2=cx+r*Math.cos(a2), y2=cy+r*Math.sin(a2);
-        if(frac>=0.9999){
-          svg+='<circle cx="'+cx+'" cy="'+cy+'" r="'+r+'" fill="none" stroke="'+PALETTE[0]+'" stroke-width="'+sw+'"></circle>';
-        } else {
-          svg+='<path d="M '+x1.toFixed(2)+' '+y1.toFixed(2)+' A '+r+' '+r+' 0 '+large+' 1 '+x2.toFixed(2)+' '+y2.toFixed(2)+'" fill="none" stroke="'+PALETTE[i%PALETTE.length]+'" stroke-width="'+sw+'"></path>';
-        }
-        angle=a2;
+  /* ================= 导出 ================= */
+  function buildDeptAoa(a){
+    var aoa=[['科室','','','业绩（单位：元）','容量（单位：人）']];
+    var merges=[{s:{r:0,c:0},e:{r:0,c:2}}];
+    function merge(r1,c1,r2,c2){ if(r1===r2&&c1===c2) return; merges.push({s:{r:r1,c:c1},e:{r:r2,c:c2}}); }
+    a.groups.forEach(function(g){
+      var r0=aoa.length;
+      if(g.front){
+        g.front.forEach(function(fr,i){
+          if(i===0) aoa.push([g.dept,fr.clinic,'合计',fr.cash,'/']);
+          else aoa.push(['',fr.clinic,'合计',fr.cash,'/']);
+        });
+        merge(r0,0,r0+g.front.length-1,0);
+        return;
+      }
+      g.clinics.forEach(function(c){
+        var cr0=aoa.length;
+        c.docs.forEach(function(d,di){
+          if(di===0) aoa.push(['',c.label,d.name,d.cash,d.cap]);
+          else aoa.push(['','',d.name,d.cash,d.cap]);
+        });
+        merge(cr0,1,aoa.length-1,1);
       });
-      svg+='<text x="'+cx+'" y="'+(cy-2)+'" font-size="16" font-weight="700" fill="#003366" text-anchor="middle">'+fmtInt(total)+'</text>';
-      svg+='<text x="'+cx+'" y="'+(cy+15)+'" font-size="10" fill="#5b6472" text-anchor="middle">总笔数</text>';
-    }
-    document.getElementById(id).innerHTML='<svg viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="xMidYMid meet">'+svg+'</svg>';
-  }
-
-  function drawMatrix(months,byCh,inScope,map,scope){
-    // 计算月份 × 渠道 现款支付（恒为全量月份；当前作用域月高亮）
-    var cell={};
-    var chans=Object.keys(byCh).sort(function(a,b){return byCh[b]-byCh[a];}).slice(0,6);
-    (dash.rows||[]).forEach(function(r){
-      var mk=monthKey(r[map.date]); if(!mk) return;
-      var c=(map.ch1!=null)?String(r[map.ch1]||'未归类'):'未归类';
-      if(chans.indexOf(c)<0) c='其他';
-      if(c==='其他'){ if(!chans.includes('其他')) chans.push('其他'); }
-      cell[mk]=cell[mk]||{}; cell[mk][c]=(cell[mk][c]||0)+num(r[map.cash]);
+      aoa.push(['',g.dept+'合计','',g.subtotal.cash,g.subtotal.cap]);
+      merge(aoa.length-1,0,aoa.length-1,1);
+      merge(r0,0,aoa.length-1,0);
     });
-    var head='<tr><th class="lbl">月份＼渠道</th>'+chans.map(function(c){return '<th>'+escapeHtml(c)+'</th>';}).join('')+'<th>合计</th></tr>';
-    var body=months.map(function(m){
-      var sum=0, tds=chans.map(function(c){ var v=cell[m]&&cell[m][c]?cell[m][c]:0; sum+=v; return '<td>'+fmt(v)+'</td>'; }).join('');
-      var hlCls=(scope===m)?' class="hl"':'';
-      return '<tr'+hlCls+'><td class="lbl">'+m+'</td>'+tds+'<td><b>'+fmt(sum)+'</b></td></tr>';
-    }).join('');
-    document.getElementById('table').innerHTML='<table>'+head+body+'</table>';
+    aoa.push(['','','全院合计',a.total.cash,a.total.cap]);
+    merge(aoa.length-1,0,aoa.length-1,2);
+    return {aoa:aoa,merges:merges};
   }
 
-  function shortNum(n){ if(Math.abs(n)>=10000) return (n/10000).toFixed(1)+'万'; if(Math.abs(n)>=1000) return (n/1000).toFixed(1)+'k'; return fmt(n); }
-  function escapeHtml(s){ return String(s).replace(/[&<>]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;'}[c];}); }
+  function buildMgrAoa(b,monthLabel){
+    var scope=dash.scope;
+    var aoa=[['健康管家',monthLabel,'',''],['','月业绩目标','实际完成','月完成率']];
+    var merges=[{s:{r:0,c:0},e:{r:1,c:0}},{s:{r:0,c:1},e:{r:0,c:3}}];
+    b.rows.forEach(function(r){
+      var t=tgtGet(scope,r.name);
+      aoa.push([r.name+(r.kind==='ref'?'（参考）':''),t||0,r.cash,(t>0?r.cash/t:null)]);
+    });
+    aoa.push(['无',tgtGet(scope,'无')||0,b.none,(tgtGet(scope,'无')>0?b.none/tgtGet(scope,'无'):null)]);
+    var sumTgt=0;
+    b.rows.forEach(function(r){ if(r.kind==='roster') sumTgt+=tgtGet(scope,r.name); });
+    aoa.push(['管家合计',sumTgt,b.rosterSum,(sumTgt>0?b.rosterSum/sumTgt:null)]);
+    aoa.push(['全院合计',tgtGet(scope,'全院合计')||0,b.total.cash,(tgtGet(scope,'全院合计')>0?b.total.cash/tgtGet(scope,'全院合计'):null)]);
+    // 完成率列设为百分比格式
+    for(var i=2;i<aoa.length;i++){
+      var cell=aoa[i][3];
+      if(cell!=null && !isNaN(cell)){
+        aoa[i][3]={v:cell,t:'n',z:'0.0%'};
+      }else{
+        aoa[i][3]='/';
+      }
+    }
+    return {aoa:aoa,merges:merges};
+  }
+
+  function exportTable(which){
+    if(!dash.rows||!dash.rows.length||!window.XLSX){ setStatus('暂无数据可导出。','err'); return; }
+    var inScope = dash.scope==='__all__' ? dash.rows : dash.rows.filter(function(r){ return rowMonth(r,dash.map)===dash.scope; });
+    var suffix = dash.scope==='__all__' ? '全部月份' : dash.scope;
+    try{
+      if(which==='dept'){
+        var m=buildDeptAoa(aggregateDept(inScope,dash.map));
+        var ws=XLSX.utils.aoa_to_sheet(m.aoa);
+        ws['!merges']=m.merges;
+        ws['!cols']=[{wch:12},{wch:16},{wch:14},{wch:18},{wch:14}];
+        var wb=XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb,ws,'各科室业绩统计');
+        XLSX.writeFile(wb,'月度各科室业绩统计_'+suffix+'.xlsx');
+        setStatus('已导出表A：月度各科室业绩统计_'+suffix+'.xlsx','ok');
+      }else{
+        var monthLabel = dash.scope==='__all__'
+          ? (dash.months.length ? (parseInt(dash.months[dash.months.length-1].slice(5),10)+'月') : '全部月份')
+          : (parseInt(dash.scope.slice(5),10)+'月');
+        var mm=buildMgrAoa(aggregateManager(inScope,dash.map),monthLabel);
+        var ws2=XLSX.utils.aoa_to_sheet(mm.aoa);
+        ws2['!merges']=mm.merges;
+        ws2['!cols']=[{wch:16},{wch:14},{wch:16},{wch:12}];
+        var wb2=XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb2,ws2,'管家业绩统计');
+        XLSX.writeFile(wb2,'月度管家业绩统计_'+suffix+'.xlsx');
+        setStatus('已导出表B：月度管家业绩统计_'+suffix+'.xlsx','ok');
+      }
+    }catch(err){ setStatus('导出失败：'+err.message,'err'); }
+  }
+  document.getElementById('btnXlsxDept').addEventListener('click',function(){ exportTable('dept'); });
+  document.getElementById('btnXlsxMgr').addEventListener('click',function(){ exportTable('mgr'); });
 
   /* ---------- 云端持久化（WorkBuddy Cloud Service，按账号隔离） ----------
    * 目的：导入的明细与聚合结果不随浏览器/设备丢失。整包 JSONB 快照存 dp_monthly，
@@ -440,12 +699,29 @@
   var KPI_TS_KEY = 'kpi_cloud_ts_monthly';
   function dashPayload(){
     if(!dash.rows || !dash.rows.length || !dash.map) return null;
-    return { rows: dash.rows, map: dash.map, fname: dash.fname || '', scope: dash.scope || '__all__', ts: Date.now() };
+    return { rows: dash.rows, map: dash.map, fname: dash.fname || '', scope: dash.scope || '__all__', targets: tgtStore(), ts: Date.now() };
   }
   function applyDashPayload(p){
-    if(!p || !Array.isArray(p.rows) || !p.rows.length || !p.map || p.map.date == null) return;
-    applyData(p.rows, p.map, p.fname || '云端数据', true);
-    if(p.scope){ dash.scope = p.scope; renderDashboard(); }
+    if(!p || !Array.isArray(p.rows) || !p.rows.length || !p.map) return;
+    var map=p.map;
+    if(typeof map==='string'){ try{ map=JSON.parse(map); }catch(e){} }
+    if(!map || typeof map!=='object') return;
+    // 旧快照的 map 可能是旧表头键 → 用当前表头重算一次，失败再回退旧 map
+    try{
+      var fresh=resolveHeaders(Object.keys(p.rows[0]||{}));
+      if(fresh.cash!=null && (fresh.ym!=null||fresh.date!=null)) map=fresh;
+    }catch(e){}
+    if(map.cash==null) return;
+    if(p.targets && typeof p.targets==='object'){
+      try{
+        var s=tgtStore();
+        Object.keys(p.targets).forEach(function(k){ if(!s[k] || !Object.keys(s[k]||{}).length) s[k]=p.targets[k]; });
+        localStorage.setItem(TGT_KEY,JSON.stringify(s));
+      }catch(e){}
+    }
+    applyData(p.rows, map, p.fname || '云端数据', true);
+    if(p.scope){ dash.scope=p.scope; }
+    renderDashboard();
   }
   if(window.KpiCloudSync){
     window.KpiCloudSync.start({
@@ -471,6 +747,7 @@
     'export-xlsx':'export','export-png':'export','export-store-xlsx':'export','export-store-png':'export',
     'vabExport':'export','orderExport':'export','chargeExport':'export','statsExport':'export',
     'consExport':'export','projExport':'export','projExportMap':'export','btnPng':'export','btnXlsx':'export','btnNextPng':'export','btnNextXlsx':'export',
+    'btnXlsxDept':'export','btnXlsxMgr':'export',
     'clear-vab':'clear','clear-manual':'clear','clear-date':'clear','clear-all':'clear','projClearMap':'clear','btnClearOV':'clear',
     'edit-vab':'editVab','vab-add-save':'editVab','recompute':'recompute'
   };
