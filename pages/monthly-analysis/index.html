@@ -44,39 +44,33 @@
   .chip:hover{border-color:var(--navy-700);background:var(--navy-50);}
   .chip.active{background:var(--navy);border-color:var(--navy);color:#fff;font-weight:600;box-shadow:0 2px 8px rgba(1,65,139,.25);}
 
-  /* ===== 导入区 ===== */
+  /* ===== 导入区（与其他页统一的 .dataseg 按钮格式，2026-10-21） ===== */
   .import-card{
     background:#fff;border:1px solid var(--navy-100);border-radius:10px;
-    padding:16px 18px;margin-bottom:18px;transition:.2s;
+    padding:10px 14px;margin-bottom:18px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+    transition:.2s;
   }
-  .import-card.mini{
-    padding:10px 14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;cursor:pointer;
+  .import-card.drag{border-color:var(--navy-700);background:var(--navy-50);}
+  .import-card .seg-label{font-size:12.5px;color:var(--ink-soft);font-weight:500;white-space:nowrap;}
+  .import-card .seg-status{display:flex;align-items:center;gap:10px;flex-wrap:wrap;min-width:0;}
+  @media (min-width:721px){ .import-card .seg-status{margin-left:auto;justify-content:flex-end;text-align:right;} }
+  .file-meta{font-size:12px;color:var(--ink-soft);}
+  .merge-opt{font-size:12px;color:var(--ink-soft);display:inline-flex;align-items:center;gap:4px;cursor:pointer;}
+  .merge-opt input{cursor:pointer;margin:0;}
+  .btn{
+    cursor:pointer;border:1px solid var(--navy-100);background:#fff;color:var(--ink);
+    border-radius:6px;padding:6px 14px;font-size:13px;font-weight:500;display:inline-flex;align-items:center;gap:6px;
+    font-family:inherit;transition:all .15s ease;user-select:none;white-space:nowrap;
   }
-  .import-card.mini .drop{display:none;}
-  .import-card.mini .schema{display:none;}
-  .import-card.mini .mini-bar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:12.5px;}
-  .mini-bar .ficon{font-size:16px;}
-  .mini-bar .fname{font-weight:600;color:var(--navy-900);}
-  .mini-bar .fmeta{color:var(--ink-soft);}
-  .mini-bar .reimport{
-    margin-left:auto;border:1px solid var(--navy-100);background:var(--navy-50);color:var(--navy);
-    border-radius:7px;padding:4px 12px;font-size:12px;font-family:inherit;cursor:pointer;
-  }
-  .mini-bar .reimport:hover{background:var(--navy);color:#fff;border-color:var(--navy);}
-  .drop{
-    border:2px dashed var(--navy-100);border-radius:10px;background:var(--navy-50);
-    padding:22px;text-align:center;cursor:pointer;transition:.15s;
-  }
-  .drop:hover,.drop.drag{border-color:var(--navy-700);background:var(--light-blue);}
-  .drop b{color:var(--navy);}
-  .drop .hint{color:var(--ink-soft);font-size:12px;margin-top:6px;}
-  .schema{margin-top:10px;font-size:12px;color:var(--ink-soft);}
-  .schema code{background:var(--navy-50);padding:1px 6px;border-radius:4px;color:var(--navy-900);}
+  .btn:hover{border-color:var(--navy-700);color:var(--navy-700);box-shadow:0 2px 8px rgba(1,65,139,.12);transform:translateY(-1px);}
+  .btn:active{transform:translateY(0);}
+  .btn-primary{background:var(--navy);color:#fff;border-color:var(--navy);}
+  .btn-primary:hover{background:var(--navy-900);color:#fff;border-color:var(--navy-900);box-shadow:0 4px 12px rgba(0,32,96,.25);}
   #file{display:none;}
   .status{margin-top:10px;font-size:12.5px;min-height:18px;}
-  .import-card.mini .status{margin:0;min-height:0;flex-basis:100%;}
   .status.ok{color:#0a7d3b;}
   .status.err{color:#c0392b;}
+  .drop-hint{font-size:11.5px;color:var(--ink-soft);}
 
   /* ===== 表卡壳 ===== */
   .card{background:#fff;border:1px solid var(--navy-100);border-radius:12px;padding:14px 16px;box-shadow:0 1px 3px rgba(1,65,139,.06);margin-bottom:16px;}
@@ -152,19 +146,17 @@
   </div>
 
   <div class="import-card" id="importCard">
-    <div class="drop" id="drop">
-      <div><b>点击或拖拽</b> 选择 Excel 文件（.xlsx）</div>
-      <div class="hint">支持「订单项目收退款表-明细」同结构文件；数据仅在本机浏览器解析，不上传。</div>
-    </div>
+    <span class="seg-label">数据明细</span>
     <input type="file" id="file" accept=".xlsx,.xls" />
-    <div class="mini-bar" id="miniBar" style="display:none;">
-      <span class="ficon">📊</span>
-      <span class="fname" id="fName"></span>
-      <span class="fmeta" id="fMeta"></span>
-      <button type="button" class="reimport" id="reimport">重新导入</button>
-    </div>
-    <div class="schema">期望字段（按关键字自动匹配）：<code>日期/收款时间</code> <code>收款金额-现款支付</code> <code>关联订单信息-订单开单科室</code> <code>订单所属-订单分诊医生</code> <code>关联订单信息-开单咨询师</code> <code>关联客户信息-会员号</code></div>
-    <div class="status" id="status"></div>
+    <label for="file" class="btn btn-primary" title="导入「订单项目收退款表-明细」同结构文件；按下方复选框决定覆盖或补充导入">📁 上传数据表</label>
+    <span class="seg-status">
+      <span id="fMeta" class="file-meta">未导入</span>
+      <label class="merge-opt" title="勾选=补充导入（重叠日期用新文件覆盖，其它日期保留）；不勾=覆盖导入（清空后重新导入）">
+        <input type="checkbox" id="merge-mode" checked /> 合并到历史数据（重叠日期覆盖，其它日期保留）
+      </label>
+      <span class="drop-hint">也可把文件拖到此处</span>
+    </span>
+    <div class="status" id="status" style="flex-basis:100%;"></div>
   </div>
 
   <div id="tables" style="display:none">
@@ -192,15 +184,12 @@
 <script>
 (function(){
   'use strict';
-  var drop=document.getElementById('drop'), file=document.getElementById('file'), status=document.getElementById('status');
-  var importCard=document.getElementById('importCard'), miniBar=document.getElementById('miniBar');
-  drop.addEventListener('click',function(){file.click();});
-  miniBar.addEventListener('click',function(e){ if(e.target.id!=='reimport') file.click(); });
-  document.getElementById('reimport').addEventListener('click',function(e){ e.stopPropagation(); file.click(); });
+  var file=document.getElementById('file'), status=document.getElementById('status');
+  var importCard=document.getElementById('importCard');
   file.addEventListener('change',function(e){ if(e.target.files[0]) loadFile(e.target.files[0]); });
-  ['dragover','dragenter'].forEach(function(ev){drop.addEventListener(ev,function(e){e.preventDefault();drop.classList.add('drag');});});
-  ['dragleave','drop'].forEach(function(ev){drop.addEventListener(ev,function(e){e.preventDefault();drop.classList.remove('drag');});});
-  drop.addEventListener('drop',function(e){ var f=e.dataTransfer&&e.dataTransfer.files[0]; if(f) loadFile(f); });
+  ['dragover','dragenter'].forEach(function(ev){importCard.addEventListener(ev,function(e){e.preventDefault();importCard.classList.add('drag');});});
+  ['dragleave','drop'].forEach(function(ev){importCard.addEventListener(ev,function(e){e.preventDefault();importCard.classList.remove('drag');});});
+  importCard.addEventListener('drop',function(e){ var f=e.dataTransfer&&e.dataTransfer.files[0]; if(f) loadFile(f); });
 
   function setStatus(msg,type){ status.textContent=msg; status.className='status'+(type?(' '+type):''); }
 
@@ -291,16 +280,34 @@
   var TGT_DEFAULT={'无':300000,'全院合计':3000000};
 
   /* ---------- 数据落地 + UI 切换：本地导入与「云端恢复」共用同一条路径 ---------- */
-  function applyData(rows, map, fname, fromCloud){
+  function applyData(rows, map, fname, fromCloud, note){
     dash.rows=rows; dash.map=map; dash.fname=fname; dash.scope='__all__';
     dash.months=(function(){ var s=new Set(); rows.forEach(function(r){ var m=rowMonth(r,map); if(m) s.add(m); }); return Array.from(s).sort(); })();
-    importCard.classList.add('mini');
-    document.getElementById('drop').style.display='none';
-    miniBar.style.display='flex';
-    document.getElementById('fName').textContent=fname;
-    document.getElementById('fMeta').textContent=fmtInt(rows.length)+' 行 · 覆盖 '+dash.months.length+' 个月（'+dash.months.join('、')+'）';
-    setStatus((fromCloud?'已从云端恢复 ':'已导入 ')+fmtInt(rows.length)+' 行','ok');
+    document.getElementById('fMeta').textContent = (fname? fname+' · ':'') + fmtInt(rows.length)+' 行 · 覆盖 '+dash.months.length+' 个月（'+dash.months.join('、')+'）';
+    setStatus((fromCloud?'已从云端恢复 ':(note||('已导入 '+fmtInt(rows.length)+' 行'))),'ok');
     renderDashboard();
+  }
+
+  /* 行级日期键（YYYY-MM-DD）：用于「补充导入」时按日期判断重叠
+     —— 与日业绩页 mergeOrdersByDate 同语义：重叠日期整批用新文件覆盖，其它日期保留 */
+  function rowDateKey(r,map){
+    var v=(map.ym!=null)?r[map.ym]:((map.date!=null)?r[map.date]:null);
+    if(v==null||v==='') return null;
+    var s=String(v).trim();
+    var m=s.match(/(\d{4})[-/年.](\d{1,2})[-/月.](\d{1,2})/);
+    if(m) return m[1]+'-'+('0'+m[2]).slice(-2)+'-'+('0'+m[3]).slice(-2);
+    var n=Number(s);
+    if(isFinite(n)&&n>20000&&n<80000){
+      var d=new Date(Date.UTC(1899,11,30)+Math.floor(n)*86400000);
+      return d.getUTCFullYear()+'-'+('0'+(d.getUTCMonth()+1)).slice(-2)+'-'+('0'+d.getUTCDate()).slice(-2);
+    }
+    return null;
+  }
+  function mergeRowsByDate(existing, incoming, map){
+    var incDates=new Set();
+    incoming.forEach(function(r){ var d=rowDateKey(r,map); if(d) incDates.add(d); });
+    var kept=existing.filter(function(r){ var d=rowDateKey(r,map); return !d || !incDates.has(d); });
+    return { rows: kept.concat(incoming), replaced: existing.length-kept.length, coveredDates: incDates.size };
   }
 
   function loadFile(f){
@@ -322,8 +329,17 @@
         if(map.doctor==null) miss.push('订单分诊医生');
         if(map.consultant==null) miss.push('开单咨询师');
         if(map.member==null) miss.push('会员号');
-        applyData(rows, map, f.name, false);
-        if(miss.length) setStatus('已导入 '+fmtInt(rows.length)+' 行；未匹配到：'+miss.join(' / ')+'（相关表将部分为空）','ok');
+        // 导入模式：勾选「合并到历史数据」= 补充导入（重叠日期覆盖、其它日期保留）；未勾 = 覆盖导入
+        var mergeMode = document.getElementById('merge-mode');
+        var doMerge = mergeMode ? mergeMode.checked : false;
+        if(doMerge && dash.rows && dash.rows.length){
+          var m=mergeRowsByDate(dash.rows, rows, map);
+          applyData(m.rows, map, f.name, false,
+            '补充导入成功：本次 '+fmtInt(rows.length)+' 行，累计 '+fmtInt(m.rows.length)+' 行（覆盖 '+m.coveredDates+' 个日期共 '+m.replaced+' 条，保留其它日期）');
+        }else{
+          applyData(rows, map, f.name, false, (doMerge?'已导入 ':'覆盖导入完成：')+fmtInt(rows.length)+' 行');
+        }
+        if(miss.length) setStatus((doMerge?'补充导入成功；':'已导入 ')+fmtInt(rows.length)+' 行；未匹配到：'+miss.join(' / ')+'（相关表将部分为空）','ok');
         if(window.KpiCloudSync) window.KpiCloudSync.markDirty();
       }catch(err){ setStatus('解析失败：'+err.message,'err'); }
     };
@@ -348,51 +364,77 @@
   /* 结构：部门 → 科室 → 医生；部门末出合计行；前台组仅 营销部/团检/其他 三行合计；全院合计行。
      业绩=收款金额-现款支付；容量=去重会员号（医生为跨科室合并去重，合计行各自重新去重，故≠相加）。 */
   function aggregateDept(rows,map){
-    var docs={}, frontCash={}, totalCash=0, totalMem=new Set();
+    // 口径（2026-10-21 用户反馈修正）：各科室业绩以「订单所属-订单分诊医生」统计当月总现款支付，
+    //   即一位医生的一行 = 该医生【当月全部订单】的现款支付合计 + 去重会员数（跨科室合并，科室行不重复计），
+    //   展示时归到其金额最大的科室（主科室）；「订单开单科室」为口腔科的订单，业绩全部计入安志国。
+    //   无分诊医生名的行（无/未归类/空）→ 按开单科室归入前台组（营销部/团检/其他）。
+    //   守恒：部门组（医生行）+ 前台三行 = 全院合计。
+    var docs={}, frontCash={}, frontMem={}, totalCash=0, totalMem=new Set();
     var deptCash={}, deptMem={};
     DEPT_ORDER.forEach(function(d){ deptCash[d]=0; deptMem[d]=new Set(); });
-    FRONT_ROWS.forEach(function(f){ frontCash[f]=0; });
+    FRONT_ROWS.forEach(function(f){ frontCash[f]=0; frontMem[f]=new Set(); });
 
     rows.forEach(function(r){
       var cash=num(r[map.cash]||0);
       totalCash+=cash;
       var mem=strVal(r[map.member]);
-      if(map.member!=null && isRealMember(mem)) totalMem.add(mem);
+      var hasMem = (map.member!=null && isRealMember(mem));
+      if(hasMem) totalMem.add(mem);
       var clinic=strVal(r[map.dept])||'未归类';
       var doctor=strVal(r[map.doctor])||'未归类';
       if(clinic==='口腔科') doctor=ORAL_DOCTOR;      // 口腔科全部归安志国
-      var dept=DEPT_OF_CLINIC[clinic]||null;
-      if(dept){
-        deptCash[dept]+=cash;
-        if(map.member!=null && isRealMember(mem)) deptMem[dept].add(mem);
+      var isDoc = doctor && doctor!=='无' && doctor!=='未归类';
+      if(isDoc){
         var d=docs[doctor];
-        if(!d){ d=docs[doctor]={cash:0,mem:new Set(),clinics:{},primary:null,primaryCash:-1}; docs[doctor]=d; }
+        if(!d){ d=docs[doctor]={cash:0,mem:new Set(),clinics:{},primary:null,primaryCash:-1,deptPrimary:null,deptPrimaryCash:-1}; docs[doctor]=d; }
         d.cash+=cash;
-        if(map.member!=null && isRealMember(mem)) d.mem.add(mem);
+        if(hasMem) d.mem.add(mem);
         d.clinics[clinic]=(d.clinics[clinic]||0)+cash;
         if(cash>d.primaryCash){ d.primaryCash=cash; d.primary=clinic; }
+        // 主科室优先取【科室类】中金额最大的（无科室/前台类不算医生归属科室），
+        // 否则像「展婷」这类以 U=空 金额更大的医生会被错误挪进前台组
+        if(DEPT_OF_CLINIC[clinic] && cash>d.deptPrimaryCash){ d.deptPrimaryCash=cash; d.deptPrimary=clinic; }
       }else{
-        // 前台类：营销部 / 团检 / 其他（前台、无、未归类、空、未映射科室）
+        // 无分诊医生名 → 前台组按开单科室归集
         var fk=(clinic==='营销部'||clinic==='团检')?clinic:'其他';
         frontCash[fk]+=cash;
+        if(hasMem) frontMem[fk].add(mem);
       }
     });
 
-    // 医生剔除无名行（无/未归类），只保留可归属到科室的医生
-    Object.keys(docs).forEach(function(k){ if(k==='无'||k==='未归类'||k==='') delete docs[k]; });
+    // 医生主科室决定展示归属：主科室属科室类 → 进对应部门；否则（前台/无/未归类等）并入前台「其他」
+    var frontDocCash={}, frontDocMem={};
+    FRONT_ROWS.forEach(function(f){ frontDocCash[f]=0; frontDocMem[f]=new Set(); });
+    Object.keys(docs).forEach(function(name){
+      var d=docs[name];
+      var primary = d.deptPrimary || d.primary;      // 科室类优先，否则退回任意科室
+      var dept=DEPT_OF_CLINIC[primary]||null;
+      if(dept){
+        deptCash[dept]+=d.cash;
+        d.mem.forEach(function(m){ deptMem[dept].add(m); });
+      }else{
+        var fk=(primary==='营销部'||primary==='团检')?primary:'其他';
+        frontDocCash[fk]+=d.cash;
+        d.mem.forEach(function(m){ frontDocMem[fk].add(m); });
+      }
+    });
 
     var groups=[];
     DEPT_ORDER.forEach(function(dept){
       if(dept==='前台'){
-        groups.push({dept:'前台',front:FRONT_ROWS.map(function(f){ return {clinic:f,cash:frontCash[f]}; })});
+        groups.push({dept:'前台',front:FRONT_ROWS.map(function(f){
+          var mem=new Set(); frontMem[f].forEach(function(m){ mem.add(m); });
+          frontDocMem[f].forEach(function(m){ mem.add(m); });
+          return {clinic:f,cash:frontCash[f]+frontDocCash[f],cap:mem.size};
+        })});
         return;
       }
       var byClinic={};
       Object.keys(docs).forEach(function(name){
         var d=docs[name];
-        var cl=d.primary;
-        if(DEPT_OF_CLINIC[cl]!==dept) return;
-        (byClinic[cl]=byClinic[cl]||[]).push({name:name,cash:d.cash,cap:d.mem.size});
+        var primary = d.deptPrimary || d.primary;
+        if(DEPT_OF_CLINIC[primary]!==dept) return;
+        (byClinic[primary]=byClinic[primary]||[]).push({name:name,cash:d.cash,cap:d.mem.size});
       });
       var names=Object.keys(byClinic);
       var ordered=(CLINIC_ORDER[dept]||[]).filter(function(c){ return names.indexOf(c)>=0; });
@@ -593,8 +635,9 @@
     document.getElementById('deptTag').textContent=scopeLabel;
     document.getElementById('mgrTag').textContent=scopeLabel;
     document.getElementById('deptNote').textContent=
-      '口径：业绩＝收款金额-现款支付合计；容量＝去重会员号数（医生容量为该医生全部订单跨科室合并去重，部门/全院合计为各自重新去重，故不等于各行相加）。'
-      +'「关联订单信息-订单开单科室」为口腔科的订单，业绩全部计入安志国。前台组（营销部/团检/其他）不列医生明细，容量不统计。'
+      '口径：业绩＝该分诊医生当月全部订单的「收款金额-现款支付」合计（跨科室合并，行内不再拆分），展示时归到其金额最大的科室；容量＝该医生全部订单去重会员号数。'
+      +'部门合计＝该部门医生行合计（容量为医生容量并集，非相加）；全院合计＝部门合计＋前台三行。'
+      +'「关联订单信息-订单开单科室」为口腔科的订单，业绩全部计入安志国；无分诊医生名的行按开单科室归入前台组（营销部/团检/其他，不列医生明细）。'
       +'月份以「日期」列为准，未匹配时回退「收款时间」。';
     document.getElementById('mgrNote').textContent=
       '口径：实际完成＝「关联订单信息-开单咨询师」名下的现款支付合计；「无」＝未填开单咨询师的订单；'
