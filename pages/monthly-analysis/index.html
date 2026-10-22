@@ -358,7 +358,7 @@
   var ORAL_DOCTOR='安志国';                 // 订单开单科室=口腔科 → 业绩全部计入安志国
   var MANAGER_ROSTER=['白雪花','赵静','严淑杰','黄果','李方媛','王勤红','房雨倩','刘梓珺'];
   var MGR_EXCLUDE=['营销部','吴雅琴','许顺华','张帆'];  // 不展示、不计入
-  var MGR_REFERENCE=['徐美琪','张亚超'];                // 展示为参考行，不计入管家合计
+  var MGR_REFERENCE=['徐美琪','张亚超'];                // 参考行徽章：显示「参考」标记，但计入管家合计
   var TGT_KEY='monthly_mgr_targets_v1';
   var TGT_DEFAULT={'无':300000,'全院合计':3000000,'全院目标':3000000};
 
@@ -643,13 +643,14 @@
     });
     extra.sort(function(x,y){ return y.cash-x.cash; });
     rowsOut=rowsOut.concat(extra);
-    var rosterSum=0, rosterCons=0;
-    rowsOut.forEach(function(r){ if(r.kind==='roster'){ rosterSum+=r.cash; rosterCons+=r.cons; } });
-    var rosterIdx=[];
-    MANAGER_ROSTER.forEach(function(n){ rosterIdx=rosterIdx.concat(idx['mgr:'+n]||[]); });
-    return {rows:rowsOut, rosterSum:rosterSum, rosterCons:rosterCons,
+    var rosterSum=0, rosterCons=0, refSum=0, refCons=0;
+    rowsOut.forEach(function(r){ if(r.kind==='roster'){ rosterSum+=r.cash; rosterCons+=r.cons; } if(r.kind==='ref'){ refSum+=r.cash; refCons+=r.cons; } });
+    var mgrSum=rosterSum+refSum, mgrCons=rosterCons+refCons;
+    var mgrIdx=[];
+    MANAGER_ROSTER.concat(MGR_REFERENCE).forEach(function(n){ mgrIdx=mgrIdx.concat(idx['mgr:'+n]||[]); });
+    return {rows:rowsOut, rosterSum:rosterSum, rosterCons:rosterCons, mgrSum:mgrSum, mgrCons:mgrCons,
             none:mgr['无']?mgr['无'].cash:0, noneCons:mgr['无']?mgr['无'].cons:0,
-            total:{cash:totalCash,cap:totalMem.size,cons:totalCons}, mgr:mgr, idx:idx, rosterIdx:rosterIdx};
+            total:{cash:totalCash,cap:totalMem.size,cons:totalCons}, mgr:mgr, idx:idx, mgrIdx:mgrIdx};
   }
 
   function tgtStore(){ try{ return JSON.parse(localStorage.getItem(TGT_KEY))||{}; }catch(e){ return {}; } }
@@ -694,14 +695,14 @@
       +'<td class="num rate bad">'+fmt(b.none)+'</td>'
       +'<td class="num">'+fmt(b.noneCons)+'</td>'
       +'<td class="num rate '+noneRt.cls+'" data-rate-for="无">'+noneRt.txt+'</td></tr>';
-    // 管家合计（名册口径）
+    // 管家合计（名册 + 参考行）
     var sumTgt=0;
-    b.rows.forEach(function(r){ if(r.kind==='roster') sumTgt+=tgtGet(scope,r.name); });
-    var sumRt=rateText(b.rosterSum,sumTgt);
-    html+='<tr class="sum" data-drill="mgrsum" data-dlabel="管家合计（名册）"><td class="doc">管家合计</td>'
+    b.rows.forEach(function(r){ if(r.kind==='roster'||r.kind==='ref') sumTgt+=tgtGet(scope,r.name); });
+    var sumRt=rateText(b.mgrSum,sumTgt);
+    html+='<tr class="sum" data-drill="mgrsum" data-dlabel="管家合计"><td class="doc">管家合计</td>'
       +'<td class="num">'+(sumTgt?fmt(sumTgt):'0')+'</td>'
-      +'<td class="num rate bad">'+fmt(b.rosterSum)+'</td>'
-      +'<td class="num">'+fmt(b.rosterCons)+'</td>'
+      +'<td class="num rate bad">'+fmt(b.mgrSum)+'</td>'
+      +'<td class="num">'+fmt(b.mgrCons)+'</td>'
       +'<td class="num rate '+sumRt.cls+'" data-rate-for="管家合计">'+sumRt.txt+'</td></tr>';
     // 全院合计
     var allTgt=tgtGet(scope,'全院合计'), allRt=rateText(b.total.cash,allTgt);
@@ -736,8 +737,8 @@
     var nc=tbl.querySelector('[data-rate-for="无"]');
     if(nc){ nc.textContent=noneRt.txt; nc.className='num rate '+noneRt.cls; }
     var sumTgt=0;
-    b.rows.forEach(function(r){ if(r.kind==='roster') sumTgt+=tgtGet(scope,r.name); });
-    var sumRt=rateText(b.rosterSum,sumTgt);
+    b.rows.forEach(function(r){ if(r.kind==='roster'||r.kind==='ref') sumTgt+=tgtGet(scope,r.name); });
+    var sumRt=rateText(b.mgrSum,sumTgt);
     var sumTgtCell=tbl.querySelector('tr.sum td.num');
     if(sumTgtCell) sumTgtCell.textContent=sumTgt?fmt(sumTgt):'0';
     var sc=tbl.querySelector('[data-rate-for="管家合计"]');
@@ -780,7 +781,7 @@
       +'点击任意一行可下钻查看对应的订单明细。月份以「日期」列为准，未匹配时回退「收款时间」。';
     document.getElementById('mgrNote').textContent=
       '口径：实际完成＝「关联订单信息-开单咨询师」名下的现款支付合计；「无」＝未填开单咨询师的订单；'
-      +'营销部 / 吴雅琴 / 许顺华 / 张帆 不纳入管家统计；'+MGR_REFERENCE.join(' / ')+' 为参考行（显示但不计入管家合计）。'
+      +'营销部 / 吴雅琴 / 许顺华 / 张帆 不纳入管家统计；'+MGR_REFERENCE.join(' / ')+' 为参考行（显示「参考」徽章，计入管家合计）。'
       +'月业绩目标可手工编辑，按月份分别保存并同步云端；完成率＝实际完成 ÷ 月业绩目标，目标 ≤0 显示「/」。'
       +'消耗业绩＝排除「品项一级分类（实时）=充值」的行后，按（现款支付＋资产抵扣）合计；下钻明细含「消耗金额」列与合计行，弹层支持按姓名/会员号/科室/医生/咨询师筛选。'
       +'点击任意一行可下钻查看对应的订单明细。';
@@ -974,8 +975,8 @@
     var noneTgt=tgtGet(scope,'无');
     rows.push([C('无','s','docSoft'),C(noneTgt||0,'n','plain'),C(b.none,'n','num'),C(b.noneCons,'n','num'),rateCell(b.none,noneTgt)]);
     var sumTgt=0;
-    b.rows.forEach(function(r){ if(r.kind==='roster') sumTgt+=tgtGet(scope,r.name); });
-    rows.push([C('管家合计','s','sumDoc'),C(sumTgt||0,'n','sumN'),C(b.rosterSum,'n','sumN'),C(b.rosterCons,'n','sumN'),rateCell(b.rosterSum,sumTgt)]);
+    b.rows.forEach(function(r){ if(r.kind==='roster'||r.kind==='ref') sumTgt+=tgtGet(scope,r.name); });
+    rows.push([C('管家合计','s','sumDoc'),C(sumTgt||0,'n','sumN'),C(b.mgrSum,'n','sumN'),C(b.mgrCons,'n','sumN'),rateCell(b.mgrSum,sumTgt)]);
     var allTgt=tgtGet(scope,'全院合计');
     rows.push([C('全院合计','s','totDoc'),C(allTgt||0,'n','totN'),C(b.total.cash,'n','totN'),C(b.total.cons,'n','totN'),rateCell(b.total.cash,allTgt)]);
     return {rows:rows,merges:merges,colWidths:[16,14,16,16,12],sheetName:'管家业绩统计',freezeRows:2};
@@ -1047,7 +1048,7 @@
     var inScope = dash.scope==='__all__' ? dash.rows : dash.rows.filter(function(r){ return rowMonth(r,dash.map)===dash.scope; });
     var idxs=null;
     if(key==='all'){ idxs=inScope.map(function(_,i){ return i; }); }
-    else if(key==='mgrsum'){ idxs=(dash.aggB&&dash.aggB.rosterIdx)||null; }
+    else if(key==='mgrsum'){ idxs=(dash.aggB&&dash.aggB.mgrIdx)||null; }
     else if(dash.aggA&&dash.aggA.idx&&dash.aggA.idx[key]) idxs=dash.aggA.idx[key];
     else if(dash.aggB&&dash.aggB.idx&&dash.aggB.idx[key]) idxs=dash.aggB.idx[key];
     if(!idxs) idxs=[];
