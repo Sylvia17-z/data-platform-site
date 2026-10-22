@@ -19,6 +19,13 @@
     --up:#c0392b;      /* 上涨/注意=红（中式习惯） */
     --down:#0a7d3b;    /* 下降/达标=绿 */
     --font:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei","Hiragino Sans GB",Helvetica,Arial,sans-serif;
+    /* 复用医管考核规范的辅助令牌（toolbar / 月份多选浮层） */
+    --navy-500:#03539f;
+    --ok:#0a7d4d;
+    --ok-bg:#e6f5ec;
+    --no:#b42318;
+    --no-bg:#fdecec;
+    --shadow-1:0 1px 3px rgba(1,42,94,.07);
   }
   *{box-sizing:border-box;}
   body{
@@ -44,16 +51,41 @@
   .chip:hover{border-color:var(--navy-700);background:var(--navy-50);}
   .chip.active{background:var(--navy);border-color:var(--navy);color:#fff;font-weight:600;box-shadow:0 2px 8px rgba(1,65,139,.25);}
 
-  /* ===== 导入区（与其他页统一的 .dataseg 按钮格式，2026-10-21） ===== */
-  .import-card{
+  /* ===== 导入区：改用与医管考核一致的 .toolbar / .fbar 规范（2026-10-22） ===== */
+  .toolbar{
+    display:flex;align-items:center;gap:10px;flex-wrap:wrap;
     background:#fff;border:1px solid var(--navy-100);border-radius:10px;
-    padding:10px 14px;margin-bottom:18px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;
-    transition:.2s;
+    padding:12px 14px;margin-bottom:12px;box-shadow:var(--shadow-1);
   }
-  .import-card.drag{border-color:var(--navy-700);background:var(--navy-50);}
-  .import-card .seg-label{font-size:12.5px;color:var(--ink-soft);font-weight:500;white-space:nowrap;}
-  .import-card .seg-status{display:flex;align-items:center;gap:10px;flex-wrap:wrap;min-width:0;}
-  @media (min-width:721px){ .import-card .seg-status{margin-left:auto;justify-content:flex-end;text-align:right;} }
+  .toolbar.drag{border-color:var(--navy-700);background:var(--navy-50);}
+  .toolbar .grp{display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
+  .toolbar .gl{font-size:12.5px;color:var(--ink-soft);}
+  .toolbar label.fbtn{
+    display:inline-flex;align-items:center;gap:6px;cursor:pointer;
+    background:var(--navy);color:#fff;border-radius:7px;padding:6px 12px;font-size:13px;
+    border:1px solid var(--navy);transition:.15s;height:32px;
+  }
+  .toolbar label.fbtn:hover{background:var(--navy-700);}
+  .toolbar label.fbtn.opt{background:#fff;color:var(--navy);}
+  .toolbar label.fbtn.opt:hover{background:var(--navy-50);}
+  .toolbar input[type=file]{display:none;}
+  .toolbar .hint{color:var(--ink-soft);font-size:12px;}
+  .toolbar select,.toolbar .btn{
+    font-family:var(--font);font-size:13px;border:1px solid var(--navy-100);
+    border-radius:7px;padding:6px 10px;background:#fff;color:var(--ink);cursor:pointer;height:32px;
+  }
+  .toolbar .btn{border-color:var(--navy);color:var(--navy);}
+  .toolbar .btn:hover{background:var(--navy-50);}
+  .toolbar select:hover{border-color:var(--navy-500);}
+  /* 月份多选筛选浮层（.fbar/.ftoggle/.fitem/.flabel 由 shared/filterbar.css 提供） */
+  .toolbar .proj-filter{position:relative;}
+  .toolbar .proj-filter-btn{font-family:var(--font);font-size:13px;border:1px solid var(--navy-100);border-radius:7px;padding:6px 10px;background:#fff;color:var(--ink);cursor:pointer;min-width:84px;text-align:left;height:32px;}
+  .toolbar .proj-filter-btn:hover{background:var(--navy-50);}
+  .proj-filter-pop{position:absolute;top:calc(100% + 4px);left:0;z-index:60;background:#fff;border:1px solid var(--navy-100);border-radius:8px;box-shadow:0 6px 20px rgba(20,40,80,.14);padding:6px;min-width:180px;max-height:320px;overflow:auto;}
+  .proj-filter-pop .pf-row{display:flex;align-items:center;gap:7px;padding:5px 8px;border-radius:6px;cursor:pointer;font-size:13px;white-space:nowrap;}
+  .proj-filter-pop .pf-row:hover{background:var(--navy-50);}
+  .proj-filter-pop .pf-row input{accent-color:var(--navy);width:15px;height:15px;flex:0 0 auto;}
+  .proj-filter-pop .pf-cats{border-top:1px solid var(--navy-100);border-bottom:1px solid var(--navy-100);margin:4px 0;padding:4px 0;}
   .file-meta{font-size:12px;color:var(--ink-soft);}
   .merge-opt{font-size:12px;color:var(--ink-soft);display:inline-flex;align-items:center;gap:4px;cursor:pointer;}
   .merge-opt input{cursor:pointer;margin:0;}
@@ -163,21 +195,38 @@
 <div class="wrap">
   <div class="topbar">
     <h1>月度分析面板</h1>
-    <span class="sub">科室业绩 / 健康管家业绩双表分析 · 支持单月聚焦</span>
-    <span class="month-chips" id="chips" style="display:none;"></span>
+    <span class="sub">科室业绩 / 健康管家业绩双表分析 · 支持多月份聚焦</span>
   </div>
 
-  <div class="import-card" id="importCard">
-    <span class="seg-label">数据明细</span>
-    <input type="file" id="file" accept=".xlsx,.xls" multiple />
-    <label for="file" class="btn btn-primary" title="导入「订单项目收退款表-明细」同结构文件；支持一次多选多个月份文件（按下方复选框决定覆盖或合并导入）">📁 上传数据表</label>
-    <span class="seg-status">
-      <span id="fMeta" class="file-meta">未导入</span>
-      <label class="merge-opt" title="勾选=补充导入（重叠日期用新文件覆盖，其它日期保留）；不勾=覆盖导入（清空后重新导入）">
-        <input type="checkbox" id="merge-mode" checked /> 合并到历史数据（重叠日期覆盖，其它日期保留）
+  <div class="toolbar" id="importCard">
+    <div class="dataseg">
+      <span class="seg-label">数据</span>
+      <label class="fbtn" title="导入「订单项目收退款表-明细」同结构文件；支持一次多选多个月份文件">📥 导入数据明细
+        <input type="file" id="file" accept=".xlsx,.xls" multiple />
       </label>
-      <span class="drop-hint">也可把文件拖到此处（支持一次多选多个月份文件）</span>
-    </span>
+      <span class="fitem" style="flex-direction:row;align-items:center;gap:6px;">
+        <span class="flabel" style="width:auto;">导入方式</span>
+        <select id="orderImportMode" class="fctl" style="width:auto;height:32px;">
+          <option value="append">合并导入</option>
+          <option value="replace">覆盖导入</option>
+        </select>
+      </span>
+      <span class="push"></span>
+      <button type="button" class="btn danger" id="btnClearData" title="清空已导入的全部数据与业绩目标（需二次确认）">🗑 清空数据</button>
+    </div>
+    <div class="fbar">
+      <button type="button" class="ftoggle" data-fbar="ma"><span>⚙</span><span>筛选</span><span class="ft-caret">▴</span></button>
+      <div class="fbody">
+        <span class="fitem proj-filter"><span class="flabel">月份（多选）</span>
+          <button type="button" class="proj-filter-btn" id="monthBtn">全部月份</button>
+          <div class="proj-filter-pop" id="monthPop" style="display:none;">
+            <label class="pf-row"><input type="checkbox" class="pf-cb" data-v="__all__" checked /> 全部</label>
+            <div class="pf-cats" id="monthCats"></div>
+          </div>
+        </span>
+      </div>
+    </div>
+    <span class="hint" id="fMeta" style="width:100%;">未导入</span>
     <div class="status" id="status" style="flex-basis:100%;"></div>
   </div>
 
@@ -310,7 +359,7 @@
   }
 
   /* ---------- 仪表盘状态 ---------- */
-  var dash={ rows:null, map:null, fname:'', months:[], scope:'__all__' };  // scope: '__all__' | 'YYYY-MM'
+  var dash={ rows:null, map:null, fname:'', months:[], scope:'__all__', selMonths:[] };  // scope: 焦点月（最新选中月）; selMonths: 选中月份集合（空=全部导入月）
 
   /* ---------- 口径常量 ---------- */
   var DEPT_ORDER=['健管部','诊疗部','前台'];
@@ -362,11 +411,34 @@
 
   /* ---------- 数据落地 + UI 切换：本地导入与「云端恢复」共用同一条路径 ---------- */
   function applyData(rows, map, fname, fromCloud, note){
-    dash.rows=rows; dash.map=map; dash.fname=fname; dash.scope='__all__';
+    dash.rows=rows; dash.map=map; dash.fname=fname; dash.scope='__all__'; dash.selMonths=[];
     dash.months=(function(){ var s=new Set(); rows.forEach(function(r){ var m=rowMonth(r,map); if(m) s.add(m); }); return Array.from(s).sort(); })();
     document.getElementById('fMeta').textContent = (fname? fname+' · ':'') + fmtInt(rows.length)+' 行 · 覆盖 '+dash.months.length+' 个月（'+dash.months.join('、')+'）';
     setStatus((fromCloud?'已从云端恢复 ':(note||('已导入 '+fmtInt(rows.length)+' 行'))),'ok');
+    renderMonthPop();
     renderDashboard();
+  }
+
+  /* ---------- 月份多选：选中集合（空=全部导入月） + 焦点月（最新选中月） ---------- */
+  function activeMonths(){
+    if(dash.selMonths && dash.selMonths.length) return dash.selMonths;
+    return dash.months || [];
+  }
+  function activeScope(){
+    // 月份多选为空 ⇒ 全部月份（聚合口径，键位 '__all__'：下钻/目标/单月筛选都按全量）；
+    // 否则取最新选中月作为「焦点月」。注意：不能用 activeMonths() 取末尾月——空选时 activeMonths 返回
+    // 全部导入月（用于渠道/年度聚合），若这里也取末尾月会把「全部」误判成单月，导致合计与口径错乱。
+    if(dash.selMonths && dash.selMonths.length) return dash.selMonths[dash.selMonths.length-1];
+    return '__all__';
+  }
+  function renderMonthPop(){
+    var box=document.getElementById('monthCats');
+    if(!box) return;
+    box.innerHTML = (dash.months||[]).map(function(m){
+      return '<label class="pf-row"><input type="checkbox" class="pf-cb" data-v="'+m+'" /> '+m+'</label>';
+    }).join('');
+    var btn=document.getElementById('monthBtn');
+    if(btn) btn.textContent = (dash.months&&dash.months.length) ? '全部月份' : '未导入数据';
   }
 
   /* 行级日期键（YYYY-MM-DD）：用于「补充导入」时按日期判断重叠
@@ -411,9 +483,9 @@
     }catch(err){ return {ok:false, msg:'解析失败：'+err.message}; }
   }
   function importRows(rows, map, fname, miss){
-    // 导入模式：勾选「合并到历史数据」= 补充导入（重叠日期覆盖、其它日期保留）；未勾 = 覆盖导入
-    var mergeMode = document.getElementById('merge-mode');
-    var doMerge = mergeMode ? mergeMode.checked : false;
+    // 导入方式：合并导入（默认）= 补充导入（重叠日期覆盖、其它日期保留）；覆盖导入 = 清空后重新导入
+    var modeSel = document.getElementById('orderImportMode');
+    var doMerge = !modeSel || modeSel.value!=='replace';
     if(doMerge && dash.rows && dash.rows.length){
       var m=mergeRowsByDate(dash.rows, rows, map);
       applyData(m.rows, map, fname, false,
@@ -457,20 +529,6 @@
     var map=ok[0].pr.map, miss=ok[0].pr.miss, combined=[];
     ok.forEach(function(r){ combined=combined.concat(r.pr.rows); });
     importRows(combined, map, files.map(function(f){return f.name;}).join(' + '), miss);
-  }
-
-  /* ---------- 月份切换 chips ---------- */
-  function renderChips(){
-    var el=document.getElementById('chips');
-    el.style.display='flex';
-    var html='<button type="button" class="chip'+(dash.scope==='__all__'?' active':'')+'" data-scope="__all__">全部月份</button>';
-    html+=dash.months.map(function(m){
-      return '<button type="button" class="chip'+(dash.scope===m?' active':'')+'" data-scope="'+m+'">'+m+'</button>';
-    }).join('');
-    el.innerHTML=html;
-    el.querySelectorAll('.chip').forEach(function(c){
-      c.addEventListener('click',function(){ dash.scope=c.dataset.scope; renderDashboard(); });
-    });
   }
 
   /* ================= 表A：月度各科室业绩统计分析 ================= */
@@ -703,7 +761,7 @@
   }
 
   function renderManagerTable(b,monthLabel){
-    var scope=dash.scope;
+    var scope=activeScope();
     var html='<thead>'
       +'<tr><th rowspan="2" class="hd-l">健康管家</th><th colspan="4">'+escapeHtml(monthLabel)+'</th></tr>'
       +'<tr><th>月业绩目标</th><th>实际完成</th><th>消耗业绩（元）</th><th>月完成率</th></tr></thead><tbody>';
@@ -747,7 +805,7 @@
     tbl.querySelectorAll('.tgt-input').forEach(function(inp){
       inp.addEventListener('input',function(){
         var name=inp.dataset.name, v=parseFloat(inp.value);
-        tgtSet(dash.scope,name,isNaN(v)?0:v);
+        tgtSet(activeScope(),name,isNaN(v)?0:v);
         refreshManagerRates(b);
         if(window.KpiCloudSync) window.KpiCloudSync.markDirty();
       });
@@ -756,7 +814,7 @@
 
   /* 目标输入后只刷新完成率与合计目标，不整表重绘（避免输入框失焦） */
   function refreshManagerRates(b){
-    var scope=dash.scope;
+    var scope=activeScope();
     var tbl=document.getElementById('tblMgr');
     b.rows.forEach(function(r){
       var rt=rateText(r.cash,tgtGet(scope,r.name));
@@ -783,12 +841,13 @@
   function renderDashboard(){
     var all=dash.rows, map=dash.map;
     if(!all||!all.length) return;
-    renderChips();
-    var inScope = dash.scope==='__all__' ? all : all.filter(function(r){ return rowMonth(r,map)===dash.scope; });
-    var monthLabel = dash.scope==='__all__'
+    var scope=activeScope();
+    var inScope = scope==='__all__' ? all : all.filter(function(r){ return rowMonth(r,map)===scope; });
+    var monthLabel = scope==='__all__'
       ? (dash.months.length ? (parseInt(dash.months[dash.months.length-1].slice(5),10)+'月') : '全部月份')
-      : (parseInt(dash.scope.slice(5),10)+'月');
-    var scopeLabel = dash.scope==='__all__' ? '全部月份' : dash.scope;
+      : (parseInt(scope.slice(5),10)+'月');
+    var selN = activeMonths().length;
+    var scopeLabel = (selN && dash.months && selN < dash.months.length) ? ('已选 '+selN+' 个月') : (scope==='__all__' ? '全部月份' : scope);
 
     document.getElementById('placeholder').style.display='none';
     document.getElementById('tables').style.display='block';
@@ -832,7 +891,8 @@
     if(ch.indexOf('商务')>=0 || ch.indexOf('商保')>=0 || ch.indexOf('公司渠道')>=0) return '商务部';
     return '其他（公司所有）';
   }
-  function channelActuals(rows,map){
+  function channelActuals(rows,map,months){
+    months = months || (dash.months||[]);
     var byMonth={};
     rows.forEach(function(r){
       var m=rowMonth(r,map); if(!m) return;
@@ -842,20 +902,22 @@
       byMonth[m][ch]+=cash;
     });
     var annual={'营销部':0,'商务部':0,'其他（公司所有）':0};
-    Object.keys(byMonth).forEach(function(m){
+    months.forEach(function(m){
+      if(!byMonth[m]) return;
       ['营销部','商务部','其他（公司所有）'].forEach(function(k){ annual[k]+=byMonth[m][k]; });
     });
     return {byMonth:byMonth, annual:annual};
   }
   function channelSelMonth(){
-    return dash.scope==='__all__' ? (dash.months.length?dash.months[dash.months.length-1]:'') : dash.scope;
+    var s=activeMonths();
+    return s.length ? s[s.length-1] : (dash.months.length?dash.months[dash.months.length-1]:'');
   }
   function renderChannelTable(){
     var map=dash.map; if(!map) return;
     var el=document.getElementById('tblChannel'); if(!el) return;
     var selMonth=channelSelMonth();
     var monthLabel = selMonth ? (parseInt(selMonth.slice(5),10)+'月') : '全部月份';
-    var ca=channelActuals(dash.rows,map);
+    var ca=channelActuals(dash.rows,map,activeMonths());
     var monthly = (selMonth && ca.byMonth[selMonth]) ? ca.byMonth[selMonth] : {'营销部':0,'商务部':0,'其他（公司所有）':0};
     var scope = selMonth || '__all__';
     var names=['营销部','商务部','其他（公司所有）'];
@@ -866,7 +928,7 @@
     var hospRt = rateText(sumAct,hospTgt);
     var yearAct = ca.annual['营销部']+ca.annual['商务部']+ca.annual['其他（公司所有）'];
     var html='<thead>'
-      +'<tr><th colspan="4" class="tl">月度业绩完成情况（'+escapeHtml(monthLabel)+'）'+(dash.scope==='__all__'?' · 按最新月份展示':'')+'</th></tr>'
+      +'<tr><th colspan="4" class="tl">月度业绩完成情况（'+escapeHtml(monthLabel)+'）'+(activeScope()==='__all__'?' · 按最新月份展示':'')+'</th></tr>'
       +'<tr><th class="tl">渠道</th><th>业绩目标（元）</th><th>实际完成（元）</th><th>完成率</th></tr></thead><tbody>';
     names.forEach(function(n){
       var act=monthly[n], tgt=tgtGet(scope,n), rt=rateText(act,tgt);
@@ -883,7 +945,7 @@
       +'<td class="tgt-cell"><input class="tgt-input" type="number" step="0.01" min="0" data-rbac="editTargets" data-chname="全院目标" value="'+(hospTgt||'')+'" title="全院目标（可手工编辑，默认 300 万）"></td>'
       +'<td class="num">'+fmt(sumAct)+'</td>'
       +'<td class="num rate '+hospRt.cls+'" data-chrate-for="全院目标">'+hospRt.txt+'</td></tr>';
-    html+='<tr class="year-total"><td class="doc">年度合计（'+dash.months.length+' 个月）</td>'
+    html+='<tr class="year-total"><td class="doc">年度合计（'+activeMonths().length+' 个月）</td>'
       +'<td class="num dim">—</td>'
       +'<td class="num">'+fmt(yearAct)+'</td>'
       +'<td class="num dim">/</td></tr>';
@@ -897,7 +959,7 @@
         if(window.KpiCloudSync) window.KpiCloudSync.markDirty();
       });
     });
-    document.getElementById('chTag').textContent = dash.scope==='__all__' ? '全部月份（按最新月 '+monthLabel+'）' : dash.scope;
+    document.getElementById('chTag').textContent = activeScope()==='__all__' ? '全部月份（按最新月 '+monthLabel+'）' : activeScope();
     var note='口径：渠道按「客户来源渠道分类（实时）」精确归类——渠道分类=营销部 → 营销部；渠道分类=商务部 → 商务部；除此之外（公司所有/经营科室/推荐/市场部/空值等）→ 其他（公司所有）；合计=三项直加（=全院，口径守恒）。'
       +'实际完成＝该渠道名下「收款金额-现款支付」合计（与表B 实际完成列一致）。业绩目标可手工编辑，按月份分别保存并同步云端；'
       +'完成率＝实际完成 ÷ 业绩目标（目标≤0 显示「/」）。';
@@ -909,7 +971,7 @@
     var map=dash.map; if(!map) return;
     var selMonth=channelSelMonth();
     var scope=selMonth||'__all__';
-    var ca=channelActuals(dash.rows,map);
+    var ca=channelActuals(dash.rows,map,activeMonths());
     var monthly=(selMonth && ca.byMonth[selMonth]) ? ca.byMonth[selMonth] : {'营销部':0,'商务部':0,'其他（公司所有）':0};
     var tbl=document.getElementById('tblChannel'); if(!tbl) return;
     ['营销部','商务部','其他（公司所有）'].forEach(function(n){
@@ -992,7 +1054,7 @@
   }
 
   function buildMgrStyled(b,monthLabel){
-    var scope=dash.scope;
+    var scope=activeScope();
     var rows=[], merges=[];
     function M(r,c,r2,c2){ if(!(r===r2&&c===c2)) merges.push({r:r,c:c,r2:r2,c2:c2}); }
     function C(v,t,s){ return {v:v,t:t,s:s}; }
@@ -1019,7 +1081,7 @@
     var map=dash.map;
     var selMonth=channelSelMonth();
     var monthLabel = selMonth ? (parseInt(selMonth.slice(5),10)+'月') : '全部月份';
-    var ca=channelActuals(dash.rows,map);
+    var ca=channelActuals(dash.rows,map,activeMonths());
     var monthly=(selMonth && ca.byMonth[selMonth]) ? ca.byMonth[selMonth] : {'营销部':0,'商务部':0,'其他（公司所有）':0};
     var scope=selMonth||'__all__';
     var rows=[], merges=[];
@@ -1040,21 +1102,22 @@
     var hospTgt=tgtGet(scope,'全院目标');
     rows.push([C('全院目标','s','hospL'),C(hospTgt||0,'n','hospPlain'),C(sumAct,'n','hospN'),(hospTgt>0?C(sumAct/hospTgt,'n','hospPct'):C('/','s','hospPctDim'))]);
     var yearAct=ca.annual['营销部']+ca.annual['商务部']+ca.annual['其他（公司所有）'];
-    rows.push([C('年度合计（'+dash.months.length+' 个月）','s','totDoc'),C('/','s','totPlain'),C(yearAct,'n','totN'),C('/','s','totPctDim')]);
+    rows.push([C('年度合计（'+activeMonths().length+' 个月）','s','totDoc'),C('/','s','totPlain'),C(yearAct,'n','totN'),C('/','s','totPctDim')]);
     return {rows:rows,merges:merges,colWidths:[20,16,18,12],sheetName:'月度业绩完成情况',freezeRows:2};
   }
 
   function exportTable(which){
     if(!dash.rows||!dash.rows.length||!window.buildStyledXlsx){ setStatus('暂无数据可导出。','err'); return; }
-    var inScope = dash.scope==='__all__' ? dash.rows : dash.rows.filter(function(r){ return rowMonth(r,dash.map)===dash.scope; });
-    var suffix = dash.scope==='__all__' ? '全部月份' : dash.scope;
+    var scope=activeScope();
+    var inScope = scope==='__all__' ? dash.rows : dash.rows.filter(function(r){ return rowMonth(r,dash.map)===scope; });
+    var suffix = scope==='__all__' ? '全部月份' : scope;
     var m;
     if(which==='dept'){ m=buildDeptStyled(aggregateDept(inScope,dash.map)); }
     else if(which==='channel'){ m=buildChannelStyled(); }
     else{
-      var monthLabel = dash.scope==='__all__'
+      var monthLabel = scope==='__all__'
         ? (dash.months.length ? (parseInt(dash.months[dash.months.length-1].slice(5),10)+'月') : '全部月份')
-        : (parseInt(dash.scope.slice(5),10)+'月');
+        : (parseInt(scope.slice(5),10)+'月');
       m=buildMgrStyled(aggregateManager(inScope,dash.map),monthLabel);
     }
     buildStyledXlsx(m).then(function(blob){
@@ -1078,7 +1141,7 @@
   }
   function openDrill(key,label){
     if(!dash.rows||!dash.rows.length||!dash.map) return;
-    var inScope = dash.scope==='__all__' ? dash.rows : dash.rows.filter(function(r){ return rowMonth(r,dash.map)===dash.scope; });
+    var inScope = activeScope()==='__all__' ? dash.rows : dash.rows.filter(function(r){ return rowMonth(r,dash.map)===activeScope(); });
     var idxs=null;
     if(key==='all'){ idxs=inScope.map(function(_,i){ return i; }); }
     else if(key==='mgrsum'){ idxs=(dash.aggB&&dash.aggB.mgrIdx)||null; }
@@ -1162,7 +1225,9 @@
   var KPI_TS_KEY = 'kpi_cloud_ts_monthly';
   function dashPayload(){
     if(!dash.rows || !dash.rows.length || !dash.map) return null;
-    return { rows: dash.rows, map: dash.map, fname: dash.fname || '', scope: dash.scope || '__all__', targets: tgtStore(), ts: Date.now() };
+    // 注意：selMonths（月份多选浮层）是临时 UI 状态，不应随云端快照恢复——
+    // 否则会覆盖本机当前的月份筛选，导致下钻口径/目标保存键位错乱。云端只存数据与目标。
+    return { rows: dash.rows, map: dash.map, fname: dash.fname || '', scope: activeScope() || '__all__', targets: tgtStore(), ts: Date.now() };
   }
   function applyDashPayload(p){
     if(!p || !Array.isArray(p.rows) || !p.rows.length || !p.map) return;
@@ -1183,7 +1248,8 @@
       }catch(e){}
     }
     applyData(p.rows, map, p.fname || '云端数据', true);
-    if(p.scope){ dash.scope=p.scope; }
+    // 不恢复 selMonths / scope：月份筛选是临时 UI 状态，保持「全部月份」(applyData 已重置)
+    renderMonthPop();
     renderDashboard();
   }
   if(window.KpiCloudSync){
@@ -1196,6 +1262,8 @@
       countOf: function(p){ return (p && Array.isArray(p.rows)) ? p.rows.length : 0; }
     });
   }
+  /* 暴露给外部脚本：月份多选浮层 / 清空数据按钮（独立 <script> 块） */
+  window.dash=dash; window.setStatus=setStatus; window.renderDashboard=renderDashboard; window.renderMonthPop=renderMonthPop; window.TGT_KEY=TGT_KEY;
 })();
 </script>
 <script src="/shared/rbac.js?v=20261016b"></script>
@@ -1212,6 +1280,7 @@
     'consExport':'export','projExport':'export','projExportMap':'export','btnPng':'export','btnXlsx':'export','btnNextPng':'export','btnNextXlsx':'export',
     'btnXlsxDept':'export','btnXlsxMgr':'export','btnXlsxChannel':'export',
     'clear-vab':'clear','clear-manual':'clear','clear-date':'clear','clear-all':'clear','projClearMap':'clear','btnClearOV':'clear',
+    'btnClearData':'clear',
     'edit-vab':'editVab','vab-add-save':'editVab','recompute':'recompute'
   };
   function tag(){
@@ -1221,6 +1290,95 @@
     });
   }
   if(document.readyState!=='loading') tag(); else document.addEventListener('DOMContentLoaded', tag);
+})();
+</script>
+<script>
+/* 月份多选浮层（替代旧 chips：复选框多选取并集，「全部」= 清空筛选） */
+(function(){
+  var btn=document.getElementById('monthBtn');
+  var pop=document.getElementById('monthPop');
+  var catsBox=document.getElementById('monthCats');
+  if(!btn||!pop||!catsBox) return;
+  var allCb=pop.querySelector('.pf-cb[data-v="__all__"]');
+  function syncLabel(){
+    var sel=(window.dash&&window.dash.selMonths)||[];
+    btn.textContent = !sel.length ? '全部月份' : (sel.length===1 ? sel[0] : '已选 '+sel.length+' 个月');
+    if(allCb) allCb.checked = (sel.length===0);
+  }
+  function applyChecks(){
+    var sel=(window.dash&&window.dash.selMonths)||[];
+    pop.querySelectorAll('.pf-cb[data-v]').forEach(function(cb){
+      var v=cb.getAttribute('data-v');
+      cb.checked = (v==='__all__') ? (sel.length===0) : (sel.indexOf(v)>=0);
+    });
+  }
+  btn.addEventListener('click', function(e){
+    e.stopPropagation();
+    var open = pop.style.display!=='none';
+    document.querySelectorAll('.proj-filter-pop').forEach(function(p){ p.style.display='none'; });
+    pop.style.display = open ? 'none' : 'block';
+    if(!open) applyChecks();
+  });
+  pop.addEventListener('click', function(e){ e.stopPropagation(); });
+  pop.addEventListener('change', function(e){
+    var cb=e.target.closest('.pf-cb'); if(!cb) return;
+    var v=cb.getAttribute('data-v');
+    var sel=((window.dash&&window.dash.selMonths)||[]).filter(function(x){ return x!=='__all__'; });
+    if(v==='__all__'){ sel=[]; }
+    else if(cb.checked){ if(sel.indexOf(v)<0) sel.push(v); }
+    else { sel=sel.filter(function(x){ return x!==v; }); }
+    window.dash.selMonths=sel;
+    syncLabel(); applyChecks();
+    if(window.renderDashboard) window.renderDashboard();
+  });
+  syncLabel();
+})();
+</script>
+<script>
+/* 筛选段折叠（shared/filterbar.css）：⚙筛选 胶囊切换 fbody 显隐，状态按面板持久化 */
+(function(){
+  function applyBtn(b){
+    var key='ma_fbar_'+(b.getAttribute('data-fbar')||'x');
+    var bar=b.closest('.fbar');
+    var collapsed=false;
+    try{ collapsed=localStorage.getItem(key)==='1'; }catch(e){}
+    if(bar) bar.classList.toggle('collapsed',collapsed);
+    var caret=b.querySelector('.ft-caret');
+    if(caret) caret.textContent=collapsed?'▸':'▴';
+  }
+  document.querySelectorAll('.ftoggle[data-fbar]').forEach(function(b){
+    applyBtn(b);
+    b.addEventListener('click',function(){
+      var key='ma_fbar_'+(b.getAttribute('data-fbar')||'x');
+      var bar=b.closest('.fbar');
+      var collapsed=bar?bar.classList.toggle('collapsed'):false;
+      try{ localStorage.setItem(key,collapsed?'1':'0'); }catch(e){}
+      var caret=b.querySelector('.ft-caret');
+      if(caret) caret.textContent=collapsed?'▸':'▴';
+    });
+  });
+})();
+</script>
+<script>
+/* 清空数据（双重确认） */
+(function(){
+  var btn=document.getElementById('btnClearData');
+  if(!btn) return;
+  btn.addEventListener('click',function(){
+    var d=window.dash;
+    if(!d||!d.rows||!d.rows.length){ if(window.setStatus) window.setStatus('当前没有可清空的数据。','err'); return; }
+    if(!window.confirm('确认清空已导入的全部数据？此操作不可撤销，需重新导入。')) return;
+    if(!window.confirm('再次确认：将清空所有已导入明细与业绩目标，确定继续？')) return;
+    d.rows=[]; d.map=null; d.fname=''; d.scope='__all__'; d.selMonths=[]; d.months=[];
+    try{ localStorage.removeItem(window.TGT_KEY); }catch(e){}
+    var fm=document.getElementById('fMeta'); if(fm) fm.textContent='未导入';
+    var mc=document.getElementById('monthCats'); if(mc) mc.innerHTML='';
+    var tb=document.getElementById('tables'); if(tb) tb.style.display='none';
+    var ph=document.getElementById('placeholder'); if(ph) ph.style.display='block';
+    if(window.setStatus) window.setStatus('已清空全部数据。','ok');
+    if(window.renderMonthPop) window.renderMonthPop();
+    if(window.KpiCloudSync) window.KpiCloudSync.markDirty();
+  });
 })();
 </script>
 <script src="/shared/auth-gate.js?v=20261020c"></script>
