@@ -121,8 +121,8 @@
   .mt-note{margin-top:8px;font-size:11.5px;color:var(--ink-soft);line-height:1.6;}
 
   /* ===== 统计表（按用户参考图版式） ===== */
-  table.mt{border-collapse:collapse;width:100%;font-size:12.5px;font-variant-numeric:tabular-nums;min-width:640px;}
-  table.mt th,table.mt td{border:1px solid var(--line);padding:5px 8px;text-align:right;white-space:nowrap;}
+  table.mt{border-collapse:collapse;width:100%;font-size:12px;font-variant-numeric:tabular-nums;min-width:640px;}
+  table.mt th,table.mt td{border:1px solid var(--line);padding:6px 9px;text-align:right;white-space:nowrap;}
   table.mt thead th{background:var(--navy);color:#fff;font-weight:600;text-align:center;position:sticky;top:0;z-index:1;}
   table.mt td.dept{background:var(--navy-100);color:var(--navy-900);font-weight:700;text-align:center;vertical-align:middle;}
   table.mt td.clinic{background:var(--navy-50);color:var(--navy-900);font-weight:600;text-align:center;}
@@ -173,6 +173,17 @@
   table.mt.channel tr.hosp-target td{background:#8497B0;color:#fff;font-weight:700;}
   table.mt.channel tr.hosp-target td.rate{color:#fff;}
   table.mt.channel tr.year-total td{background:var(--navy-100);font-weight:700;}
+
+  /* ===== 顶部 KPI 概览（方案B·专业 BI 紧凑：白卡 + 左侧藏蓝强调条 + 紧凑字号） ===== */
+  .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:0 0 14px;}
+  .ktile{position:relative;overflow:hidden;background:#fff;border:1px solid var(--navy-100);border-radius:10px;padding:13px 16px 13px 18px;box-shadow:0 1px 3px rgba(1,65,139,.06);}
+  .ktile::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--navy);}
+  .ktile .kl{font-size:11.5px;color:var(--ink-soft);margin-bottom:7px;}
+  .ktile .kv{font-size:21px;font-weight:700;color:var(--navy-900);letter-spacing:.2px;font-variant-numeric:tabular-nums;line-height:1.15;}
+  .ktile .kv .ku{font-size:12px;color:var(--ink-soft);font-weight:500;margin-left:3px;}
+  .ktile .ks{font-size:11.5px;margin-top:6px;color:var(--ink-soft);}
+  .ktile .ks.g{color:var(--down);} .ktile .ks.b{color:var(--up);}
+  @media(max-width:900px){ .kpis{grid-template-columns:repeat(2,1fr);} }
 
   .empty{color:var(--ink-soft);text-align:center;padding:60px 0;font-size:14px;}
   @media(max-width:640px){
@@ -228,6 +239,13 @@
     </div>
     <span class="hint" id="fMeta" style="width:100%;">未导入</span>
     <div class="status" id="status" style="flex-basis:100%;"></div>
+  </div>
+
+  <div class="kpis" id="kpis" style="display:none">
+    <div class="ktile"><div class="kl">全院合计 · 现款支付</div><div class="kv" id="kpiCash">0<span class="ku">元</span></div><div class="ks" id="kpiCashSub">&nbsp;</div></div>
+    <div class="ktile"><div class="kl">消耗业绩</div><div class="kv" id="kpiCons">0<span class="ku">元</span></div><div class="ks" id="kpiConsSub">&nbsp;</div></div>
+    <div class="ktile"><div class="kl">全院容量（去重会员）</div><div class="kv" id="kpiMem">0<span class="ku">人</span></div><div class="ks" id="kpiMemSub">&nbsp;</div></div>
+    <div class="ktile"><div class="kl">管家目标完成率</div><div class="kv" id="kpiRate">—</div><div class="ks" id="kpiRateSub">&nbsp;</div></div>
   </div>
 
   <div id="tables" style="display:none">
@@ -859,6 +877,35 @@
     dash.aggA=a; dash.aggB=b;   // 供明细下钻取订单桶
     renderChannelTable();
 
+    /* KPI 概览（方案B·专业 BI 紧凑）：从聚焦范围内数据实时聚合，不硬编码任何数值 */
+    (function(){
+      var cashTotal=0, consTotal=0; var memSet=new Set();
+      inScope.forEach(function(r){
+        cashTotal+=num(r[map.cash]||0);
+        consTotal+=rowCons(r,map);
+        var mem=strVal(r[map.member]);
+        if(map.member!=null && isRealMember(mem)) memSet.add(mem);
+      });
+      var mgrTargetSum=0;
+      MANAGER_ROSTER.concat(MGR_REFERENCE).forEach(function(n){ mgrTargetSum+=tgtGet(scope,n); });
+      var ratePct = mgrTargetSum>0 ? (b.mgrSum/mgrTargetSum*100) : null;
+      document.getElementById('kpis').style.display='grid';
+      document.getElementById('kpiCash').innerHTML=fmt(cashTotal)+'<span class="ku">元</span>';
+      document.getElementById('kpiCons').innerHTML=fmt(consTotal)+'<span class="ku">元</span>';
+      document.getElementById('kpiMem').innerHTML=fmtInt(memSet.size)+'<span class="ku">人</span>';
+      document.getElementById('kpiCashSub').textContent='聚焦：'+scopeLabel;
+      document.getElementById('kpiConsSub').textContent='含储值消费';
+      document.getElementById('kpiMemSub').textContent='覆盖 '+inScope.length+' 笔订单';
+      var rateEl=document.getElementById('kpiRate'), rateSub=document.getElementById('kpiRateSub');
+      if(ratePct==null){ rateEl.textContent='—'; rateEl.style.color='var(--navy-900)'; rateSub.textContent='未设管家目标'; rateSub.className='ks'; }
+      else{
+        rateEl.textContent=ratePct.toFixed(1)+'%';
+        rateEl.style.color = ratePct>=100 ? 'var(--down)' : 'var(--up)';
+        rateSub.textContent='实际 '+fmt(b.mgrSum)+' / 目标 '+fmt(mgrTargetSum);
+        rateSub.className='ks '+(ratePct>=100?'g':'b');
+      }
+    })();
+
     document.getElementById('deptTag').textContent=scopeLabel;
     document.getElementById('mgrTag').textContent=scopeLabel;
     document.getElementById('deptNote').textContent=
@@ -1374,6 +1421,7 @@
     var fm=document.getElementById('fMeta'); if(fm) fm.textContent='未导入';
     var mc=document.getElementById('monthCats'); if(mc) mc.innerHTML='';
     var tb=document.getElementById('tables'); if(tb) tb.style.display='none';
+    var kp=document.getElementById('kpis'); if(kp) kp.style.display='none';
     var ph=document.getElementById('placeholder'); if(ph) ph.style.display='block';
     if(window.setStatus) window.setStatus('已清空全部数据。','ok');
     if(window.renderMonthPop) window.renderMonthPop();
