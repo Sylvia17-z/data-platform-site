@@ -103,10 +103,7 @@
   table.mt tr.sum td.sum-lbl{text-align:center;}
   table.mt tr.total td{background:var(--navy-100);font-weight:700;}
   table.mt tr.total td.sum-lbl{text-align:center;}
-  table.mt td.ref-name{color:var(--ink-soft);}
-  table.mt tr.ref-row td{background:#f7f7f7;color:var(--ink-soft);font-style:italic;}
   table.mt tr.wu-row td.doc{color:var(--ink-soft);}
-  .ref-mark{display:inline-block;margin-left:5px;padding:0 5px;font-size:10px;font-style:normal;line-height:15px;border-radius:3px;background:#eceff3;color:var(--ink-soft);border:1px solid #dfe3e8;vertical-align:1px;}
 
   /* 明细下钻：行可点击 + 弹层 */
   table.mt tbody tr[data-drill]{cursor:pointer;}
@@ -359,7 +356,7 @@
   var ORAL_DOCTOR='安志国';                 // 订单开单科室=口腔科 → 业绩全部计入安志国
   var MANAGER_ROSTER=['白雪花','赵静','严淑杰','黄果','李方媛','王勤红','房雨倩','刘梓珺'];
   var MGR_EXCLUDE=['营销部','吴雅琴','许顺华','张帆'];  // 不展示、不计入
-  var MGR_REFERENCE=['徐美琪','张亚超'];                // 参考行徽章：显示「参考」标记，但计入管家合计
+  var MGR_REFERENCE=['徐美琪','张亚超'];                // 计入管家合计（按普通行渲染，不显示参考徽章）
   var TGT_KEY='monthly_mgr_targets_v1';
   var TGT_DEFAULT={'无':300000,'全院合计':3000000,'全院目标':3000000};
 
@@ -681,9 +678,9 @@
     b.rows.forEach(function(r){
       var tgt=tgtGet(scope,r.name);
       var rt=rateText(r.cash,tgt);
-      var cls=r.kind==='ref'?' class="ref-row"':'';
-      var nameHtml=escapeHtml(r.name)+(r.kind==='ref'?'<i class="ref-mark">参考</i>':'');
-      html+='<tr'+cls+' data-drill="mgr:'+escapeHtml(r.name)+'" data-dlabel="'+escapeHtml(r.name)+(r.kind==='ref'?'（参考）':'')+'"><td class="doc'+(r.kind==='ref'?' ref-name':'')+'">'+nameHtml+'</td>'
+      var cls='';
+      var nameHtml=escapeHtml(r.name);
+      html+='<tr'+cls+' data-drill="mgr:'+escapeHtml(r.name)+'" data-dlabel="'+escapeHtml(r.name)+'"><td class="doc">'+nameHtml+'</td>'
         +'<td class="tgt-cell"><input class="tgt-input" type="number" step="0.01" min="0" data-rbac="editTargets" data-name="'+escapeHtml(r.name)+'" value="'+(tgt||'')+'" title="月业绩目标（可手工编辑，按月保存）"></td>'
         +'<td class="num rate bad">'+fmt(r.cash)+'</td>'
         +'<td class="num">'+fmt(r.cons)+'</td>'
@@ -782,7 +779,7 @@
       +'点击任意一行可下钻查看对应的订单明细。月份以「日期」列为准，未匹配时回退「收款时间」。';
     document.getElementById('mgrNote').textContent=
       '口径：实际完成＝「关联订单信息-开单咨询师」名下的现款支付合计；「无」＝未填开单咨询师的订单；'
-      +'营销部 / 吴雅琴 / 许顺华 / 张帆 不纳入管家统计；'+MGR_REFERENCE.join(' / ')+' 为参考行（显示「参考」徽章，计入管家合计）。'
+      +'营销部 / 吴雅琴 / 许顺华 / 张帆 不纳入管家统计；'+MGR_REFERENCE.join(' / ')+' 计入管家合计（不显示参考徽章，按普通行渲染）。'
       +'月业绩目标可手工编辑，按月份分别保存并同步云端；完成率＝实际完成 ÷ 月业绩目标，目标 ≤0 显示「/」。'
       +'消耗业绩＝排除「品项一级分类（实时）=充值」的行后，按（现款支付＋资产抵扣）合计；下钻明细含「消耗金额」列与合计行，弹层支持按姓名/会员号/科室/医生/咨询师筛选。'
       +'点击任意一行可下钻查看对应的订单明细。';
@@ -974,11 +971,7 @@
     M(0,0,1,0); M(0,1,0,4);
     b.rows.forEach(function(r){
       var t=tgtGet(scope,r.name);
-      if(r.kind==='ref'){
-        rows.push([C(r.name+'（参考）','s','ref'),C(t||0,'n','refPlain'),C(r.cash,'n','refN'),C(r.cons,'n','refN'),rateCell(r.cash,t)]);
-      }else{
-        rows.push([C(r.name,'s','doc'),C(t||0,'n','plain'),C(r.cash,'n','num'),C(r.cons,'n','num'),rateCell(r.cash,t)]);
-      }
+      rows.push([C(r.name,'s','doc'),C(t||0,'n','plain'),C(r.cash,'n','num'),C(r.cons,'n','num'),rateCell(r.cash,t)]);
     });
     var noneTgt=tgtGet(scope,'无');
     rows.push([C('无','s','docSoft'),C(noneTgt||0,'n','plain'),C(b.none,'n','num'),C(b.noneCons,'n','num'),rateCell(b.none,noneTgt)]);
