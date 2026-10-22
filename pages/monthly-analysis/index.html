@@ -169,14 +169,14 @@
 
   <div class="import-card" id="importCard">
     <span class="seg-label">数据明细</span>
-    <input type="file" id="file" accept=".xlsx,.xls" />
-    <label for="file" class="btn btn-primary" title="导入「订单项目收退款表-明细」同结构文件；按下方复选框决定覆盖或补充导入">📁 上传数据表</label>
+    <input type="file" id="file" accept=".xlsx,.xls" multiple />
+    <label for="file" class="btn btn-primary" title="导入「订单项目收退款表-明细」同结构文件；支持一次多选多个月份文件（按下方复选框决定覆盖或合并导入）">📁 上传数据表</label>
     <span class="seg-status">
       <span id="fMeta" class="file-meta">未导入</span>
       <label class="merge-opt" title="勾选=补充导入（重叠日期用新文件覆盖，其它日期保留）；不勾=覆盖导入（清空后重新导入）">
         <input type="checkbox" id="merge-mode" checked /> 合并到历史数据（重叠日期覆盖，其它日期保留）
       </label>
-      <span class="drop-hint">也可把文件拖到此处</span>
+      <span class="drop-hint">也可把文件拖到此处（支持一次多选多个月份文件）</span>
     </span>
     <div class="status" id="status" style="flex-basis:100%;"></div>
   </div>
@@ -225,10 +225,10 @@
   'use strict';
   var file=document.getElementById('file'), status=document.getElementById('status');
   var importCard=document.getElementById('importCard');
-  file.addEventListener('change',function(e){ if(e.target.files[0]) loadFile(e.target.files[0]); });
+  file.addEventListener('change',function(e){ var fs=Array.from(e.target.files||[]); if(fs.length) loadFiles(fs); });
   ['dragover','dragenter'].forEach(function(ev){importCard.addEventListener(ev,function(e){e.preventDefault();importCard.classList.add('drag');});});
   ['dragleave','drop'].forEach(function(ev){importCard.addEventListener(ev,function(e){e.preventDefault();importCard.classList.remove('drag');});});
-  importCard.addEventListener('drop',function(e){ var f=e.dataTransfer&&e.dataTransfer.files[0]; if(f) loadFile(f); });
+  importCard.addEventListener('drop',function(e){ var fs=e.dataTransfer&&Array.from(e.dataTransfer.files||[]); if(fs&&fs.length) loadFiles(fs); });
 
   function setStatus(msg,type){ status.textContent=msg; status.className='status'+(type?(' '+type):''); }
 
@@ -391,40 +391,72 @@
     return { rows: kept.concat(incoming), replaced: existing.length-kept.length, coveredDates: incDates.size };
   }
 
+  function parseArrayBuffer(buf, fname){
+    try{
+      var wb=XLSX.read(new Uint8Array(buf),{type:'array'});
+      var ws=wb.SheetNames.length?wb.Sheets[wb.SheetNames[0]]:null;
+      if(!ws) return {ok:false,msg:'文件中没有可读取的工作表。'};
+      var rows=XLSX.utils.sheet_to_json(ws,{defval:''});
+      if(!rows.length) return {ok:false,msg:'工作表为空，请检查数据。'};
+      var headers=Object.keys(rows[0]);
+      var map=resolveHeaders(headers);
+      if(map.cash==null) return {ok:false,msg:'未匹配到关键列（收款金额-现款支付），请确认文件结构。'};
+      if(map.ym==null&&map.date==null) return {ok:false,msg:'未匹配到月份列（日期 / 收款时间），请确认文件结构。'};
+      var miss=[];
+      if(map.dept==null) miss.push('订单开单科室');
+      if(map.doctor==null) miss.push('订单分诊医生');
+      if(map.consultant==null) miss.push('开单咨询师');
+      if(map.member==null) miss.push('会员号');
+      return {ok:true, rows:rows, map:map, miss:miss};
+    }catch(err){ return {ok:false, msg:'解析失败：'+err.message}; }
+  }
+  function importRows(rows, map, fname, miss){
+    // 导入模式：勾选「合并到历史数据」= 补充导入（重叠日期覆盖、其它日期保留）；未勾 = 覆盖导入
+    var mergeMode = document.getElementById('merge-mode');
+    var doMerge = mergeMode ? mergeMode.checked : false;
+    if(doMerge && dash.rows && dash.rows.length){
+      var m=mergeRowsByDate(dash.rows, rows, map);
+      applyData(m.rows, map, fname, false,
+        '补充导入成功：本次 '+fmtInt(rows.length)+' 行，累计 '+fmtInt(m.rows.length)+' 行（覆盖 '+m.coveredDates+' 个日期共 '+m.replaced+' 条，保留其它日期）');
+    }else{
+      applyData(rows, map, fname, false, (doMerge?'已导入 ':'覆盖导入完成：')+fmtInt(rows.length)+' 行');
+    }
+    if(miss&&miss.length) setStatus((doMerge?'补充导入成功；':'已导入 ')+fmtInt(rows.length)+' 行；未匹配到：'+miss.join(' / ')+'（相关表将部分为空）','ok');
+    if(window.KpiCloudSync) window.KpiCloudSync.markDirty();
+  }
   function loadFile(f){
     setStatus('正在解析 '+f.name+' …');
     var reader=new FileReader();
     reader.onload=function(e){
-      try{
-        var wb=XLSX.read(new Uint8Array(e.target.result),{type:'array'});
-        var ws=wb.SheetNames.length?wb.Sheets[wb.SheetNames[0]]:null;
-        if(!ws){ setStatus('文件中没有可读取的工作表。','err'); return; }
-        var rows=XLSX.utils.sheet_to_json(ws,{defval:''});
-        if(!rows.length){ setStatus('工作表为空，请检查数据。','err'); return; }
-        var headers=Object.keys(rows[0]);
-        var map=resolveHeaders(headers);
-        if(map.cash==null){ setStatus('未匹配到关键列（收款金额-现款支付），请确认文件结构。','err'); return; }
-        if(map.ym==null&&map.date==null){ setStatus('未匹配到月份列（日期 / 收款时间），请确认文件结构。','err'); return; }
-        var miss=[];
-        if(map.dept==null) miss.push('订单开单科室');
-        if(map.doctor==null) miss.push('订单分诊医生');
-        if(map.consultant==null) miss.push('开单咨询师');
-        if(map.member==null) miss.push('会员号');
-        // 导入模式：勾选「合并到历史数据」= 补充导入（重叠日期覆盖、其它日期保留）；未勾 = 覆盖导入
-        var mergeMode = document.getElementById('merge-mode');
-        var doMerge = mergeMode ? mergeMode.checked : false;
-        if(doMerge && dash.rows && dash.rows.length){
-          var m=mergeRowsByDate(dash.rows, rows, map);
-          applyData(m.rows, map, f.name, false,
-            '补充导入成功：本次 '+fmtInt(rows.length)+' 行，累计 '+fmtInt(m.rows.length)+' 行（覆盖 '+m.coveredDates+' 个日期共 '+m.replaced+' 条，保留其它日期）');
-        }else{
-          applyData(rows, map, f.name, false, (doMerge?'已导入 ':'覆盖导入完成：')+fmtInt(rows.length)+' 行');
-        }
-        if(miss.length) setStatus((doMerge?'补充导入成功；':'已导入 ')+fmtInt(rows.length)+' 行；未匹配到：'+miss.join(' / ')+'（相关表将部分为空）','ok');
-        if(window.KpiCloudSync) window.KpiCloudSync.markDirty();
-      }catch(err){ setStatus('解析失败：'+err.message,'err'); }
+      var pr=parseArrayBuffer(e.target.result, f.name);
+      if(!pr.ok){ setStatus(pr.msg,'err'); return; }
+      importRows(pr.rows, pr.map, f.name, pr.miss);
     };
+    reader.onerror=function(){ setStatus('读取失败：'+f.name,'err'); };
     reader.readAsArrayBuffer(f);
+  }
+  function loadFiles(files){
+    if(files.length===1){ loadFile(files[0]); return; }
+    setStatus('正在解析 '+files.length+' 个文件 …');
+    var results=[], pending=files.length;
+    files.forEach(function(f){
+      var reader=new FileReader();
+      reader.onload=function(e){
+        results.push({f:f, pr:parseArrayBuffer(e.target.result, f.name)});
+        if(--pending===0) finishMultiImport(results, files);
+      };
+      reader.onerror=function(){ results.push({f:f, pr:{ok:false,msg:'读取失败：'+f.name}}); if(--pending===0) finishMultiImport(results, files); };
+      reader.readAsArrayBuffer(f);
+    });
+  }
+  function finishMultiImport(results, files){
+    var ok=results.filter(function(r){ return r.pr.ok; });
+    var bad=results.filter(function(r){ return !r.pr.ok; });
+    if(bad.length) setStatus('部分文件解析失败：'+bad.map(function(r){return r.pr.msg;}).join('； '),'err');
+    if(!ok.length) return;
+    var map=ok[0].pr.map, miss=ok[0].pr.miss, combined=[];
+    ok.forEach(function(r){ combined=combined.concat(r.pr.rows); });
+    importRows(combined, map, files.map(function(f){return f.name;}).join(' + '), miss);
   }
 
   /* ---------- 月份切换 chips ---------- */
