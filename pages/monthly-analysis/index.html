@@ -136,6 +136,15 @@
   .rate.good{color:var(--down);}
   .rate.bad{color:var(--up);}
 
+  /* 月度业绩完成情况（按用户截图：灰色双表头 + 白色数据行 + 钢蓝全院目标行） */
+  table.mt.channel thead th{background:#D9D9D9;color:#0f172a;font-weight:700;}
+  table.mt.channel thead th.tl{text-align:left;}
+  table.mt.channel tbody td{background:#fff;}
+  table.mt.channel tr.ch-sum td{background:#fff;font-weight:700;border-top:2px solid var(--navy);}
+  table.mt.channel tr.hosp-target td{background:#8497B0;color:#fff;font-weight:700;}
+  table.mt.channel tr.hosp-target td.rate{color:#fff;}
+  table.mt.channel tr.year-total td{background:var(--navy-100);font-weight:700;}
+
   .empty{color:var(--ink-soft);text-align:center;padding:60px 0;font-size:14px;}
   @media(max-width:640px){
     table.mt{min-width:560px;}
@@ -190,6 +199,13 @@
       <div class="table-card"><table class="mt" id="tblMgr"></table></div>
       <div class="mt-note" id="mgrNote"></div>
     </section>
+    <section class="card" id="cardChannel">
+      <h3><span class="t"><span class="bar"></span>月度业绩完成情况</span>
+        <span class="tbl-ops"><span class="tag" id="chTag"></span>
+        <button type="button" class="btn" id="btnXlsxChannel" title="导出月度业绩完成情况（样式与页面显示完全一致）">导出</button></span></h3>
+      <div class="table-card"><table class="mt channel" id="tblChannel"></table></div>
+      <div class="mt-note" id="chNote"></div>
+    </section>
   </div>
 
   <div id="placeholder" class="empty">尚未导入数据 —— 请先选择 Excel 文件。</div>
@@ -229,7 +245,8 @@
     consultant:['关联订单信息-开单咨询师','订单开单咨询师','开单咨询师'],
     member:['关联客户信息-会员号','会员号'],
     mname:['关联客户信息-客户姓名','客户姓名'],
-    cat:['品项一级分类（实时）','品项一级分类']
+    cat:['品项一级分类（实时）','品项一级分类'],
+    channel:['关联客户信息 客户来源一级渠道（实时）','客户来源一级渠道（实时）']
   };
 
   function resolveHeaders(headers){
@@ -343,7 +360,7 @@
   var MGR_EXCLUDE=['营销部','吴雅琴','许顺华','张帆'];  // 不展示、不计入
   var MGR_REFERENCE=['徐美琪','张亚超'];                // 展示为参考行，不计入管家合计
   var TGT_KEY='monthly_mgr_targets_v1';
-  var TGT_DEFAULT={'无':300000,'全院合计':3000000};
+  var TGT_DEFAULT={'无':300000,'全院合计':3000000,'全院目标':3000000};
 
   /* ---------- 数据落地 + UI 切换：本地导入与「云端恢复」共用同一条路径 ---------- */
   function applyData(rows, map, fname, fromCloud, note){
@@ -750,6 +767,7 @@
     var b=aggregateManager(inScope,map);
     renderManagerTable(b,monthLabel);
     dash.aggA=a; dash.aggB=b;   // 供明细下钻取订单桶
+    renderChannelTable();
 
     document.getElementById('deptTag').textContent=scopeLabel;
     document.getElementById('mgrTag').textContent=scopeLabel;
@@ -766,6 +784,109 @@
       +'月业绩目标可手工编辑，按月份分别保存并同步云端；完成率＝实际完成 ÷ 月业绩目标，目标 ≤0 显示「/」。'
       +'消耗业绩＝排除「品项一级分类（实时）=充值」的行后，按（现款支付＋资产抵扣）合计；下钻明细含「消耗金额」列与合计行，弹层支持按姓名/会员号/科室/医生/咨询师筛选。'
       +'点击任意一行可下钻查看对应的订单明细。';
+  }
+
+  /* ================= 月度业绩完成情况（按渠道归类 + 月度口径 + 年度合计） ================= */
+  // 渠道归类（用户关键字口径）：营销部=含「营销部」；商务部=含「商务」/「商保」/「公司渠道」；其他=其余全部
+  function classifyChannel(r,map){
+    var ch = map.channel!=null ? strVal(r[map.channel]) : '';
+    if(ch.indexOf('营销部')>=0) return '营销部';
+    if(ch.indexOf('商务')>=0 || ch.indexOf('商保')>=0 || ch.indexOf('公司渠道')>=0) return '商务部';
+    return '其他（公司所有）';
+  }
+  function channelActuals(rows,map){
+    var byMonth={};
+    rows.forEach(function(r){
+      var m=rowMonth(r,map); if(!m) return;
+      var ch=classifyChannel(r,map);
+      var cash=num(r[map.cash]||0);
+      if(!byMonth[m]) byMonth[m]={'营销部':0,'商务部':0,'其他（公司所有）':0};
+      byMonth[m][ch]+=cash;
+    });
+    var annual={'营销部':0,'商务部':0,'其他（公司所有）':0};
+    Object.keys(byMonth).forEach(function(m){
+      ['营销部','商务部','其他（公司所有）'].forEach(function(k){ annual[k]+=byMonth[m][k]; });
+    });
+    return {byMonth:byMonth, annual:annual};
+  }
+  function channelSelMonth(){
+    return dash.scope==='__all__' ? (dash.months.length?dash.months[dash.months.length-1]:'') : dash.scope;
+  }
+  function renderChannelTable(){
+    var map=dash.map; if(!map) return;
+    var el=document.getElementById('tblChannel'); if(!el) return;
+    var selMonth=channelSelMonth();
+    var monthLabel = selMonth ? (parseInt(selMonth.slice(5),10)+'月') : '全部月份';
+    var ca=channelActuals(dash.rows,map);
+    var monthly = (selMonth && ca.byMonth[selMonth]) ? ca.byMonth[selMonth] : {'营销部':0,'商务部':0,'其他（公司所有）':0};
+    var scope = selMonth || '__all__';
+    var names=['营销部','商务部','其他（公司所有）'];
+    var sumAct = monthly['营销部']+monthly['商务部']+monthly['其他（公司所有）'];
+    var sumTgt = 0; names.forEach(function(n){ sumTgt+=tgtGet(scope,n); });
+    var sumRt = rateText(sumAct,sumTgt);
+    var hospTgt = tgtGet(scope,'全院目标');
+    var hospRt = rateText(sumAct,hospTgt);
+    var yearAct = ca.annual['营销部']+ca.annual['商务部']+ca.annual['其他（公司所有）'];
+    var html='<thead>'
+      +'<tr><th colspan="4" class="tl">月度业绩完成情况（'+escapeHtml(monthLabel)+'）'+(dash.scope==='__all__'?' · 按最新月份展示':'')+'</th></tr>'
+      +'<tr><th class="tl">渠道</th><th>业绩目标（元）</th><th>实际完成（元）</th><th>完成率</th></tr></thead><tbody>';
+    names.forEach(function(n){
+      var act=monthly[n], tgt=tgtGet(scope,n), rt=rateText(act,tgt);
+      html+='<tr><td class="doc">'+escapeHtml(n)+'</td>'
+        +'<td class="tgt-cell"><input class="tgt-input" type="number" step="0.01" min="0" data-rbac="editTargets" data-chname="'+escapeHtml(n)+'" value="'+(tgt||'')+'" title="业绩目标（可手工编辑，按月保存）"></td>'
+        +'<td class="num rate bad">'+fmt(act)+'</td>'
+        +'<td class="num rate '+rt.cls+'" data-chrate-for="'+escapeHtml(n)+'">'+rt.txt+'</td></tr>';
+    });
+    html+='<tr class="ch-sum"><td class="doc">合计</td>'
+      +'<td class="num" data-chtarget="__sum__">'+fmt(sumTgt)+'</td>'
+      +'<td class="num">'+fmt(sumAct)+'</td>'
+      +'<td class="num rate '+sumRt.cls+'" data-chrate-for="__sum__">'+sumRt.txt+'</td></tr>';
+    html+='<tr class="hosp-target"><td class="doc">全院目标</td>'
+      +'<td class="tgt-cell"><input class="tgt-input" type="number" step="0.01" min="0" data-rbac="editTargets" data-chname="全院目标" value="'+(hospTgt||'')+'" title="全院目标（可手工编辑，默认 300 万）"></td>'
+      +'<td class="num">'+fmt(sumAct)+'</td>'
+      +'<td class="num rate '+hospRt.cls+'" data-chrate-for="全院目标">'+hospRt.txt+'</td></tr>';
+    html+='<tr class="year-total"><td class="doc">年度合计（'+dash.months.length+' 个月）</td>'
+      +'<td class="num dim">—</td>'
+      +'<td class="num">'+fmt(yearAct)+'</td>'
+      +'<td class="num dim">/</td></tr>';
+    html+='</tbody>';
+    el.innerHTML=html;
+    el.querySelectorAll('.tgt-input').forEach(function(inp){
+      inp.addEventListener('input',function(){
+        var name=inp.dataset.chname, v=parseFloat(inp.value);
+        tgtSet(scope,name,isNaN(v)?0:v);
+        refreshChannelRates();
+        if(window.KpiCloudSync) window.KpiCloudSync.markDirty();
+      });
+    });
+    document.getElementById('chTag').textContent = dash.scope==='__all__' ? '全部月份（按最新月 '+monthLabel+'）' : dash.scope;
+    var note='口径：渠道按「客户来源一级渠道（实时）」关键字归类——营销部=含「营销部」；商务部=含「商务」/「商保」/「公司渠道」；其他（公司所有）=其余全部；合计=三项直加（=全院，口径守恒）。'
+      +'实际完成＝该渠道名下「收款金额-现款支付」合计（与表B 实际完成列一致）。业绩目标可手工编辑，按月份分别保存并同步云端；'
+      +'完成率＝实际完成 ÷ 业绩目标（目标≤0 显示「/」）。';
+    if(map.channel==null) note+='（未匹配到渠道列，全部归入「其他（公司所有）」）';
+    note+='「年度合计」行为跨全部月份求和的真实累计，无年度目标故完成率显示「/」。点击「导出」可生成与页面样式完全一致的 Excel。';
+    document.getElementById('chNote').textContent=note;
+  }
+  function refreshChannelRates(){
+    var map=dash.map; if(!map) return;
+    var selMonth=channelSelMonth();
+    var scope=selMonth||'__all__';
+    var ca=channelActuals(dash.rows,map);
+    var monthly=(selMonth && ca.byMonth[selMonth]) ? ca.byMonth[selMonth] : {'营销部':0,'商务部':0,'其他（公司所有）':0};
+    var tbl=document.getElementById('tblChannel'); if(!tbl) return;
+    ['营销部','商务部','其他（公司所有）'].forEach(function(n){
+      var rt=rateText(monthly[n],tgtGet(scope,n));
+      var c=tbl.querySelector('[data-chrate-for="'+cssEsc(n)+'"]');
+      if(c){ c.textContent=rt.txt; c.className='num rate '+rt.cls; }
+    });
+    var sumAct=monthly['营销部']+monthly['商务部']+monthly['其他（公司所有）'];
+    var sumTgt=0; ['营销部','商务部','其他（公司所有）'].forEach(function(n){ sumTgt+=tgtGet(scope,n); });
+    var st=tbl.querySelector('[data-chtarget="__sum__"]');
+    if(st){ st.textContent = sumTgt?fmt(sumTgt):'0'; }
+    var sc=tbl.querySelector('[data-chrate-for="__sum__"]');
+    if(sc){ var srt=rateText(sumAct,sumTgt); sc.textContent=srt.txt; sc.className='num rate '+srt.cls; }
+    var hc=tbl.querySelector('[data-chrate-for="全院目标"]');
+    if(hc){ var hrt=rateText(sumAct,tgtGet(scope,'全院目标')); hc.textContent=hrt.txt; hc.className='num rate '+hrt.cls; }
   }
 
   /* ================= 导出（样式与页面完全一致：藏蓝表头/合并单元格/黑框/斑马行/合计配色） ================= */
@@ -860,12 +981,42 @@
     return {rows:rows,merges:merges,colWidths:[16,14,16,16,12],sheetName:'管家业绩统计',freezeRows:2};
   }
 
+  function buildChannelStyled(){
+    var map=dash.map;
+    var selMonth=channelSelMonth();
+    var monthLabel = selMonth ? (parseInt(selMonth.slice(5),10)+'月') : '全部月份';
+    var ca=channelActuals(dash.rows,map);
+    var monthly=(selMonth && ca.byMonth[selMonth]) ? ca.byMonth[selMonth] : {'营销部':0,'商务部':0,'其他（公司所有）':0};
+    var scope=selMonth||'__all__';
+    var rows=[], merges=[];
+    function M(r,c,r2,c2){ if(!(r===r2&&c===c2)) merges.push({r:r,c:c,r2:r2,c2:c2}); }
+    function C(v,t,s){ return {v:v,t:t,s:s}; }
+    // 灰色双表头（与页面一致）
+    rows.push([C('月度业绩完成情况（'+monthLabel+'）','s','grayTitle'),C('','s','grayHead'),C('','s','grayHead'),C('','s','grayHead')]);
+    M(0,0,0,3);
+    rows.push([C('渠道','s','grayHead'),C('业绩目标（元）','s','grayHead'),C('实际完成（元）','s','grayHead'),C('完成率','s','grayHead')]);
+    var names=['营销部','商务部','其他（公司所有）'];
+    names.forEach(function(n){
+      var act=monthly[n], t=tgtGet(scope,n);
+      rows.push([C(n,'s','doc'),C(t||0,'n','plain'),C(act,'n','num'),(t>0?C(act/t,'n','pct'):C('/','s','pctDim'))]);
+    });
+    var sumAct=monthly['营销部']+monthly['商务部']+monthly['其他（公司所有）'];
+    var sumTgt=0; names.forEach(function(n){ sumTgt+=tgtGet(scope,n); });
+    rows.push([C('合计','s','chSumL'),C(sumTgt||0,'n','chSumN'),C(sumAct,'n','chSumN'),(sumTgt>0?C(sumAct/sumTgt,'n','pct'):C('/','s','pctDim'))]);
+    var hospTgt=tgtGet(scope,'全院目标');
+    rows.push([C('全院目标','s','hospL'),C(hospTgt||0,'n','hospPlain'),C(sumAct,'n','hospN'),(hospTgt>0?C(sumAct/hospTgt,'n','hospPct'):C('/','s','hospPctDim'))]);
+    var yearAct=ca.annual['营销部']+ca.annual['商务部']+ca.annual['其他（公司所有）'];
+    rows.push([C('年度合计（'+dash.months.length+' 个月）','s','totDoc'),C('/','s','totPlain'),C(yearAct,'n','totN'),C('/','s','totPctDim')]);
+    return {rows:rows,merges:merges,colWidths:[20,16,18,12],sheetName:'月度业绩完成情况',freezeRows:2};
+  }
+
   function exportTable(which){
     if(!dash.rows||!dash.rows.length||!window.buildStyledXlsx){ setStatus('暂无数据可导出。','err'); return; }
     var inScope = dash.scope==='__all__' ? dash.rows : dash.rows.filter(function(r){ return rowMonth(r,dash.map)===dash.scope; });
     var suffix = dash.scope==='__all__' ? '全部月份' : dash.scope;
     var m;
     if(which==='dept'){ m=buildDeptStyled(aggregateDept(inScope,dash.map)); }
+    else if(which==='channel'){ m=buildChannelStyled(); }
     else{
       var monthLabel = dash.scope==='__all__'
         ? (dash.months.length ? (parseInt(dash.months[dash.months.length-1].slice(5),10)+'月') : '全部月份')
@@ -875,14 +1026,15 @@
     buildStyledXlsx(m).then(function(blob){
       var a=document.createElement('a');
       a.href=URL.createObjectURL(blob);
-      a.download=(which==='dept'?'月度各科室业绩统计_':'月度管家业绩统计_')+suffix+'.xlsx';
+      a.download=(which==='dept'?'月度各科室业绩统计_':(which==='channel'?'月度业绩完成情况_':'月度管家业绩统计_'))+suffix+'.xlsx';
       document.body.appendChild(a); a.click();
       setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); },800);
-      setStatus('已导出'+(which==='dept'?'表A':'表B')+'：'+a.download+'（样式与页面一致）','ok');
+      setStatus('已导出'+(which==='dept'?'表A':(which==='channel'?'月度业绩完成情况':'表B'))+'：'+a.download+'（样式与页面一致）','ok');
     }).catch(function(err){ setStatus('导出失败：'+err.message,'err'); });
   }
   document.getElementById('btnXlsxDept').addEventListener('click',function(){ exportTable('dept'); });
   document.getElementById('btnXlsxMgr').addEventListener('click',function(){ exportTable('mgr'); });
+  document.getElementById('btnXlsxChannel').addEventListener('click',function(){ exportTable('channel'); });
 
   /* ---------- 明细下钻：点击统计表任意行（含合计行）查看对应订单 ---------- */
   function drillDate(r,map){
@@ -1024,7 +1176,7 @@
     'export-xlsx':'export','export-png':'export','export-store-xlsx':'export','export-store-png':'export',
     'vabExport':'export','orderExport':'export','chargeExport':'export','statsExport':'export',
     'consExport':'export','projExport':'export','projExportMap':'export','btnPng':'export','btnXlsx':'export','btnNextPng':'export','btnNextXlsx':'export',
-    'btnXlsxDept':'export','btnXlsxMgr':'export',
+    'btnXlsxDept':'export','btnXlsxMgr':'export','btnXlsxChannel':'export',
     'clear-vab':'clear','clear-manual':'clear','clear-date':'clear','clear-all':'clear','projClearMap':'clear','btnClearOV':'clear',
     'edit-vab':'editVab','vab-add-save':'editVab','recompute':'recompute'
   };

@@ -51,7 +51,19 @@
     totL:    {f:2, fill:3, bd:1, nf:0,   align:'center'},   // 全院合计行：#d6e0f0 粗体
     totDoc:  {f:2, fill:3, bd:1, nf:0,   align:'left'},     // 表B「全院合计」标签：#d6e0f0 粗体左对齐
     totN:    {f:2, fill:3, bd:1, nf:4,   align:'right'},
-    totNInt: {f:2, fill:3, bd:1, nf:3,   align:'right'}
+    totNInt: {f:2, fill:3, bd:1, nf:3,   align:'right'},
+    totPlain:{f:2, fill:3, bd:1, nf:0,   align:'right'},   // 年度合计·目标（navy-100 底，navy 粗）
+    totPctDim:{f:2, fill:3, bd:1, nf:0,   align:'right'},  // 年度合计·完成率「/」
+    // 月度业绩完成情况（按截图：灰双表头 #D9D9D9 + 钢蓝全院目标 #8497B0）
+    grayTitle:{f:2, fill:10, bd:1, nf:0,  align:'left'},    // 灰表头·标题行（左）
+    grayHead: {f:2, fill:10, bd:1, nf:0,  align:'center'}, // 灰表头·列名（中）
+    chSumL:   {f:2, fill:5,  bd:1, nf:0,  align:'left'},    // 合计行·标签（白底 navy 粗）
+    chSumN:   {f:2, fill:5,  bd:1, nf:4,  align:'right'},   // 合计行·金额（白底 navy 粗）
+    hospL:    {f:1, fill:9,  bd:1, nf:0,  align:'center'},  // 全院目标·标签（钢蓝底白粗）
+    hospPlain:{f:1, fill:9,  bd:1, nf:0,  align:'right'},   // 全院目标·目标（钢蓝底白粗）
+    hospN:    {f:1, fill:9,  bd:1, nf:4,  align:'right'},   // 全院目标·实际（钢蓝底白粗）
+    hospPct:  {f:1, fill:9,  bd:1, nf:164,align:'right'},   // 全院目标·完成率（钢蓝底白粗）
+    hospPctDim:{f:1,fill:9,  bd:1, nf:0,  align:'right'}    // 全院目标·完成率「/」
   };
 
   function stylesXml(){
@@ -66,7 +78,7 @@
         '<font><i/><sz val="11"/><color rgb="FF5B6472"/><name val="Microsoft YaHei"/></font>' +
       '</fonts>';
     const fills =
-      '<fills count="9">' +
+      '<fills count="11">' +
         '<fill><patternFill patternType="none"/></fill>' +
         '<fill><patternFill patternType="gray125"/></fill>' +
         // v-72 兼容修复：实色填充 bgColor 必须写同一 rgb，否则 WPS 下整行渲染成白底
@@ -77,6 +89,8 @@
         '<fill><patternFill patternType="solid"><fgColor rgb="FFFBFCFE"/><bgColor rgb="FFFBFCFE"/></patternFill></fill>' +
         '<fill><patternFill patternType="solid"><fgColor rgb="FFF7F7F7"/><bgColor rgb="FFF7F7F7"/></patternFill></fill>' +
         '<fill><patternFill patternType="solid"><fgColor rgb="FFD7EFF9"/><bgColor rgb="FFD7EFF9"/></patternFill></fill>' +
+        '<fill><patternFill patternType="solid"><fgColor rgb="FF8497B0"/><bgColor rgb="FF8497B0"/></patternFill></fill>' +  // fill9 全院目标钢蓝
+        '<fill><patternFill patternType="solid"><fgColor rgb="FFD9D9D9"/><bgColor rgb="FFD9D9D9"/></patternFill></fill>' +  // fill10 灰表头
       '</fills>';
     const borders =
       '<borders count="2">' +
