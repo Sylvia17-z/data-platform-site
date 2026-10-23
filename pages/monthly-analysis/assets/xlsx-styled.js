@@ -54,16 +54,9 @@
     totNInt: {f:2, fill:3, bd:1, nf:3,   align:'right'},
     totPlain:{f:2, fill:3, bd:1, nf:0,   align:'right'},   // 年度合计·目标（navy-100 底，navy 粗）
     totPctDim:{f:2, fill:3, bd:1, nf:0,   align:'right'},  // 年度合计·完成率「/」
-    // 月度业绩完成情况（按截图：灰双表头 #D9D9D9 + 钢蓝全院目标 #8497B0）
-    grayTitle:{f:2, fill:10, bd:1, nf:0,  align:'left'},    // 灰表头·标题行（左）
-    grayHead: {f:2, fill:10, bd:1, nf:0,  align:'center'}, // 灰表头·列名（中）
-    chSumL:   {f:2, fill:5,  bd:1, nf:0,  align:'left'},    // 合计行·标签（白底 navy 粗）
-    chSumN:   {f:2, fill:5,  bd:1, nf:4,  align:'right'},   // 合计行·金额（白底 navy 粗）
-    hospL:    {f:1, fill:9,  bd:1, nf:0,  align:'center'},  // 全院目标·标签（钢蓝底白粗）
-    hospPlain:{f:1, fill:9,  bd:1, nf:0,  align:'right'},   // 全院目标·目标（钢蓝底白粗）
-    hospN:    {f:1, fill:9,  bd:1, nf:4,  align:'right'},   // 全院目标·实际（钢蓝底白粗）
-    hospPct:  {f:1, fill:9,  bd:1, nf:164,align:'right'},   // 全院目标·完成率（钢蓝底白粗）
-    hospPctDim:{f:1,fill:9,  bd:1, nf:0,  align:'right'}    // 全院目标·完成率「/」
+    // 月度业绩完成情况（2026-10-23：与表A/表B 配色统一——藏蓝表头白字 + 浅蓝合计 + navy-100 全院目标）
+    sumPct:  {f:2, fill:8,  bd:1, nf:164,align:'right'},   // 合计行·完成率（浅蓝底 navy 粗 + 百分比）
+    totPct:  {f:2, fill:3,  bd:1, nf:164,align:'right'}    // 全院目标·完成率（navy-100 底 navy 粗 + 百分比）
   };
 
   function stylesXml(){

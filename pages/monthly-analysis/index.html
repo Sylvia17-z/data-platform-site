@@ -131,9 +131,9 @@
   table.mt tbody tr:nth-child(even) td.doc-lbl{background:#fbfcfe;}
   table.mt td.num{text-align:right;}
   table.mt td.dim{color:var(--ink-soft);}
-  table.mt tr.sum td{background:var(--light-blue);font-weight:700;}
+  table.mt tr.sum td{background:var(--light-blue)!important;font-weight:700;}
   table.mt tr.sum td.sum-lbl{text-align:center;}
-  table.mt tr.total td{background:var(--navy-100);font-weight:700;}
+  table.mt tr.total td{background:var(--navy-100)!important;font-weight:700;}
   table.mt tr.total td.sum-lbl{text-align:center;}
   table.mt tr.wu-row td.doc{color:var(--ink-soft);}
 
@@ -165,14 +165,13 @@
   .rate.good{color:var(--down);}
   .rate.bad{color:var(--up);}
 
-  /* 月度业绩完成情况（按用户截图：灰色双表头 + 白色数据行 + 钢蓝全院目标行） */
-  table.mt.channel thead th{background:#D9D9D9;color:#0f172a;font-weight:700;}
+  /* 月度业绩完成情况（2026-10-23：与表A/表B配色统一——藏蓝表头白字 + 浅蓝合计行，去掉灰表头/钢蓝行） */
+  table.mt.channel thead th{background:var(--navy);color:#fff;font-weight:600;}
   table.mt.channel thead th.tl{text-align:left;}
   table.mt.channel tbody td{background:#fff;}
-  table.mt.channel tr.ch-sum td{background:#fff;font-weight:700;border-top:2px solid var(--navy);}
-  table.mt.channel tr.hosp-target td{background:#8497B0;color:#fff;font-weight:700;}
-  table.mt.channel tr.hosp-target td.rate{color:#fff;}
-  table.mt.channel tr.year-total td{background:var(--navy-100);font-weight:700;}
+  table.mt.channel tr.ch-sum td{background:var(--light-blue)!important;font-weight:700;}
+  table.mt.channel tr.hosp-target td{background:var(--navy-100)!important;color:var(--navy-900);font-weight:700;}
+  table.mt.channel tr.year-total td{background:var(--navy-50)!important;font-weight:700;}
 
   /* ===== 顶部 KPI 概览（方案B·专业 BI 紧凑：白卡 + 左侧藏蓝强调条 + 紧凑字号） ===== */
   .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:0 0 14px;}
@@ -286,7 +285,7 @@
 <script src="/shared/kpi-cloud-sync.js?v=20261016a"></script>
 <script src="./vendor/xlsx.full.min.js"></script>
 <script src="./vendor/jszip.min.js"></script>
-<script src="./assets/xlsx-styled.js"></script>
+<script src="./assets/xlsx-styled.js?v=20261023a"></script>
 <script>
 (function(){
   'use strict';
@@ -781,8 +780,8 @@
   function renderManagerTable(b,monthLabel){
     var scope=activeScope();
     var html='<thead>'
-      +'<tr><th rowspan="2" class="hd-l">健康管家</th><th colspan="4">'+escapeHtml(monthLabel)+'</th></tr>'
-      +'<tr><th>月业绩目标</th><th>实际完成</th><th>消耗业绩（元）</th><th>月完成率</th></tr></thead><tbody>';
+      // 2026-10-23：表头去掉月份显示行（月份已在卡片标题右上角展示），改为单行表头
+      +'<tr><th class="hd-l">健康管家</th><th>月业绩目标</th><th>实际完成</th><th>消耗业绩（元）</th><th>月完成率</th></tr></thead><tbody>';
     b.rows.forEach(function(r){
       var tgt=tgtGet(scope,r.name);
       var rt=rateText(r.cash,tgt);
@@ -969,18 +968,25 @@
     var scope = selMonth || '__all__';
     var names=['营销部','商务部','其他（公司所有）'];
     var sumAct = monthly['营销部']+monthly['商务部']+monthly['其他（公司所有）'];
-    var sumTgt = 0; names.forEach(function(n){ sumTgt+=tgtGet(scope,n); });
-    var sumRt = rateText(sumAct,sumTgt);
+    // 2026-10-23：「其他（公司所有）」业绩目标改为自动推导 = 全院目标 − 营销部目标 − 商务部目标（不可编辑，保证合计目标=全院目标守恒）
+    var mktTgt = tgtGet(scope,'营销部'), bizTgt = tgtGet(scope,'商务部');
     var hospTgt = tgtGet(scope,'全院目标');
+    var othTgt = hospTgt - mktTgt - bizTgt;
+    var tgtOf = function(n){ return n==='其他（公司所有）' ? othTgt : tgtGet(scope,n); };
+    var sumTgt = mktTgt + bizTgt + othTgt;   // = 全院目标（口径守恒）
+    var sumRt = rateText(sumAct,sumTgt);
     var hospRt = rateText(sumAct,hospTgt);
     var yearAct = ca.annual['营销部']+ca.annual['商务部']+ca.annual['其他（公司所有）'];
     var html='<thead>'
       +'<tr><th colspan="4" class="tl">月度业绩完成情况（'+escapeHtml(monthLabel)+'）'+(activeScope()==='__all__'?' · 按最新月份展示':'')+'</th></tr>'
       +'<tr><th class="tl">渠道</th><th>业绩目标（元）</th><th>实际完成（元）</th><th>完成率</th></tr></thead><tbody>';
     names.forEach(function(n){
-      var act=monthly[n], tgt=tgtGet(scope,n), rt=rateText(act,tgt);
-      html+='<tr><td class="doc">'+escapeHtml(n)+'</td>'
-        +'<td class="tgt-cell"><input class="tgt-input" type="number" step="0.01" min="0" data-rbac="editTargets" data-chname="'+escapeHtml(n)+'" value="'+(tgt||'')+'" title="业绩目标（可手工编辑，按月保存）"></td>'
+      var act=monthly[n], tgt=tgtOf(n), rt=rateText(act,tgt);
+      // 其他（公司所有）：目标为自动推导值，只读展示（不渲染输入框）
+      var tgtCell = (n==='其他（公司所有）')
+        ? '<td class="num" data-chtarget="其他（公司所有）" title="自动推导：全院目标 − 营销部目标 − 商务部目标（不可编辑）">'+fmt(tgt)+'</td>'
+        : '<td class="tgt-cell"><input class="tgt-input" type="number" step="0.01" min="0" data-rbac="editTargets" data-chname="'+escapeHtml(n)+'" value="'+(tgt||'')+'" title="业绩目标（可手工编辑，按月保存）"></td>';
+      html+='<tr><td class="doc">'+escapeHtml(n)+'</td>'+tgtCell
         +'<td class="num rate bad">'+fmt(act)+'</td>'
         +'<td class="num rate '+rt.cls+'" data-chrate-for="'+escapeHtml(n)+'">'+rt.txt+'</td></tr>';
     });
@@ -1008,7 +1014,8 @@
     });
     document.getElementById('chTag').textContent = activeScope()==='__all__' ? '全部月份（按最新月 '+monthLabel+'）' : activeScope();
     var note='口径：渠道按「客户来源渠道分类（实时）」精确归类——渠道分类=营销部 → 营销部；渠道分类=商务部 → 商务部；除此之外（公司所有/经营科室/推荐/市场部/空值等）→ 其他（公司所有）；合计=三项直加（=全院，口径守恒）。'
-      +'实际完成＝该渠道名下「收款金额-现款支付」合计（与表B 实际完成列一致）。业绩目标可手工编辑，按月份分别保存并同步云端；'
+      +'实际完成＝该渠道名下「收款金额-现款支付」合计（与表B 实际完成列一致）。营销部/商务部/全院目标可手工编辑，按月份分别保存并同步云端；'
+      +'其他（公司所有）业绩目标＝全院目标−营销部目标−商务部目标（自动推导，不可编辑，故合计目标恒等于全院目标）；'
       +'完成率＝实际完成 ÷ 业绩目标（目标≤0 显示「/」）。';
     if(map.channelCls==null && map.channel==null) note+='（未匹配到渠道列，全部归入「其他（公司所有）」）';
     note+='「年度合计」行为跨全部月份求和的真实累计，无年度目标故完成率显示「/」。点击「导出」可生成与页面样式完全一致的 Excel。';
@@ -1021,15 +1028,22 @@
     var ca=channelActuals(dash.rows,map,activeMonths());
     var monthly=(selMonth && ca.byMonth[selMonth]) ? ca.byMonth[selMonth] : {'营销部':0,'商务部':0,'其他（公司所有）':0};
     var tbl=document.getElementById('tblChannel'); if(!tbl) return;
+    // 与 renderChannelTable 一致的推导：其他（公司所有）目标 = 全院目标 − 营销部目标 − 商务部目标（自动推导，保证合计目标守恒）
+    var mktTgt=tgtGet(scope,'营销部'), bizTgt=tgtGet(scope,'商务部'), hospTgt=tgtGet(scope,'全院目标');
+    var othTgt=hospTgt-mktTgt-bizTgt;
+    var tgtOf=function(n){ return n==='其他（公司所有）'?othTgt:tgtGet(scope,n); };
     ['营销部','商务部','其他（公司所有）'].forEach(function(n){
-      var rt=rateText(monthly[n],tgtGet(scope,n));
+      var rt=rateText(monthly[n],tgtOf(n));
       var c=tbl.querySelector('[data-chrate-for="'+cssEsc(n)+'"]');
       if(c){ c.textContent=rt.txt; c.className='num rate '+rt.cls; }
     });
     var sumAct=monthly['营销部']+monthly['商务部']+monthly['其他（公司所有）'];
-    var sumTgt=0; ['营销部','商务部','其他（公司所有）'].forEach(function(n){ sumTgt+=tgtGet(scope,n); });
+    var sumTgt=mktTgt+bizTgt+othTgt;   // = 全院目标（口径守恒）
     var st=tbl.querySelector('[data-chtarget="__sum__"]');
     if(st){ st.textContent = sumTgt?fmt(sumTgt):'0'; }
+    // 其他（公司所有）目标随全院/营销部/商务部变动而自动重算（只读展示）
+    var oc=tbl.querySelector('[data-chtarget="其他（公司所有）"]');
+    if(oc){ oc.textContent = othTgt?fmt(othTgt):'0'; }
     var sc=tbl.querySelector('[data-chrate-for="__sum__"]');
     if(sc){ var srt=rateText(sumAct,sumTgt); sc.textContent=srt.txt; sc.className='num rate '+srt.cls; }
     var hc=tbl.querySelector('[data-chrate-for="全院目标"]');
@@ -1106,10 +1120,8 @@
     function M(r,c,r2,c2){ if(!(r===r2&&c===c2)) merges.push({r:r,c:c,r2:r2,c2:c2}); }
     function C(v,t,s){ return {v:v,t:t,s:s}; }
     function rateCell(v,t){ return (t>0)?C(v/t,'n','pct'):C('/','s','pctDim'); }
-    // 表头两行（页面：健康管家 rowspan2 + 月份 colspan4 + 四个子列，藏蓝底白字）
-    rows.push([C('健康管家','s','title'),C(monthLabel,'s','title'),C('','s','title'),C('','s','title'),C('','s','title')]);
-    rows.push([C('','s','title'),C('月业绩目标','s','title'),C('实际完成','s','title'),C('消耗业绩（元）','s','title'),C('月完成率','s','title')]);
-    M(0,0,1,0); M(0,1,0,4);
+    // 表头一行（2026-10-23：与页面一致，去掉月份行，藏蓝底白字）
+    rows.push([C('健康管家','s','title'),C('月业绩目标','s','title'),C('实际完成','s','title'),C('消耗业绩（元）','s','title'),C('月完成率','s','title')]);
     b.rows.forEach(function(r){
       var t=tgtGet(scope,r.name);
       rows.push([C(r.name,'s','doc'),C(t||0,'n','plain'),C(r.cash,'n','num'),C(r.cons,'n','num'),rateCell(r.cash,t)]);
@@ -1121,7 +1133,7 @@
     rows.push([C('管家合计','s','sumDoc'),C(sumTgt||0,'n','sumN'),C(b.mgrSum,'n','sumN'),C(b.mgrCons,'n','sumN'),rateCell(b.mgrSum,sumTgt)]);
     var allTgt=tgtGet(scope,'全院合计');
     rows.push([C('全院合计','s','totDoc'),C(allTgt||0,'n','totN'),C(b.total.cash,'n','totN'),C(b.total.cons,'n','totN'),rateCell(b.total.cash,allTgt)]);
-    return {rows:rows,merges:merges,colWidths:[16,14,16,16,12],sheetName:'管家业绩统计',freezeRows:2};
+    return {rows:rows,merges:merges,colWidths:[16,14,16,16,12],sheetName:'管家业绩统计',freezeRows:1};
   }
 
   function buildChannelStyled(){
@@ -1134,20 +1146,23 @@
     var rows=[], merges=[];
     function M(r,c,r2,c2){ if(!(r===r2&&c===c2)) merges.push({r:r,c:c,r2:r2,c2:c2}); }
     function C(v,t,s){ return {v:v,t:t,s:s}; }
-    // 灰色双表头（与页面一致）
-    rows.push([C('月度业绩完成情况（'+monthLabel+'）','s','grayTitle'),C('','s','grayHead'),C('','s','grayHead'),C('','s','grayHead')]);
+    // 藏蓝表头白字（与表A/表B 完全一致）
+    rows.push([C('月度业绩完成情况（'+monthLabel+'）','s','title'),C('','s','title'),C('','s','title'),C('','s','title')]);
     M(0,0,0,3);
-    rows.push([C('渠道','s','grayHead'),C('业绩目标（元）','s','grayHead'),C('实际完成（元）','s','grayHead'),C('完成率','s','grayHead')]);
+    rows.push([C('渠道','s','title'),C('业绩目标（元）','s','title'),C('实际完成（元）','s','title'),C('完成率','s','title')]);
     var names=['营销部','商务部','其他（公司所有）'];
+    // 其他（公司所有）目标 = 全院目标 − 营销部目标 − 商务部目标（自动推导，与页面一致，保证合计目标守恒）
+    var mktTgt=tgtGet(scope,'营销部'), bizTgt=tgtGet(scope,'商务部'), hospTgt=tgtGet(scope,'全院目标');
+    var othTgt=hospTgt-mktTgt-bizTgt;
+    var tgtOf=function(n){ return n==='其他（公司所有）'?othTgt:tgtGet(scope,n); };
     names.forEach(function(n){
-      var act=monthly[n], t=tgtGet(scope,n);
+      var act=monthly[n], t=tgtOf(n);
       rows.push([C(n,'s','doc'),C(t||0,'n','plain'),C(act,'n','num'),(t>0?C(act/t,'n','pct'):C('/','s','pctDim'))]);
     });
     var sumAct=monthly['营销部']+monthly['商务部']+monthly['其他（公司所有）'];
-    var sumTgt=0; names.forEach(function(n){ sumTgt+=tgtGet(scope,n); });
-    rows.push([C('合计','s','chSumL'),C(sumTgt||0,'n','chSumN'),C(sumAct,'n','chSumN'),(sumTgt>0?C(sumAct/sumTgt,'n','pct'):C('/','s','pctDim'))]);
-    var hospTgt=tgtGet(scope,'全院目标');
-    rows.push([C('全院目标','s','hospL'),C(hospTgt||0,'n','hospPlain'),C(sumAct,'n','hospN'),(hospTgt>0?C(sumAct/hospTgt,'n','hospPct'):C('/','s','hospPctDim'))]);
+    var sumTgt=mktTgt+bizTgt+othTgt;   // = 全院目标（口径守恒）
+    rows.push([C('合计','s','sumL'),C(sumTgt||0,'n','sumN'),C(sumAct,'n','sumN'),(sumTgt>0?C(sumAct/sumTgt,'n','sumPct'):C('/','s','pctDim'))]);
+    rows.push([C('全院目标','s','totDoc'),C(hospTgt||0,'n','totPlain'),C(sumAct,'n','totN'),(hospTgt>0?C(sumAct/hospTgt,'n','totPct'):C('/','s','totPctDim'))]);
     var yearAct=ca.annual['营销部']+ca.annual['商务部']+ca.annual['其他（公司所有）'];
     rows.push([C('年度合计（'+activeMonths().length+' 个月）','s','totDoc'),C('/','s','totPlain'),C(yearAct,'n','totN'),C('/','s','totPctDim')]);
     return {rows:rows,merges:merges,colWidths:[20,16,18,12],sheetName:'月度业绩完成情况',freezeRows:2};
