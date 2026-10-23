@@ -293,6 +293,8 @@ window.addEventListener('message', (e) => {
     if(state.histOrders.length > 0) return;
     if(applyHistRaw(m.payload)){
       invalidateMktKeyCaches();
+      // 2026-10-23 修复：壳窗口桥接恢复时也恢复 histGz，避免该设备后续订单保存把云端 hist 清空
+      try{ const _o = JSON.parse(m.payload); if(_o && typeof _o.gz === 'string'){ state.histGz = { gz: _o.gz, histTs: Number(_o.ts) || 0 }; } }catch(_){}
       if(state.orders.length > 0 && typeof runRestoredRecompute === 'function') runRestoredRecompute({ silent:true });
     }
     return;
@@ -359,18 +361,25 @@ function queueHistGz(){
 }
 function persistHist(){
   state.histTs = Date.now();
-  const payload = JSON.stringify({ histOrders: state.histOrders, ts: state.histTs });
-  try{ localStorage.setItem(HIST_STORAGE_KEY, payload); }catch(e){ /* 配额超限：IndexedDB 兜底 */ }
-  idbSet(HIST_STORAGE_KEY, payload).catch(()=>{});
-  try{ if(window.parent && window.parent !== window) window.parent.postMessage({ type:'dp:persist', key:HIST_STORAGE_KEY, payload }, '*'); }catch(e){}
+  const basePayload = JSON.stringify({ histOrders: state.histOrders, ts: state.histTs });
+  // 先落盘「无 gz 版」（保证本机可读）；gz 压缩完成后会就地补写（见 .then），
+  // 使刷新后 state.histGz 可直接从本机恢复 —— 否则重载后下次订单保存会把云端 hist 清空（2026-10-23 修复）。
+  try{ localStorage.setItem(HIST_STORAGE_KEY, basePayload); }catch(e){ /* 配额超限：IndexedDB 兜底 */ }
+  idbSet(HIST_STORAGE_KEY, basePayload).catch(()=>{});
+  try{ if(window.parent && window.parent !== window) window.parent.postMessage({ type:'dp:persist', key:HIST_STORAGE_KEY, payload: basePayload }, '*'); }catch(e){}
   if((state.histOrders||[]).length === 0) return; // 无任何明细可传
   // 云端持久化（2026-10-20）：hist 始终上云，不再要求「必须有订单」。
   //   有订单 → 整包上传（含 hist）；无订单（仅明细）→ 合并云端已有订单后上传，避免清空云端订单。
   bumpSnapTs();
   gzipToB64({ histOrders: slimHistRows(state.histOrders), ts: state.histTs || 0 })
     .then(gz => {
+      state.histGz = { gz, histTs: state.histTs || 0 };
+      // 补写带 gz 的快照到本机（localStorage + IDB + 壳窗口桥接），供刷新后直接恢复 histGz（2026-10-23 修复）
+      const withGz = JSON.stringify({ histOrders: state.histOrders, ts: state.histTs, gz });
+      try{ localStorage.setItem(HIST_STORAGE_KEY, withGz); }catch(e){}
+      idbSet(HIST_STORAGE_KEY, withGz).catch(()=>{});
+      try{ if(window.parent && window.parent !== window) window.parent.postMessage({ type:'dp:persist', key:HIST_STORAGE_KEY, payload: withGz }, '*'); }catch(e){}
       if(Array.isArray(state.orders) && state.orders.length > 0){
-        state.histGz = { gz, histTs: state.histTs || 0 };
         // 注意：histClouded 在 saveOrdersToCloud 真正上传成功后才置真（见其 success 分支），
         // 不能在此处提前置真——否则无云端/未登录时会误报「已同步云端」。
         saveOrdersToCloud(true);
@@ -408,6 +417,8 @@ function restoreHist(){
       if(applyHistRaw(chosenRaw)){
         invalidateMktKeyCaches();
         if(typeof refreshHistMeta === 'function') refreshHistMeta();
+        // 2026-10-23 修复：从本机快照恢复 histGz，避免重载后下次订单保存把云端 hist 清空
+        try{ const _o = JSON.parse(chosenRaw); if(_o && typeof _o.gz === 'string'){ state.histGz = { gz: _o.gz, histTs: Number(_o.ts) || 0 }; } }catch(_){}
         // 2026-10-20 修复「刷新后新客规则失效」：hist 为异步恢复，订单先恢复并完成首次重算时
         // hist 尚未就位 → 报表按「规则B停用」出数；hist 恢复后必须再重算一次，否则报表停留旧口径。
         if(state.orders.length > 0 && typeof runRestoredRecompute === 'function') runRestoredRecompute({ silent:true });
@@ -417,7 +428,7 @@ function restoreHist(){
     }
   }).catch(()=>{
     // IDB 不可用 → 退回 localStorage
-    if(lsParsed && lsParsed.orders.length){ if(applyHistRaw(raw)){ invalidateMktKeyCaches(); if(typeof refreshHistMeta==='function') refreshHistMeta(); if(state.orders.length > 0 && typeof runRestoredRecompute === 'function') runRestoredRecompute({ silent:true }); queueHistGz(); } }
+    if(lsParsed && lsParsed.orders.length){ if(applyHistRaw(raw)){ invalidateMktKeyCaches(); if(typeof refreshHistMeta==='function') refreshHistMeta(); if(state.orders.length > 0 && typeof runRestoredRecompute === 'function') runRestoredRecompute({ silent:true }); try{ const _o = JSON.parse(raw); if(_o && typeof _o.gz === 'string'){ state.histGz = { gz: _o.gz, histTs: Number(_o.ts) || 0 }; } }catch(_){} } }
   });
   // 桥接父窗口：向壳索取持久化数据（与壳的主动推送互补）
   try{ if(window.parent && window.parent !== window) window.parent.postMessage({ type:'dp:request', key:HIST_STORAGE_KEY }, '*'); }catch(e){}
@@ -664,6 +675,7 @@ async function syncFromCloud(opts){
       .select('id, payload, updated_at').order('updated_at', { ascending:false }).limit(1);
     if(error){ setCloudStatus('云端读取失败：' + (error.message || ''), 'err'); return; }
     const row = Array.isArray(data) ? data[0] : data;
+    const snap = (row && row.payload) ? row.payload : null; // 函数级快照引用，供下方 hist 兜底块使用（data2 在块内声明，块外不可见）
     if(row && row.payload){
       const data2 = row;
       // 整包新旧裁决（2026-10-16 重写）：orders + VAB 名单 + 月目标 + 手动覆盖 视为「一个快照」整体裁决，
@@ -723,12 +735,12 @@ async function syncFromCloud(opts){
     // hist 兜底（2026-10-20）：云端快照含 hist 而本机恢复后为空/陈旧 → 强制回灌，
     // 不依赖整体 verdict（尤其 verdict==='same' 时整包不会被 applyCloudObj，会漏掉 hist，导致刷新后明细丢失）。
     try{
-      const ch = data2.payload && data2.payload.hist;
+      const ch = snap && snap.hist;
       if(ch && typeof ch === 'object'){
-        const chTs = Number(ch.histTs) || Number(data2.payload.ts) || 0;
+        const chTs = Number(ch.histTs) || Number(snap.ts) || 0;
         const loTs = Number(state.histTs) || 0;
         if((state.histOrders||[]).length === 0 || chTs > loTs){
-          applyCloudObj({ hist: ch, ts: data2.payload.ts });
+          applyCloudObj({ hist: ch, ts: snap.ts });
         }else{
           // 本机已是最新（ts 持平）→ 不重复回灌，但云端确有该明细，置云端标志避免误显「暂仅保存在本机」
           histClouded = true;
