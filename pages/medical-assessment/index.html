@@ -49,6 +49,9 @@
   .panel-head{display:flex;flex-direction:column;align-items:flex-start;gap:3px;margin-bottom:12px;}
   .panel-head h2{font-size:16px;margin:0;color:var(--navy-900);display:flex;align-items:center;gap:8px;}
   .panel-head .desc{color:var(--ink-soft);font-size:12.5px;line-height:1.6;}
+  /* 2026-10-23：全站统一不显示口径/说明性文字（口径说明、统计说明、下钻指引等一律不在界面呈现） */
+  .panel-head .desc{display:none;}
+  #projDiagBox .note{display:none;}
 
   .toolbar{
     display:flex;align-items:center;gap:10px;flex-wrap:wrap;
@@ -2689,23 +2692,26 @@ const PROJ_EXCLUDE = {
     if(exp) exp.disabled = !viewRows.length;
     const note = document.getElementById('projNote');
     if(note) note.textContent = hasData
-      ? ('共 '+viewRows.length+' 行（'+dimLabel+'维度'+(month ? ' · 基准月 '+month+'，按各类别考核周期倒推' : ' · 全部时间')
+      ? ('共 '+viewRows.length+' 行（'+dimLabel+'维度'+(month ? ' · 基准月 '+month : ' · 全部时间')
         + (projFManager ? ' · 管家：'+projFManager : '') + (projFDoctor ? ' · 医生：'+projFDoctor : '') + (projFProject ? ' · 项目：'+projFProject : '')
         + '）；未归入重点类别的明细 '+uncatRows+' 行'
         + (onlyHit ? '；已按「仅显示命中」过滤（生成 '+rows.length+' 行，命中 '+viewRows.length+' 行）'
-                     : '；共生成 '+rows.length+' 行（覆盖户主数 0 表示该类别考核窗口内无消费）')
-        + '；点击行下钻查看该类别的命中户主，再点击户主查看逐笔明细'
-        // 提示被丢弃的命中行：避免「某个客户怎么查不到」无从排查（常见原因：VAB 未重新导入 / 户主未匹配 / 缺管家医生）
-        + ((dropNoHouse||dropNoDim) ? '；⚠ 有 '+(dropNoHouse+dropNoDim)+' 行命中重点类别但未纳入统计'
-            + (dropNoHouse ? '（'+dropNoHouse+' 行未匹配到 VAB 户主）' : '')
-            + (dropNoDim ? '（'+dropNoDim+' 行缺管家/医生）' : '')
-            + '，请确认 VAB 清单已包含这些会员且管家/医生信息完整' : ''))
+                     : '；共生成 '+rows.length+' 行')
+        // 2026-10-23：去掉「点击行下钻…」等指引性说明，只保留行数/未归类行数等数据
+        )
       : '';
     const warn = document.getElementById('projWarn');
     if(warn){
+      // 2026-10-23：界面不显示口径说明文字；此处仅保留「映射已启用」状态与命中行未纳入统计的告警
+      const wparts=[];
+      if(projMap.size) wparts.push('已启用「导入项目分类映射」覆盖（'+projMap.size+' 条单品映射）。');
+      if(dropNoHouse||dropNoDim) wparts.push('⚠ 有 '+(dropNoHouse+dropNoDim)+' 行命中重点类别但未纳入统计'
+        + (dropNoHouse ? '（'+dropNoHouse+' 行未匹配到 VAB 户主）' : '')
+        + (dropNoDim ? '（'+dropNoDim+' 行缺管家/医生）' : '')
+        + '，请确认 VAB 清单已包含这些会员且管家/医生信息完整。');
       warn.className='vab-linked';
-      if(projMap.size){ warn.classList.add('show'); warn.textContent='已启用「导入项目分类映射」覆盖（'+projMap.size+' 条单品映射），未映射单品仍按内置关键词归类。'; }
-      else { warn.classList.add('show'); warn.textContent='内置 12 类重点项目口径已启用：季度倒推3个月 / 半年倒推6个月 / 年度倒推12个月；单品归类按备注关键词匹配（跨类别最长关键词命中、大小写不敏感），可用「导入项目分类映射」按项目名覆盖。'; }
+      if(wparts.length){ warn.classList.add('show'); warn.textContent=wparts.join(' '); }
+      else { warn.classList.remove('show'); warn.textContent=''; }
     }
     _projCache = { cols, rows: viewRows };
   }
@@ -3562,7 +3568,7 @@ const PROJ_EXCLUDE = {
     refreshStats();               // 基于已恢复的数据生成统计表
   })();
   </script>
-<script src="/shared/rbac.js?v=20261016b"></script>
+<script src="/shared/rbac.js?v=20261023a"></script>
 <script>
 /* 敏感操作 → 权限点映射：集中维护，rbac.js 守卫据此禁用无权限按钮（导入/导出/清除/编辑/重算）。
    覆盖全站各页常见触发器，不存在的选择器自动跳过。 */

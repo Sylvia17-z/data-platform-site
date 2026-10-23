@@ -12,7 +12,7 @@ const state = { modules: [], tabs: [], current: null };
 // 发布版本号：由 index.html 顶部的 <script>window.SITE_VER=... 注入，作为唯一权威来源，避免双文件版本漂移。
 // 此处保留兜底常量，仅在脱离 Shell 独立打开时生效。用于 iframe 缓存穿透，确保线上改动即时可见。
 // file:// 双击打开时不加查询串（带查询串的 iframe 在 file:// 下可能无法加载）。
-const SITE_VER = (typeof window !== 'undefined' && window.SITE_VER) || '20261020b';
+const SITE_VER = (typeof window !== 'undefined' && window.SITE_VER) || '20261023a';
 // 每次页面加载的唯一戳：拼到所有子页 iframe URL 之后，确保浏览器每次都重新拉取最新脚本，
 // 彻底规避「服务器无 Cache-Control 时浏览器启发式缓存旧脚本导致刷新丢数据」的问题。
 // file:// 双击打开时不加查询串。
@@ -49,16 +49,12 @@ const MODULES = [
   },
   {
     id: 'daily-performance',
-    name: '日业绩统计',
-    icon: '📈',
+    name: '日业绩报表·初诊',
+    icon: '🩺',
     group: '数据统计',
     type: 'embed',
-    src: '/pages/daily-performance/index.html',
-    desc: '每日业绩统计（标准版 / 初诊版）：订单 / VAB / 月目标 / 导出',
-    children: [
-      { id: 'dp-std', name: '日业绩报表', icon: '📊', src: '/pages/daily-performance/index.html' },
-      { id: 'dp-chuzhen', name: '日业绩报表·初诊', icon: '🩺', src: '/pages/daily-performance-chuzhen/index.html' },
-    ],
+    src: '/pages/daily-performance-chuzhen/index.html',
+    desc: '每日业绩统计（初诊版）：订单 / VAB / 月目标 / 导出',
   },
   {
     id: 'monthly-analysis',
@@ -212,8 +208,9 @@ function renderNav() {
 /* ---------- 二级子功能解析与打开 ---------- */
 function resolveTarget(id) {
   /* 旧版 hash 兼容：合并模块前的一级菜单 id → 新的子功能 id */
-  if (id === 'daily-performance') id = 'dp-std';
-  if (id === 'daily-performance-chuzhen') id = 'dp-chuzhen';
+  // 2026-10-23：标准版「日业绩报表」已移除；日业绩统计改为单模块（初诊版），
+  // 旧的子功能 id（dp-std / dp-chuzhen / daily-performance-chuzhen）统一指向它。
+  if (id === 'dp-std' || id === 'dp-chuzhen' || id === 'daily-performance-chuzhen') id = 'daily-performance';
   const mod = state.modules.find((m) => m.id === id);
   if (mod) return { kind: 'module', mod };
   for (const m of state.modules) {

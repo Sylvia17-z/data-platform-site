@@ -2711,8 +2711,9 @@ function detailSortVal(r, key){
   }
 }
 // 可排序列定义（# 与 操作 列不排序）
+// 2026-10-23：新增「客户开发人」列（原表字段：客户所属(实时)-客户开发人），各页签共用此表
 const DETAIL_SORT_COLS = [
-  ['name','姓名'], ['memberNo','会员号'], ['channelClass','渠道分类'], ['channelL1','一级渠道'],
+  ['name','姓名'], ['memberNo','会员号'], ['developer','客户开发人'], ['channelClass','渠道分类'], ['channelL1','一级渠道'],
   ['channelL2','二级渠道'], ['visitType','到访类型'], ['consultant','咨询师'], ['cashier','收款员工'],
   ['payTime','收款时间'], ['cashPay','现款支付'], ['assetDeduct','资产抵扣金额'], ['dept','报表归属'], ['vab','VAB'],
 ];
@@ -2812,7 +2813,7 @@ function filterOrdersByTab(key, opts){
     if(set.includes(MS_BLANK) && v==='') return true;
     return set.includes(v);
   };
-  ['channelClass','channelL1','channelL2','visitType','consultant','cashier'].forEach(k=>{
+  ['channelClass','channelL1','channelL2','visitType','consultant','developer','cashier'].forEach(k=>{
     if(f[k] && f[k].length) list=list.filter(r=>multiHit(f[k], r[k]));
   });
   if(f.dept && f.dept.length) list=list.filter(r=>multiHit(f.dept, effectiveDept(r)));
@@ -2834,15 +2835,15 @@ function filterOrdersByTab(key, opts){
 }
 
 // ===== 「⑥ 导入数据明细」导出（各页签均可导出）=====
-// 表头与页面列一致：# / 姓名 / 会员号 / 渠道分类 / 一级渠道 / 二级渠道 / 到访类型 /
+// 表头与页面列一致：# / 姓名 / 会员号 / 客户开发人 / 渠道分类 / 一级渠道 / 二级渠道 / 到访类型 /
 // 咨询师 / 收款员工 / 收款时间 / 现款支付 / 资产抵扣金额 / 报表归属 / VAB
-const DETAIL_EXPORT_HEAD = ['#','姓名','会员号','渠道分类','一级渠道','二级渠道','到访类型','咨询师','收款员工','收款时间','现款支付','资产抵扣金额','报表归属','VAB'];
-const DETAIL_EXPORT_COLW = [6,12,16,12,14,16,10,12,12,12,14,14,16,8];
+const DETAIL_EXPORT_HEAD = ['#','姓名','会员号','客户开发人','渠道分类','一级渠道','二级渠道','到访类型','咨询师','收款员工','收款时间','现款支付','资产抵扣金额','报表归属','VAB'];
+const DETAIL_EXPORT_COLW = [6,12,16,12,12,14,16,10,12,12,12,14,14,16,8];
 
 function detailExportRow(r, idx){
   return [
     idx+1,
-    r.name||'', r.memberNo||'', r.channelClass||'', r.channelL1||'', r.channelL2||'',
+    r.name||'', r.memberNo||'', r.developer||'', r.channelClass||'', r.channelL1||'', r.channelL2||'',
     r.visitType||'', r.consultant||'', r.cashier||'',
     r.payTime?fmtDate(r.payTime):'',
     Number(r.cashPay)||0, Number(r.assetDeduct)||0,
@@ -2860,8 +2861,8 @@ function detailExportRows(list, tabLabel){
   const foot = new Array(DETAIL_EXPORT_HEAD.length).fill('');
   foot[0] = '合计';
   foot[1] = list.length + ' 行';
-  foot[10] = total;
-  foot[11] = totalAsset;
+  foot[11] = total;          // 现款支付（新增「客户开发人」列后下标 +1）
+  foot[12] = totalAsset;     // 资产抵扣金额
   rows.push(foot);
   return rows;
 }
@@ -2876,9 +2877,9 @@ async function exportDetailCurrent(){
     const raw = detailExportRows(list, tabLabel);
     const rows = raw.map((r,ri)=> r.map((v,ci)=>{
       if(ri===0) return cell(v,'s','subhead');
-      if(ri===raw.length-1) return cell(v, typeof v==='number'?'n':'s', ci===10||ci===11?'num':'cat');
-      if(ci===10||ci===11) return cell(v,'n','num');
-      return cell(v,'s', ci===12?'cat':'');
+      if(ri===raw.length-1) return cell(v, typeof v==='number'?'n':'s', ci===11||ci===12?'num':'cat');
+      if(ci===11||ci===12) return cell(v,'n','num');
+      return cell(v,'s', ci===13?'cat':'');
     }));
     const blob = await buildStyledXlsx({ sheetName:'导入数据明细', rows, merges:[], colWidths:DETAIL_EXPORT_COLW });
     downloadBlob(blob, `日业绩明细-${tabLabel}-${state.cutoffDate||todayIso()}.xlsx`);
@@ -2963,6 +2964,7 @@ function detailRowCells(r, i, start){
     <td style="text-align:center;color:var(--c-muted);">${start+i+1}</td>
     <td>${esc(r.name)}</td>
     <td>${esc(r.memberNo)}</td>
+    <td>${esc(r.developer)}</td>
     <td>${esc(r.channelClass)}</td>
     <td>${esc(r.channelL1)}</td>
     <td>${esc(r.channelL2)}</td>
@@ -2990,6 +2992,7 @@ function detailCardHTML(r){
     </div>
     <div class="dc-rows">
       ${row('会员号', esc(r.memberNo))}
+      ${row('客户开发人', esc(r.developer))}
       ${row('渠道分类', esc(r.channelClass))}
       ${row('一级渠道', esc(r.channelL1))}
       ${row('二级渠道', esc(r.channelL2))}
@@ -3195,6 +3198,7 @@ function renderImportDetails(){
       ${mselHTML('channelL2','二级渠道',l2Candidates)}
       ${mselHTML('visitType','到访类型',distinct('visitType'))}
       ${mselHTML('consultant','咨询师',distinct('consultant'))}
+      ${mselHTML('developer','客户开发人',distinct('developer'))}
       ${mselHTML('cashier','收款员工',distinct('cashier'))}
       ${fNum('cashPay','现款支付')}
       ${fNum('assetDeduct','资产抵扣金额')}
@@ -3225,13 +3229,8 @@ function renderImportDetails(){
   const activeFieldCount = activeFilterEntries.length;
   const filterNote = (detailMonth.length?('月度选'+detailMonth.length+'项 · '):'')+dateNote
     +(activeFieldCount?('字段筛选 '+activeFieldCount+' 项 · '):'');
-  // 营销部两类页签的口径说明见下方 mktTabNote（初诊=与③报表每日列同源、逐笔按收款日判定）
-  const mktTabNote = detailTab === 'yx_chuzhen'
-    ? ('口径：与③报表「营销部→公司支持/部门业绩」严格一致（逐笔按【该笔收款日】的30天初诊窗口判定，与③报表每日列同源；短视频组及营销部渠道中无对应部门类别的行已排除）· ')
-    : (detailTab === 'yx_blank'
-      ? '口径：营销部渠道·到访类型空白（全部订单审计视图，不受初诊客户集合限制）· '
-      : (detailTab === 'yingxiao'
-        ? '口径：营销部渠道全量（审计视图，含不计入部门业绩的行）· ' : ''));
+  // 2026-10-23：全站统一不显示口径说明文字——营销部两类页签的口径提示已从界面移除（仅保留筛选/行数/金额等数据）
+  const mktTabNote = '';
   // 手机端排序条（桌面端隐藏，由表格表头排序代替）
   const mobileSort = `
     <div class="detail-mobile-bar">
@@ -3250,7 +3249,7 @@ function renderImportDetails(){
           <thead><tr>${sortThs}</tr></thead>
           <tbody>${pageItems.map((r,i)=>detailRowCells(r,i,start)).join('')}</tbody>
           <tfoot><tr style="font-weight:700;background:var(--c-blue-tint);color:var(--c-head);">
-            <td colspan="10" style="text-align:right;">合计（${list.length} 行 · 命中VAB ${vabCount} 行）</td>
+            <td colspan="11" style="text-align:right;">合计（${list.length} 行 · 命中VAB ${vabCount} 行）</td>
             <td style="text-align:right;">${fmt(total)}</td>
             <td style="text-align:right;">${fmt(totalAsset)}</td>
             <td></td>

@@ -285,6 +285,9 @@
   .sw-tint{background:var(--c-blue-tint);}
   .sw-pink{background:var(--c-pink);}
   .sw-sub{background:var(--c-blue-sub);}
+  /* 2026-10-23：全站统一不显示口径/说明性文字——图例中的纯文字说明隐藏，色块图例保留 */
+  .legend span:not(:has(.swatch)){display:none;}
+  .legend:not(:has(.swatch)){display:none;}
 
   /* ============ 导入数据明细（标签 + 表格） ============ */
   details > summary{cursor:pointer;list-style:none;}
@@ -525,7 +528,6 @@
       <button class="btn btn-danger" id="clear-manual" title="清除所有手动调整的月累计/每日数据，恢复自动计算（用于修正手动改错导致的「月累计≠当日」）">🧹 清除手动调整</button>
       <button class="btn btn-danger" id="clear-date" title="清除某个指定日期（按收款时间所在日）的全部业绩记录，各统计表自动重算">🗓 清除指定日期</button>
       <button class="btn btn-danger" id="clear-all" title="清除本机保存的订单/月目标/手动调整/列宽，重置为空后重新导入（不影响 VAB 会员与近一年消费明细）">🗑 清除全部数据</button>
-        <a class="btn" href="../daily-performance/index.html" style="text-decoration:none;" title="切换到「每日业绩日报表」标准版页面（逻辑完全一致，数据各自独立导入）">🚀 标准版入口 →</a>
       </span>
     </div>
     <div id="render-error" style="display:none;margin-top:10px;padding:10px 12px;background:#fde4e4;color:#b3261e;border:1px solid #b3261e;border-radius:6px;font-size:13px;" data-page-node-id="Cren2M9ptIxbdhlZu8Vs9i"></div>
@@ -663,7 +665,7 @@
 </script>
 
 <!-- 缓存穿透：每次加载追加唯一戳，强制浏览器重新拉取最新 app.js，彻底规避「刷新后仍跑旧脚本导致丢数据」 -->
-<script>document.write('<script src="assets/app.js?v=20260929-06_' + Date.now() + '"><\/script>');</script><script src="/shared/rbac.js?v=20261016b"></script>
+<script>document.write('<script src="assets/app.js?v=20260929-06_' + Date.now() + '"><\/script>');</script><script src="/shared/rbac.js?v=20261023a"></script>
 <script>
 /* 敏感操作 → 权限点映射：集中维护，rbac.js 守卫据此禁用无权限按钮（导入/导出/清除/编辑/重算）。
    覆盖全站各页常见触发器，不存在的选择器自动跳过。 */

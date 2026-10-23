@@ -673,6 +673,8 @@
     // 子元素去掉 820px 上限与自动外边距，让内容刚好铺满画布、不留左右空白
     [].forEach.call(clone.querySelectorAll(".report-card,.stat-note,.report-note"),function(c){
       c.style.maxWidth="none"; c.style.width="100%"; c.style.marginLeft="0"; c.style.marginRight="0";
+      // 2026-10-23：界面隐藏口径说明，但导出件仍保留（与 Excel 导出的统计说明一致）
+      if(c.classList.contains("stat-note")||c.classList.contains("report-note")) c.style.display="block";
     });
     [].forEach.call(clone.querySelectorAll(".scroll"),function(sc){
       sc.style.overflow="visible"; sc.style.width="100%"; sc.style.maxWidth="none";

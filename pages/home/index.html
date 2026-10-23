@@ -86,6 +86,8 @@
   .notes{display:flex;flex-direction:column;gap:6px;}
   .note{font-size:12.5px;color:var(--text);line-height:1.4;padding-left:9px;border-left:3px solid #dbe6f7;}
   .note b{color:var(--navy);margin-right:6px;font-variant-numeric:tabular-nums;}
+  /* 2026-10-23：全站统一不显示口径/说明性文字（口径标签不呈现） */
+  .more.caliber-tag{display:none;}
 
   .empty{color:var(--muted);font-size:12.5px;padding:8px 0;}
   @media (max-width:1100px){ .grid3{grid-template-columns:1fr 1fr;} .col-side{grid-column:1/-1;} }
@@ -135,7 +137,7 @@
       </div>
 
       <div class="card" style="grid-column:1/-1;">
-        <div class="card-h"><b>近两周业绩对比</b><span class="more">现款支付口径</span></div>
+        <div class="card-h"><b>近两周业绩对比</b><span class="more caliber-tag">现款支付口径</span></div>
         <div class="bars" id="bars"></div>
       </div>
     </div>
@@ -301,8 +303,7 @@
 
   /* ---------- 快捷应用 / 入口（跳壳层 hash） ---------- */
   var APPS = [
-    {nm:'日业绩报表', ico:'📈', bg:'linear-gradient(135deg,#002060,#1e3a8a)', hash:'#dp-std'},
-    {nm:'日业绩·初诊', ico:'🩺', bg:'linear-gradient(135deg,#1e3a8a,#3658d3)', hash:'#dp-chuzhen'},
+    {nm:'日业绩·初诊', ico:'🩺', bg:'linear-gradient(135deg,#1e3a8a,#3658d3)', hash:'#daily-performance'},
     {nm:'客量业绩报表', ico:'📊', bg:'linear-gradient(135deg,#0d6e5f,#2E7D5B)', hash:'#data-statistics'},
     {nm:'预约到店', ico:'📅', bg:'linear-gradient(135deg,#0d5e8a,#1a7fc1)', hash:'#ds-appt'},
     {nm:'月度分析', ico:'📆', bg:'linear-gradient(135deg,#6b4fd8,#8a6ff0)', hash:'#monthly-analysis'},

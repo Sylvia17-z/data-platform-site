@@ -79,7 +79,10 @@ table.tbl td.editable:hover{background:#fff}
 table.tbl td.editable:focus{background:#fff;color:var(--ink);outline:none;box-shadow:none}
 
 /* ===== 报表顶部说明区 ===== */
-.report-note{background:var(--light-blue);border:1px solid var(--navy-100);border-radius:10px;
+/* 2026-10-23：全站统一不显示口径/统计说明等解释性文字（口径说明块不在界面呈现；
+   导出 PNG 时由 exportNodePng 克隆节点强制 display:block 恢复，与 Excel 导出口径一致） */
+.report-note{display:none;}
+.report-note.export-keep{display:block;background:var(--light-blue);border:1px solid var(--navy-100);border-radius:10px;
   padding:12px 16px;margin-bottom:14px;color:var(--navy);font-size:13px;line-height:1.7;white-space:pre-line}
 
 /* ===== KPI 总览 ===== */
@@ -98,7 +101,8 @@ table.tbl td.editable:focus{background:#fff;color:var(--ink);outline:none;box-sh
 .ctl{background:var(--navy-50);border:1px solid var(--navy-100);border-radius:10px;padding:12px 14px;display:flex;flex-direction:column;gap:8px}
 .ctl-title{font-size:13px;font-weight:700;color:var(--navy);letter-spacing:1px;display:flex;align-items:center;gap:6px}
 .dot{width:7px;height:7px;border-radius:50%;background:var(--navy);box-shadow:0 0 0 3px rgba(1,65,139,.15);flex:none}
-.hint{font-size:11.5px;color:var(--ink-soft);line-height:1.5}
+/* 2026-10-23：全站统一不显示解释性文字（操作提示类 .hint 一并隐藏） */
+.hint{display:none;}
 .btn-col{display:flex;flex-direction:column;gap:8px}
 .btn-col .btn{width:100%}
 
@@ -120,7 +124,8 @@ table.tbl td.editable:focus{background:#fff;color:var(--ink);outline:none;box-sh
 #nextReport .tbl th:nth-child(n+2),#nextReport .tbl td:nth-child(n+2){text-align:center;width:17%}
 #nextReport .report-card{max-width:820px;margin:0 auto 14px}
 /* 预约量统计专用「统计说明」：宽度与下方数据表（820px）对齐 */
-#nextReport .stat-note{max-width:820px;margin:0 auto 14px;background:var(--light-blue);
+#nextReport .stat-note{display:none;}
+#nextReport .stat-note.export-keep{display:block;max-width:820px;margin:0 auto 14px;background:var(--light-blue);
   border:1px solid var(--navy-100);border-radius:10px;padding:12px 16px;
   color:var(--navy);font-size:13px;line-height:1.7;white-space:pre-line}
 
@@ -1043,6 +1048,8 @@ https://github.com/nodeca/pako/blob/main/LICENSE
     // 子元素去掉 820px 上限与自动外边距，让内容刚好铺满画布、不留左右空白
     [].forEach.call(clone.querySelectorAll(".report-card,.stat-note,.report-note"),function(c){
       c.style.maxWidth="none"; c.style.width="100%"; c.style.marginLeft="0"; c.style.marginRight="0";
+      // 2026-10-23：界面隐藏口径说明，但导出件仍保留（与 Excel 导出的统计说明一致）
+      if(c.classList.contains("stat-note")||c.classList.contains("report-note")) c.style.display="block";
     });
     [].forEach.call(clone.querySelectorAll(".scroll"),function(sc){
       sc.style.overflow="visible"; sc.style.width="100%"; sc.style.maxWidth="none";
@@ -1485,7 +1492,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
   });
 })();
 </script>
-<script src="/shared/rbac.js?v=20261016b"></script>
+<script src="/shared/rbac.js?v=20261023a"></script>
 <script>
 /* 敏感操作 → 权限点映射：集中维护，rbac.js 守卫据此禁用无权限按钮（导入/导出/清除/编辑/重算）。
    覆盖全站各页常见触发器，不存在的选择器自动跳过。 */
