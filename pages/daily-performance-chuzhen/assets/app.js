@@ -345,6 +345,41 @@ async function b64ToObj(b64){
   const stream = new Blob([buf]).stream().pipeThrough(new DecompressionStream('gzip'));
   return JSON.parse(await new Response(stream).text());
 }
+/* ---- 云端读写加固（2026-10-24）----
+   现象：整包 payload 涨到 ~1.4MB 后，弱网/代理环境下 SELECT/UPDATE 偶发 fetch 网络层中断，
+   界面报「云端保存失败：TypeError: NetworkError when attempting to fetch resource」
+   （实测 08:11:39 报错、08:11:48 同网络同尺寸写入成功 → 瞬时抖动，重试即可自愈）。
+   措施：① 订单数组随快照 gzip 压缩（ordersGz，复用 hist 的压缩设施，整包 1.39MB → ~0.6MB）；
+         ② 网络层错误自动重试 2 次（1.2s / 3s 退避），业务错误（权限/字段等）不重试直接上抛。 ---- */
+const NET_ERR_RE = /networkerror|network error|failed to fetch|fetch failed|load failed|when attempting to fetch/i;
+// 包一层 SDK 请求：网络层错误自动重试；最终仍失败时在 message 上标注重试次数
+async function cloudRun(makeReq, tries){
+  const N = tries || 3;
+  let lastMsg = '';
+  for(let i = 0; i < N; i++){
+    if(i) await new Promise(r => setTimeout(r, i === 1 ? 1200 : 3000));
+    try{
+      const { data, error } = await makeReq();
+      if(!error) return { data, error: null };
+      lastMsg = String(error.message || '');
+      if(!NET_ERR_RE.test(lastMsg)) return { data, error };
+    }catch(e){
+      lastMsg = String((e && e.message) || e);
+      if(!NET_ERR_RE.test(lastMsg)) throw e;
+    }
+  }
+  return { data: null, error: { message: '网络异常（已自动重试 ' + (N - 1) + ' 次）' } };
+}
+// 网络类错误转友好文案（最终失败提示用）
+function netErrMsg(m){ return NET_ERR_RE.test(String(m || '')) ? '网络异常（请求未送达，请检查网络后重试）' : (m || ''); }
+// 解出云端快照里的订单数组：orders 数组 = 旧格式（直读）；ordersGz = 压缩格式（2026-10-24 起）
+async function cloudOrdersArr(payload){
+  if(payload && Array.isArray(payload.orders)) return payload.orders;
+  if(payload && payload.ordersGz){
+    try{ const arr = await b64ToObj(payload.ordersGz); if(Array.isArray(arr)) return arr; }catch(e){}
+  }
+  return [];
+}
 // hist 压缩缓存（内存态，不持久化）：persistHist / 云端恢复 时填充，cloudPayload 同步取用
 function slimHistRows(rows){
   return (rows || []).map(r => ({
@@ -556,11 +591,19 @@ function cloudPayload(){
 // 应用云端整包快照：订单 + VAB 会员名单 + 月目标 + 手动覆盖。
 // 期间置 _applyingCloud，禁止任何写入路径把「刚拉下来的云端数据」又立刻推回云端（防 ping-pong）。
 let _applyingCloud = false;
-function applyCloudObj(obj){
+async function applyCloudObj(obj){
   if(!obj || typeof obj !== 'object') return false;
   _applyingCloud = true;
   let touched = false;
   try{
+    // 订单：orders 数组 = 旧格式直读；ordersGz = 压缩格式（2026-10-24）→ 先解压再应用。
+    // 不改写入参 obj（调用方随后还要原样落 localStorage）。
+    if(!Array.isArray(obj.orders) && obj.ordersGz){
+      try{
+        const arr = await b64ToObj(obj.ordersGz);
+        if(Array.isArray(arr)) obj = Object.assign({}, obj, { orders: arr });
+      }catch(e){}
+    }
     if(applyOrdersObj(obj)) touched = true;
     const v = obj.vab;
     if(v && typeof v === 'object'){
@@ -671,9 +714,9 @@ async function syncFromCloud(opts){
   startCloudKeepalive();        // 页面打开期间定时续期，避免长期闲置后 refreshToken 失效
   setCloudStatus('已登录 · 同步云端', 'ok');
   try{
-    const { data, error } = await cloud.database.from('dp_orders')
-      .select('id, payload, updated_at').order('updated_at', { ascending:false }).limit(1);
-    if(error){ setCloudStatus('云端读取失败：' + (error.message || ''), 'err'); return; }
+    const { data, error } = await cloudRun(() => cloud.database.from('dp_orders')
+      .select('id, payload, updated_at').order('updated_at', { ascending:false }).limit(1));
+    if(error){ setCloudStatus('云端读取失败：' + netErrMsg(error.message), 'err'); return; }
     const row = Array.isArray(data) ? data[0] : data;
     const snap = (row && row.payload) ? row.payload : null; // 函数级快照引用，供下方 hist 兜底块使用（data2 在块内声明，块外不可见）
     if(row && row.payload){
@@ -689,9 +732,10 @@ async function syncFromCloud(opts){
       // 安全网：云端订单月份落后于本地 → 判定云端为陈旧快照，保留本地（防止旧快照把新数据倒退）。
       const cloudTs   = Number(data2.payload && data2.payload.ts) || 0;
       const localTs   = Number(state.snapTs) || 0;
-      const cloudCnt  = (data2.payload.orders && data2.payload.orders.length) || 0;
+      const cloudOrdersA = await cloudOrdersArr(data2.payload); // 兼容 orders / ordersGz 两种云端格式
+      const cloudCnt  = cloudOrdersA.length;
       const localCnt  = Array.isArray(state.orders) ? state.orders.length : 0;
-      const cloudMon  = monthOfOrders(data2.payload.orders);
+      const cloudMon  = monthOfOrders(cloudOrdersA);
       const localMon  = monthOfOrders(state.orders);
       // 本地「真实数据」标志：orders / VAB / 历史明细 任一非空。
       // 本地全空（如新设备 / 清过缓存）时 snapTs 可能被空写入抬高，此时无权压制云端——必拉云端，
@@ -714,8 +758,16 @@ async function syncFromCloud(opts){
       if(verdict === 'same'){
         setCloudStatus('已同步云端（' + cloudCnt + ' 条 · VAB ' + cloudVabN + ' 人）', 'ok');
       }else if(verdict === 'cloud'){
-        applyCloudObj(data2.payload);
-        try{ localStorage.setItem(ORDERS_STORAGE_KEY, JSON.stringify(data2.payload)); }catch(e){}
+        await applyCloudObj(data2.payload);
+        // 云端快照落本地缓存前先解压回明文 orders（本地 localStorage 始终存明文格式）
+        try{
+          const plainSnap = Object.assign({}, data2.payload);
+          if(!Array.isArray(plainSnap.orders) && plainSnap.ordersGz){
+            plainSnap.orders = await cloudOrdersArr(plainSnap);
+            delete plainSnap.ordersGz;
+          }
+          localStorage.setItem(ORDERS_STORAGE_KEY, JSON.stringify(plainSnap));
+        }catch(e){}
         if(typeof runRestoredRecompute === 'function') runRestoredRecompute({ silent });
         try{ refreshVabStatus(); }catch(e){}
         setCloudStatus('已同步云端（' + cloudCnt + ' 条 · VAB ' + (state.vabList || []).length + ' 人）', 'ok');
@@ -773,12 +825,19 @@ async function saveOrdersToCloud(force){
     try{
       // 显式按 updated_at 倒序取最新一条并 upsert，避免 maybeSingle() 在存在多条历史残留记录时
       // 直接报错导致「云端保存失败」→ 云端长期停留在旧快照，刷新后把新数据倒退覆盖。
-      const { data: rows, error: selErr } = await cloud.database.from('dp_orders')
-        .select('id, updated_at, payload').order('updated_at', { ascending:false }).limit(1);
-      if(selErr){ failSave('云端保存失败：' + (selErr.message || '')); return; }
+      const { data: rows, error: selErr } = await cloudRun(() => cloud.database.from('dp_orders')
+        .select('id, updated_at, payload').order('updated_at', { ascending:false }).limit(1));
+      if(selErr){ failSave('云端保存失败：' + netErrMsg(selErr.message)); return; }
       const latest = Array.isArray(rows) && rows.length ? rows[0] : null;
       // 跨设备保护（2026-10-20）：本地无 hist 但云端已有 hist → 保留云端 hist，避免「仅订单设备」上传时把云端明细清空
       if(!payload.hist && latest && latest.payload && latest.payload.hist){ payload.hist = latest.payload.hist; }
+      // 整包上传前压缩：订单数组 gzip（ordersGz），整包 1.39MB → ~0.6MB，
+      // 防 payload 超云端网关请求体限制报 NetworkError（与 hist 压缩同思路，2026-10-24）。
+      // 压缩不可用的旧浏览器自动保留明文 orders 兜底；云端读取侧两种格式都兼容。
+      const upPayload = Object.assign({}, payload);
+      if(typeof CompressionStream !== 'undefined'){
+        try{ upPayload.ordersGz = await gzipToB64(payload.orders); delete upPayload.orders; }catch(e){}
+      }
       if(latest && latest.id != null){
         // 跨设备保护：云端已有比本地更新的数据（如另一台设备刚写入）且非强制保存时，
         // 不用过期本地数据覆盖云端，改为拉取云端保持一致
@@ -787,11 +846,11 @@ async function saveOrdersToCloud(force){
           setCloudStatus('云端数据更新（其他设备已保存），已跳过本次上传', 'warn');
           return;
         }
-        const { error } = await cloud.database.from('dp_orders').update({ payload, updated_at: new Date().toISOString() }).eq('id', latest.id);
-        if(error){ failSave('云端保存失败：' + (error.message || '')); return; }
+        const { error } = await cloudRun(() => cloud.database.from('dp_orders').update({ payload: upPayload, updated_at: new Date().toISOString() }).eq('id', latest.id));
+        if(error){ failSave('云端保存失败：' + netErrMsg(error.message)); return; }
         // 清理可能存在的多余旧记录，保证下次读取只命中最新一条
         try{
-          const { data: others } = await cloud.database.from('dp_orders').select('id');
+          const { data: others } = await cloudRun(() => cloud.database.from('dp_orders').select('id'));
           if(Array.isArray(others)){
             for(const r of others){
               if(r && r.id != null && r.id !== latest.id){
@@ -801,8 +860,8 @@ async function saveOrdersToCloud(force){
           }
         }catch(_){}
       }else{
-        const { error } = await cloud.database.from('dp_orders').insert({ payload, updated_at: new Date().toISOString() });
-        if(error){ failSave('云端保存失败：' + (error.message || '')); return; }
+        const { error } = await cloudRun(() => cloud.database.from('dp_orders').insert({ payload: upPayload, updated_at: new Date().toISOString() }));
+        if(error){ failSave('云端保存失败：' + netErrMsg(error.message)); return; }
       }
       state.ordersTs = Number(payload.ts) || Date.now();
       state.snapTs = state.ordersTs; saveSnapTs(state.snapTs);
@@ -824,18 +883,18 @@ async function saveHistOnlyToCloud(gz){
   try{ const r = await cloud.auth.getSession(); session = r.data; if(r.error) session = null; }catch(e){ session = null; }
   if(!session){ setCloudStatus('未登录云端：明细仅保存在本机', 'err'); return; }
   try{
-    const { data: rows, error } = await cloud.database.from('dp_orders').select('id, payload').order('updated_at',{ascending:false}).limit(1);
-    if(error){ setCloudStatus('云端读取失败：'+(error.message||''), 'err'); return; }
+    const { data: rows, error } = await cloudRun(() => cloud.database.from('dp_orders').select('id, payload').order('updated_at',{ascending:false}).limit(1));
+    if(error){ setCloudStatus('云端读取失败：'+netErrMsg(error.message), 'err'); return; }
     const latest = Array.isArray(rows) && rows.length ? rows[0] : null;
     const base = (latest && latest.payload && typeof latest.payload === 'object') ? latest.payload
                : { orders: [], cutoff: null, vab: { list: [], rows: [], demo: false }, targets: {}, manual: {} };
     const payload = Object.assign({}, base, { hist: { gz, histTs: state.histTs || 0 }, ts: state.snapTs || Date.now() });
     if(latest && latest.id != null){
-      const { error: e2 } = await cloud.database.from('dp_orders').update({ payload, updated_at: new Date().toISOString() }).eq('id', latest.id);
-      if(e2){ setCloudStatus('云端保存失败：'+(e2.message||''), 'err'); return; }
+      const { error: e2 } = await cloudRun(() => cloud.database.from('dp_orders').update({ payload, updated_at: new Date().toISOString() }).eq('id', latest.id));
+      if(e2){ setCloudStatus('云端保存失败：'+netErrMsg(e2.message), 'err'); return; }
     }else{
-      const { error: e2 } = await cloud.database.from('dp_orders').insert({ payload, updated_at: new Date().toISOString() });
-      if(e2){ setCloudStatus('云端保存失败：'+(e2.message||''), 'err'); return; }
+      const { error: e2 } = await cloudRun(() => cloud.database.from('dp_orders').insert({ payload, updated_at: new Date().toISOString() }));
+      if(e2){ setCloudStatus('云端保存失败：'+netErrMsg(e2.message), 'err'); return; }
     }
     state.histGz = { gz, histTs: state.histTs || 0 };
     histClouded = true;
