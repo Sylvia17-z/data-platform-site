@@ -616,10 +616,27 @@
     </div>
   </div>
 
-  <!-- ⑤ 营销部初诊客户（近30天）：可折叠 + 分页，点击数据行查看该客户近30天消费明细 -->
+  <!-- ⑤ 电商组各二级渠道业绩（初诊口径，日/月；格式参考用户提供报表） -->
+  <div class="panel" id="panel-ec-sub">
+    <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:8px;">
+      <h2 style="margin:0;">⑤ 电商组二级渠道业绩（初诊）</h2>
+      <div class="row">
+        <button class="btn" id="export-ec-sub-xlsx">📥 导出Excel</button>
+        <button class="btn btn-orange" id="export-ec-sub-png">🖼 导出图片</button>
+      </div>
+    </div>
+    <div class="stage" id="ec-sub-stage">
+      <table class="report" id="ec-sub-table">
+        <thead id="ec-sub-head"></thead>
+        <tbody id="ec-sub-body"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ⑥ 营销部初诊客户（近30天）：可折叠 + 分页，点击数据行查看该客户近30天消费明细 -->
   <div class="panel" id="panel-mkt-first">
     <details open>
-      <summary>⑤ 营销部初诊客户（近30天）</summary>
+      <summary>⑥ 营销部初诊客户（近30天）</summary>
       <div class="legend" style="margin:2px 0 8px;">口径：近30天（截止日起往前30天，可跨月）内 来源渠道=营销部 的初诊客户（按客户去重）。初诊判定 = ①到访类型=初诊（30天窗口内）∪ ②一年内无消费·新客（2026-10-16 新增：导入「近一年消费明细」后，营销部顾客若在截止日往前一年内无任何消费记录即视为初诊客户；未导入历史明细时该规则停用）· 来源渠道=渠道分类-一级渠道-二级渠道 · 支持筛选 · 点击数据行查看该客户近30天消费明细</div>
       <div id="mkt-first-clients" style="margin-top:4px;">导入订单数据后显示近30天营销部初诊客户</div>
     </details>
@@ -628,7 +645,7 @@
   <!-- 导入数据明细（全部导入订单，扁平展示） -->
   <div class="panel" data-page-node-id="impDtlPanel">
     <details open data-page-node-id="impDtl">
-      <summary data-page-node-id="impDtlSum">⑥ 导入数据明细（全部导入订单，含 VAB 命中标记）</summary>
+      <summary data-page-node-id="impDtlSum">⑦ 导入数据明细（全部导入订单，含 VAB 命中标记）</summary>
       <div id="import-details" style="margin-top:10px;" data-page-node-id="impDtlBody"></div>
     </details>
   </div>

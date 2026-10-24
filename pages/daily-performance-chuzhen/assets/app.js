@@ -2078,6 +2078,8 @@ function renderReportInner(){
     // 门店业绩占位
     $('store-table').querySelector('thead').innerHTML = '<tr><th colspan="4" class="sub-head" style="background:#fff;color:var(--c-text);">请先在"① 数据导入"上传订单表</th></tr>';
     $('store-body').innerHTML = '';
+    // ⑤ 电商组二级渠道业绩占位
+    renderEcSubReport();
     return;
   }
   // 导入数据的最新日期
@@ -2246,6 +2248,9 @@ function renderReportInner(){
 
   // ④ 门店业绩（高新 / 北郊）
   renderStoreReport(dateList, dailyResults);
+
+  // ⑤ 电商组各二级渠道业绩（初诊，日/月）
+  renderEcSubReport();
 }
 
 // 双击编辑绑定：月目标、月累计、每日数据
@@ -4364,6 +4369,228 @@ function buildStoreGrid(){
   return { rows, merges, colWidths, hiddenCols };
 }
 
+/* ===== ⑤ 电商组各二级渠道业绩（初诊口径，日/月） =====
+ * 需求（2026-10-24）：门店报表下方新增报表，统计「电商组」各二级渠道的日业绩与本月累计业绩，
+ * 口径与 ③ 业绩总表「营销部」一致（初诊业绩 = 30天/近一年无消费 的营销部初诊客户消费，计入现款支付）。
+ * 行维度：电商组（含 一级=电商组/客户转介绍/企业团检、品牌组-线上400、推荐→营销部）按二级渠道下钻；
+ * 每个二级渠道 2 行：当日数据 / 本月累计。
+ */
+const EC_SUB_PLATFORMS = {
+  '美大-高端体检': '海蓓国际医疗·高端体检中心',
+  '美大-国际门诊': '海蓓国际医疗·高新中心医院',
+  '美大-口腔保健': '海蓓国际医疗·口腔保健美学中心',
+  '美大-新妇科·抗衰': '海蓓国际医疗·女性健康中心',
+  '美大-新妇科·私密': '海蓓Anna·皮肤私密养护中心',
+  '美大-北郊保健': '海蓓·私享保健中心',
+  '美大-北郊医疗': '海蓓国际医疗·医疗保健中心（未央分院）',
+};
+const EC_SUB_ORDER = Object.keys(EC_SUB_PLATFORMS);
+// 与 calculate 内 DEPT_KEYS 保持一致（手动「报表归属」键）
+const EC_SUB_OV_KEYS = ['品牌组-其他','活动组-活动支持','电商组','新媒体组','短视频组','品牌组-自然到店','商务部','其他'];
+
+function computeEcSubReport(){
+  const cutoff = state.cutoffDate ? new Date(state.cutoffDate) : new Date();
+  const dateStr = fmtDate(cutoff);
+  const empty = { dateStr, rows: [], totalToday: 0, totalMonth: 0, hasData: false };
+  if(!Array.isArray(state.orders) || !state.orders.length) return empty;
+
+  const CC = r => (r.channelClass || '').trim();
+  const L1 = r => (r.channelL1 || '').trim();
+  const L2 = r => (r.channelL2 || '').trim();
+  const mktFirstKeys = buildMktFirstKeys(state.orders, cutoff);
+  const isMktFirst = r => mktFirstKeys.has(mktFirstClientKey(r));
+  const hasOv = r => EC_SUB_OV_KEYS.includes(String(r.deptOverride || '').trim());
+
+  // 电商组订单集：完全复刻 ③ 主表 电商组 行（r3 + r3c + r3b + ov），再按二级渠道下钻
+  const ecAuto = state.orders.filter(r => {
+    if(hasOv(r)) return false;
+    if(!isMktFirst(r)) return false;                       // 初诊门槛（与主表 autoYx 一致）
+    if(CC(r)==='营销部' && ['电商组','客户转介绍','企业团检'].includes(L1(r))) return true;
+    if(CC(r)==='营销部' && L1(r)==='品牌组' && L2(r).includes('线上400')) return true;
+    if(isRecToYingxiao(r) && !L2(r).includes('自然到店')) return true;
+    return false;
+  });
+  const ecOv = state.orders.filter(r => String(r.deptOverride || '').trim() === '电商组');
+  const ecOrders = ecAuto.concat(ecOv);
+
+  // 月累计：截止日所在「本月」且 <= 截止日（与 calculate 同口径，不含历史月份）
+  const cy = cutoff.getFullYear(), cm = cutoff.getMonth();
+  const monthSet = ecOrders.filter(r => r.payTime
+    && r.payTime.getFullYear() === cy && r.payTime.getMonth() === cm && inDateRange(r.payTime, cutoff));
+  const todaySet = monthSet.filter(r => fmtDate(r.payTime) === dateStr);
+
+  const map = new Map();
+  const bucket = l2 => {
+    if(!map.has(l2)) map.set(l2, { l2, today: 0, month: 0, cat: '', l1: '' });
+    return map.get(l2);
+  };
+  monthSet.forEach(r => {
+    const b = bucket(L2(r) || '（未分类）');
+    b.month += Number(r.cashPay) || 0;
+    if(!b.cat && CC(r)) b.cat = CC(r);
+    if(!b.l1 && L1(r)) b.l1 = L1(r);
+  });
+  todaySet.forEach(r => {
+    const b = bucket(L2(r) || '（未分类）');
+    b.today += Number(r.cashPay) || 0;
+  });
+
+  const rank = l2 => { const i = EC_SUB_ORDER.indexOf(l2); return i < 0 ? 999 : i; };
+  const rows = [...map.values()].sort((a,b) => {
+    const d = rank(a.l2) - rank(b.l2);
+    return d !== 0 ? d : a.l2.localeCompare(b.l2, 'zh');
+  }).map(b => ({
+    platform: EC_SUB_PLATFORMS[b.l2] || '—',
+    cat: b.cat || '营销部',
+    l1: b.l1 || '电商组',
+    l2: b.l2,
+    today: b.today,
+    month: b.month,
+  }));
+
+  const totalToday = rows.reduce((a,r) => a + r.today, 0);
+  const totalMonth = rows.reduce((a,r) => a + r.month, 0);
+  return { dateStr, rows, totalToday, totalMonth, hasData: rows.length > 0 };
+}
+
+function renderEcSubReport(){
+  const table = $('ec-sub-table');
+  if(!table) return;
+  const head = $('ec-sub-head'), body = $('ec-sub-body');
+  const rep = computeEcSubReport();
+  const cutoff = state.cutoffDate ? new Date(state.cutoffDate) : new Date();
+  const monthStr = (cutoff.getMonth()+1) + '月' + cutoff.getDate() + '日';
+
+  if(!state.results){
+    head.innerHTML = '<tr><th colspan="6" class="sub-head" style="background:#fff;color:var(--c-text);">请先在"① 数据导入"上传订单表</th></tr>';
+    body.innerHTML = '';
+    return;
+  }
+  if(!rep.hasData){
+    head.innerHTML = '<tr><th colspan="6" class="sub-head" style="background:#fff;color:var(--c-text);">当前数据中无「电商组」初诊业绩（一级渠道=电商组 的初诊客户消费）</th></tr>';
+    body.innerHTML = '';
+    return;
+  }
+
+  head.innerHTML = `
+    <tr><th colspan="6" class="title-cell">电商组各二级渠道业绩（初诊业绩，截止${monthStr}）</th></tr>
+    <tr>
+      <th class="sub-head">平台名称</th>
+      <th class="sub-head">渠道分类</th>
+      <th class="sub-head">一级渠道</th>
+      <th class="sub-head">二级渠道</th>
+      <th class="sub-head">业绩类型</th>
+      <th class="sub-head">初诊业绩<br>(单位：元)</th>
+    </tr>`;
+
+  let html = '';
+  rep.rows.forEach(r => {
+    html += `<tr>
+      <td rowspan="2" class="cat">${esc(r.platform)}</td>
+      <td rowspan="2">${esc(r.cat)}</td>
+      <td rowspan="2">${esc(r.l1)}</td>
+      <td rowspan="2">${esc(r.l2)}</td>
+      <td>当日数据</td>
+      <td class="num">${fmt(r.today)}</td>
+    </tr>
+    <tr>
+      <td>本月累计</td>
+      <td class="num">${fmt(r.month)}</td>
+    </tr>`;
+  });
+  // 合计行（与 ④ 门店业绩一致）
+  html += `<tr class="row-orange" style="font-weight:700;font-size:15px;">
+      <td colspan="4" class="cat">合计</td>
+      <td>当日数据</td>
+      <td class="num">${fmt(rep.totalToday)}</td>
+    </tr>
+    <tr class="row-orange" style="font-weight:700;font-size:15px;">
+      <td colspan="4"></td>
+      <td>本月累计</td>
+      <td class="num">${fmt(rep.totalMonth)}</td>
+    </tr>`;
+  body.innerHTML = html;
+}
+
+// ⑤ 导出网格：每个二级渠道 2 行（当日数据 / 本月累计），A~D 纵向合并；末尾合计行
+function buildEcSubGrid(){
+  const rep = computeEcSubReport();
+  const cutoff = state.cutoffDate ? new Date(state.cutoffDate) : new Date();
+  const monthStr = (cutoff.getMonth()+1) + '月' + cutoff.getDate() + '日';
+  const nCols = 6;
+  const rows = [];
+  const merges = [];
+  rows.push(Array.from({length:nCols}, () => null));
+  rows[0][0] = cell('电商组各二级渠道业绩（初诊业绩，截止'+monthStr+'）', 's', 'title');
+  merges.push({r:0, c:0, r2:0, c2:nCols-1});
+  rows.push(Array.from({length:nCols}, () => null));
+  ['平台名称','渠道分类','一级渠道','二级渠道','业绩类型','初诊业绩\n(单位：元)'].forEach((h,i)=>{ rows[1][i] = cell(h, 's', 'subhead'); });
+
+  let r = 2;
+  rep.rows.forEach(row => {
+    const a = Array.from({length:nCols}, () => null);
+    a[0] = cell(row.platform, 's', 'cat');
+    a[1] = cell(row.cat, 's', 'cat');
+    a[2] = cell(row.l1, 's', 'cat');
+    a[3] = cell(row.l2, 's', 'cat');
+    a[4] = cell('当日数据', 's', 'cat');
+    a[5] = cell(row.today, 'n', 'num');
+    rows.push(a);
+    for(let c=0;c<4;c++) merges.push({r, c, r2:r+1, c2:c});
+    const b = Array.from({length:nCols}, () => null);
+    b[4] = cell('本月累计', 's', 'cat');
+    b[5] = cell(row.month, 'n', 'num');
+    rows.push(b);
+    r += 2;
+  });
+  // 合计行
+  const t1 = Array.from({length:nCols}, () => null);
+  t1[0] = cell('合计', 's', 'orange');
+  t1[4] = cell('当日数据', 's', 'orange');
+  t1[5] = cell(rep.totalToday, 'n', 'orange');
+  rows.push(t1); merges.push({r, c:0, r2:r, c2:3}); r++;
+  const t2 = Array.from({length:nCols}, () => null);
+  t2[4] = cell('本月累计', 's', 'orange');
+  t2[5] = cell(rep.totalMonth, 'n', 'orange');
+  rows.push(t2); r++;
+
+  return { rows, merges, colWidths:[24, 12, 12, 20, 14, 16], hiddenCols:[] };
+}
+
+async function exportEcSubXlsx(){
+  await ensureXlsxStyled();
+  const { rows, merges, colWidths } = buildEcSubGrid();
+  buildStyledXlsx({ sheetName:'电商组二级渠道', rows, merges, colWidths }).then(blob=>{
+    downloadBlob(blob, `电商组二级渠道业绩-${state.cutoffDate||todayIso()}.xlsx`);
+    showToast('Excel已导出(与线上显示一致)', 'ok');
+  }).catch(e=>{
+    console.error(e);
+    showToast('导出失败：'+e.message, 'err');
+  });
+}
+
+async function exportEcSubPng(){
+  await ensureHtml2canvas();
+  const table = $('ec-sub-table');
+  if(!table) return;
+  const holder = document.createElement('div');
+  holder.style.cssText = 'position:absolute;left:-99999px;top:0;width:auto;background:#fff;z-index:-1;';
+  const clone = table.cloneNode(true);
+  clone.style.width = (table.offsetWidth || 0) + 'px';
+  clone.style.margin = '0';
+  holder.appendChild(clone);
+  document.body.appendChild(holder);
+  html2canvas(clone, {backgroundColor:'#fff', scale:2, useCORS:true}).then(canvas=>{
+    canvas.toBlob(blob=>{
+      downloadBlob(blob, `电商组二级渠道业绩-${state.cutoffDate||todayIso()}.png`);
+      showToast('图片已导出', 'ok');
+    });
+  }).catch(e=>{
+    console.error(e);
+    showToast('导出失败：'+e.message, 'err');
+  }).finally(()=>{ holder.remove(); });
+}
+
 // （v-75）量测线上表格各逻辑列的实际渲染像素宽：
 // 对每个逻辑列找一个 colspan=1 且可见(offsetWidth>0)的单元格取其 offsetWidth（即该列真实列宽）。
 // 返回 widthByCol[c]（像素；量不到为 0，由调用方退回 colgroup 规格）。
@@ -4686,6 +4913,11 @@ function initApp(){
   $('export-xlsx').addEventListener('click', exportXlsx);
   $('export-store-png').addEventListener('click', exportStorePng);
   $('export-store-xlsx').addEventListener('click', exportStoreXlsx);
+  // ⑤ 电商组二级渠道业绩导出
+  const ecSubXlsxBtn = $('export-ec-sub-xlsx');
+  if(ecSubXlsxBtn) ecSubXlsxBtn.addEventListener('click', exportEcSubXlsx);
+  const ecSubPngBtn = $('export-ec-sub-png');
+  if(ecSubPngBtn) ecSubPngBtn.addEventListener('click', exportEcSubPng);
   // 「批量 / 展开」报表独立按钮（已移出表头）：仅绑定一次；④ 门店业绩同款
   bindBatchExpandButtons($('report-table'));
   bindStoreBatchExpandButtons($('store-table'));
