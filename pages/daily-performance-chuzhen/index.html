@@ -264,6 +264,12 @@
   table.report .resize-handle{position:absolute;right:0;top:0;width:6px;height:100%;cursor:col-resize;z-index:5;background:transparent;}
   table.report .resize-handle:hover{background:rgba(54,88,211,.35);}
   table.report col{width:auto;}
+  /* ⑤ 电商组二级渠道：每个渠道 2 行（当日数据 / 月累计），用底色区分 */
+  table.report .type-cell{background:var(--c-blue-sub);color:#002060;font-weight:600;font-size:12px;}
+  table.report tr.ec-sub-cum td{background:#f7f9fd;}
+  table.report tr.ec-sub-cum td.type-cell{background:#dbe5f7;}
+  /* ⑤ 表格宽度跟随内容（隐藏日期列不渲染，避免幽灵列把表格撑出空白） */
+  table.report#ec-sub-table{width:auto;}
 
   /* 业绩报表字体规范：除标题行外全部黑色 + 微软雅黑；合计行大两号加粗（v20260916） */
   table.report, table.report th, table.report td,
@@ -622,6 +628,8 @@
     <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:8px;">
       <h2 style="margin:0;">⑤ 电商组二级渠道业绩（初诊）</h2>
       <div class="row">
+        <button class="btn" id="ec-sub-batch-toggle" title="批量选择要隐藏的日期列">☑ 批量</button>
+        <button class="btn" id="ec-sub-expand-all" title="展开所有日期列">+展开</button>
         <button class="btn" id="export-ec-sub-xlsx">📥 导出Excel</button>
         <button class="btn btn-orange" id="export-ec-sub-png">🖼 导出图片</button>
       </div>

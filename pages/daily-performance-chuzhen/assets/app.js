@@ -4372,8 +4372,8 @@ function buildStoreGrid(){
 /* ===== ⑤ 电商组各二级渠道业绩（初诊口径，日/月） =====
  * 需求（2026-10-24）：门店报表下方新增报表，统计「电商组」各二级渠道的日业绩与本月累计业绩，
  * 口径与 ③ 业绩总表「营销部」一致（初诊业绩 = 30天/近一年无消费 的营销部初诊客户消费，计入现款支付）。
- * 行维度：电商组（含 一级=电商组/客户转介绍/企业团检、品牌组-线上400、推荐→营销部）按二级渠道下钻；
- * 每个二级渠道 2 行：当日数据 / 本月累计。
+ * 结构（10-24 晚定稿）：行沿用最初格式——每个二级渠道 2 行（当日数据 / 月累计），列仍为每日一列；
+ *   默认只显示「最新有数据的日期」列，支持单列收起、「☑ 批量」多选隐藏、「+展开」（与 ③ 业绩报表一致）。
  */
 const EC_SUB_PLATFORMS = {
   '美大-高端体检': '海蓓国际医疗·高端体检中心',
@@ -4388,11 +4388,15 @@ const EC_SUB_ORDER = Object.keys(EC_SUB_PLATFORMS);
 // 与 calculate 内 DEPT_KEYS 保持一致（手动「报表归属」键）
 const EC_SUB_OV_KEYS = ['品牌组-其他','活动组-活动支持','电商组','新媒体组','短视频组','品牌组-自然到店','商务部','其他'];
 
+// ⑤ 列可见性状态：null = 尚未手动调整（默认仅显示最新有数据日期列）；Set = 用户自定义隐藏的日期集合
+let ecSubHidden = null;
+let ecSubBatchMode = false;
+
 function computeEcSubReport(){
   const cutoff = state.cutoffDate ? new Date(state.cutoffDate) : new Date();
   const dateStr = fmtDate(cutoff);
   const dateList = generateDateRange(cutoff); // 当月 1 日 ~ 截止日，每天一列
-  const res = { dateStr, dateList, rows: [], totalMonth: 0, totalCount: 0, totalDays: {}, hasOrders: Array.isArray(state.orders) && state.orders.length > 0 };
+  const res = { dateStr, dateList, rows: [], totalMonth: 0, totalCount: 0, totalDays: {}, totalCum: {}, defaultIdx: -1, hasOrders: Array.isArray(state.orders) && state.orders.length > 0 };
   if(!res.hasOrders) return res;
 
   const CC = r => (r.channelClass || '').trim();
@@ -4438,16 +4442,40 @@ function computeEcSubReport(){
   [...map.keys()].forEach(k => { if(!ordered.includes(k)) ordered.push(k); });
   res.rows = ordered.map(l2 => {
     const b = map.get(l2) || newBucket();
-    const days = {};
-    dateList.forEach(d => { days[d] = b.days.get(d) || 0; });
-    return { l2, platform: EC_SUB_PLATFORMS[l2] || '—', month: b.month, cnt: b.cnt.size, days };
+    const days = {}, cum = {};
+    let acc = 0;
+    dateList.forEach(d => {
+      const v = b.days.get(d) || 0;
+      days[d] = v; acc += v; cum[d] = acc;      // 月累计行：累计至该日
+    });
+    return { l2, platform: EC_SUB_PLATFORMS[l2] || '—', month: b.month, cnt: b.cnt.size, days, cum };
   });
 
-  res.totalDays = {};
-  dateList.forEach(d => { res.totalDays[d] = res.rows.reduce((a,r) => a + (r.days[d] || 0), 0); });
+  res.totalDays = {}; res.totalCum = {};
+  let tAcc = 0;
+  dateList.forEach(d => {
+    const dv = res.rows.reduce((a,r) => a + (r.days[d] || 0), 0);
+    res.totalDays[d] = dv; tAcc += dv; res.totalCum[d] = tAcc;
+  });
   res.totalMonth = res.rows.reduce((a,r) => a + r.month, 0);
   res.totalCount = res.rows.reduce((a,r) => a + r.cnt, 0);
+  // 默认可见列：最后一个「有数据」的日期；全月无数据则取最后一列
+  for(let i = dateList.length - 1; i >= 0; i--){
+    if((res.totalDays[dateList[i]] || 0) > 0){ res.defaultIdx = i; break; }
+  }
+  if(res.defaultIdx < 0 && dateList.length) res.defaultIdx = dateList.length - 1;
   return res;
+}
+
+// ⑤ 当前应隐藏的日期集合：用户未手动调整过（null）时按「仅显示最新有数据日期列」的默认规则
+function ecSubHiddenSet(rep){
+  const list = (rep && rep.dateList) || [];
+  if(ecSubHidden === null){
+    const s = new Set(list);
+    if(rep && rep.defaultIdx >= 0) s.delete(list[rep.defaultIdx]);
+    return s;
+  }
+  return new Set(list.filter(d => ecSubHidden.has(d)));
 }
 
 function renderEcSubReport(){
@@ -4464,38 +4492,55 @@ function renderEcSubReport(){
     const msg = !state.results ? '请先在"① 数据导入"上传订单表' : '当前数据中无「电商组」初诊业绩';
     head.innerHTML = `<tr><th colspan="${nCols}" class="sub-head" style="background:#fff;color:var(--c-text);">${msg}</th></tr>`;
     body.innerHTML = '';
+    table.querySelectorAll('colgroup').forEach(c=>c.remove());
+    // 无数据：列可见性回到默认规则
+    ecSubHidden = null; ecSubBatchMode = false;
+    table.classList.remove('batch-mode');
+    const bb = $('ec-sub-batch-toggle'); if(bb) bb.textContent = '☑ 批量';
     return;
   }
 
+  // 只渲染「可见」日期列（隐藏列不进 DOM，表格不会被幽灵列撑出空白）
+  const hidden = ecSubHiddenSet(rep);
+  const vDates = dateList.filter(d => !hidden.has(d));
+  const idxOf = new Map(dateList.map((d,i)=>[d,i]));
+
   head.innerHTML = `
-    <tr><th colspan="${nCols}" class="title-cell">电商组各二级渠道业绩（初诊业绩，截止${monthStr}）</th></tr>
+    <tr><th colspan="${4 + vDates.length}" class="title-cell">电商组各二级渠道业绩（初诊业绩，截止${monthStr}）</th></tr>
     <tr>
       <th class="sub-head">平台名称</th>
       <th class="sub-head">二级渠道</th>
-      <th class="sub-head">月累计<br>(单位：元)<span class="copy-col" data-col="month" title="复制月累计整列">复制</span></th>
+      <th class="sub-head">业绩类型</th>
       <th class="sub-head">客量<br>(人)<span class="copy-col" data-col="cnt" title="复制客量整列">复制</span></th>
-      ${dateList.map((d,i)=>{
+      ${vDates.map(d=>{
         const dt = new Date(d);
-        return `<th class="sub-head daily-col" data-date="${d}" data-idx="${i}" title="${dt.getMonth()+1}月${dt.getDate()}日">${dt.getMonth()+1}月${dt.getDate()}日<span class="copy-col" data-col="d:${d}" title="复制该日期整列数据">复制</span></th>`;
+        return `<th class="sub-head daily-col" data-date="${d}" data-idx="${idxOf.get(d)}" title="点击收起该日期列">${dt.getMonth()+1}月${dt.getDate()}日<span class="copy-col" data-col="d:${d}" title="复制该日期整列数据">复制</span></th>`;
       }).join('')}
     </tr>`;
 
   let html = '';
   rep.rows.forEach(r => {
-    html += `<tr>
-      <td class="cat">${esc(r.platform)}</td>
-      <td>${esc(r.l2)}</td>
-      <td class="num" data-col="month" data-val="${r.month}">${fmt(r.month)}</td>
-      <td class="num" data-col="cnt" data-val="${r.cnt}">${r.cnt}</td>
-      ${dateList.map((d,i)=>`<td class="num daily-col-${i}" data-idx="${i}" data-date="${d}" data-col="d:${d}" data-val="${r.days[d] || 0}">${fmt(r.days[d] || 0)}</td>`).join('')}
+    // 每个二级渠道 2 行：当日数据 / 月累计（平台·渠道·客量纵向合并 2 行）
+    html += `<tr class="ec-sub-today">
+      <td class="cat" rowspan="2">${esc(r.platform)}</td>
+      <td rowspan="2">${esc(r.l2)}</td>
+      <td class="type-cell">当日数据</td>
+      <td class="num" rowspan="2" data-col="cnt" data-val="${r.cnt}">${r.cnt}</td>
+      ${vDates.map(d=>`<td class="num" data-idx="${idxOf.get(d)}" data-date="${d}" data-col="d:${d}" data-val="${r.days[d] || 0}">${fmt(r.days[d] || 0)}</td>`).join('')}
+    </tr>
+    <tr class="ec-sub-cum">
+      <td class="type-cell">月累计</td>
+      ${vDates.map(d=>`<td class="num" data-idx="${idxOf.get(d)}" data-date="${d}" data-col="d:${d}" data-val="${r.cum[d] || 0}">${fmt(r.cum[d] || 0)}</td>`).join('')}
     </tr>`;
   });
-  // 合计行（与 ④ 门店业绩一致）；data-total 用于「单列复制」时跳过合计，避免粘贴后重复汇总
-  html += `<tr class="row-orange" data-total="1" style="font-weight:700;font-size:15px;">
-      <td colspan="2" class="cat">合计</td>
-      <td class="num" data-col="month" data-val="${rep.totalMonth}">${fmt(rep.totalMonth)}</td>
-      <td class="num" data-col="cnt" data-val="${rep.totalCount}">${rep.totalCount}</td>
-      ${dateList.map((d,i)=>`<td class="num" data-idx="${i}" data-date="${d}" data-col="d:${d}" data-val="${rep.totalDays[d] || 0}">${fmt(rep.totalDays[d] || 0)}</td>`).join('')}
+  // 合计：同样 2 行（当日合计 / 累计合计）；data-total 用于「单列复制」时跳过合计，避免粘贴后重复汇总
+  html += `<tr class="row-orange" data-total="1">
+      <td class="cat" colspan="3" rowspan="2">合计</td>
+      <td class="num" rowspan="2" data-col="cnt" data-val="${rep.totalCount}">${rep.totalCount}</td>
+      ${vDates.map(d=>`<td class="num" data-idx="${idxOf.get(d)}" data-date="${d}" data-col="d:${d}" data-val="${rep.totalDays[d] || 0}">${fmt(rep.totalDays[d] || 0)}</td>`).join('')}
+    </tr>
+    <tr class="row-orange" data-total="1">
+      ${vDates.map(d=>`<td class="num" data-idx="${idxOf.get(d)}" data-date="${d}" data-col="d:${d}" data-val="${rep.totalCum[d] || 0}">${fmt(rep.totalCum[d] || 0)}</td>`).join('')}
     </tr>`;
   body.innerHTML = html;
 
@@ -4503,14 +4548,83 @@ function renderEcSubReport(){
   table.querySelectorAll('colgroup').forEach(c=>c.remove());
   const cg = document.createElement('colgroup');
   const addCol = w => { const c = document.createElement('col'); c.style.width = w; cg.appendChild(c); };
-  addCol('200px'); addCol('120px'); addCol('110px'); addCol('70px');
-  dateList.forEach(()=>addCol(DAILY_COL_PX + 'px'));
+  addCol('230px'); addCol('120px'); addCol('92px'); addCol('62px');
+  vDates.forEach(()=>addCol(DAILY_COL_PX + 'px'));
   table.insertBefore(cg, table.firstChild);
 
-  // 单列复制（月累计 / 客量 / 每日列）
-  head.querySelectorAll('.copy-col').forEach(btn=>{
-    btn.addEventListener('click', e => { e.stopPropagation(); copyEcSubColumn(btn.dataset.col); });
-  });
+  if(ecSubBatchMode) table.classList.add('batch-mode');
+}
+
+// 标题跨可见列：4 个固定列 + 可见日期列
+function updateEcSubTitleColspan(){
+  const table = $('ec-sub-table');
+  if(!table) return;
+  const visible = table.querySelectorAll('th.daily-col').length;   // 隐藏列已不渲染
+  const titleTh = table.querySelector('thead tr:first-child th');
+  if(titleTh) titleTh.colSpan = 4 + visible;
+}
+
+// ⑤ 日期列交互（事件委托，只绑定一次）：单列收起、「☑ 批量」多选隐藏、「+展开」
+// 隐藏列直接不渲染（避免幽灵列占宽产生空白），故所有操作都改 ecSubHidden 后重渲染
+function bindEcSubControls(){
+  const table = $('ec-sub-table');
+  if(!table || table.dataset.bound) return;
+  table.dataset.bound = '1';
+  const head = $('ec-sub-head');
+  const batchBtn = $('ec-sub-batch-toggle');
+  const expandBtn = $('ec-sub-expand-all');
+  const exitBatch = ()=>{
+    ecSubBatchMode = false;
+    table.classList.remove('batch-mode');
+    if(batchBtn) batchBtn.textContent = '☑ 批量';
+    table.querySelectorAll('th.daily-col.selected').forEach(th=>th.classList.remove('selected'));
+  };
+  // 至少保留一个日期列（否则「当日数据/月累计」两行失去意义）
+  const applyHidden = (nextSet) => {
+    const rep = computeEcSubReport();
+    const total = (rep.dateList || []).length;
+    if(total > 0 && nextSet.size >= total){
+      showToast('至少保留一个日期列，请用「+展开」恢复', 'err', 2400);
+      return false;
+    }
+    ecSubHidden = nextSet;
+    renderEcSubReport();
+    return true;
+  };
+  const curHidden = () => ecSubHiddenSet(computeEcSubReport());
+  if(head){
+    head.addEventListener('click', e => {
+      const cbtn = e.target.closest('.copy-col');
+      if(cbtn){ e.stopPropagation(); copyEcSubColumn(cbtn.dataset.col); return; }
+      const th = e.target.closest('th.daily-col');
+      if(!th) return;
+      if(ecSubBatchMode){ th.classList.toggle('selected'); return; }   // 批量模式：点选（黄色高亮）
+      const next = curHidden(); next.add(th.dataset.date);
+      applyHidden(next);
+    });
+  }
+  if(batchBtn){
+    batchBtn.addEventListener('click', ()=>{
+      if(ecSubBatchMode){
+        const sel = [...table.querySelectorAll('th.daily-col.selected')].map(th => th.dataset.date);
+        const next = curHidden();
+        sel.forEach(d => next.add(d));
+        if(sel.length && applyHidden(next)) showToast(`已隐藏 ${sel.length} 个日期列`, 'ok');
+        exitBatch();
+      } else {
+        ecSubBatchMode = true;
+        table.classList.add('batch-mode');
+        batchBtn.textContent = '✕ 完成隐藏';
+      }
+    });
+  }
+  if(expandBtn){
+    expandBtn.addEventListener('click', ()=>{
+      if(ecSubBatchMode) exitBatch();
+      ecSubHidden = new Set();     // 全部展开 → 记住「无隐藏」，重渲染不再回到默认
+      renderEcSubReport();
+    });
+  }
 }
 
 // 复制 ⑤ 报表的某一整列（月累计 / 客量 / 某个日期）：读取单元格 data-val 原始数值
@@ -4530,7 +4644,8 @@ function copyEcSubColumn(colKey){
   });
 }
 
-// ⑤ 导出网格：平台名称 | 二级渠道 | 月累计 | 客量 | 每日列；末尾合计行（与线上显示一致）
+// ⑤ 导出网格：平台名称 | 二级渠道 | 业绩类型 | 客量 | 每日列；每渠道 2 行（当日数据/月累计），末尾合计 2 行
+// 导出始终包含「全部」日期列（不跟随屏幕收起状态），便于后续分析
 function buildEcSubGrid(){
   const rep = computeEcSubReport();
   const cutoff = state.cutoffDate ? new Date(state.cutoffDate) : new Date();
@@ -4545,29 +4660,43 @@ function buildEcSubGrid(){
   rows.push(Array.from({length:nCols}, () => null));
   rows[1][0] = cell('平台名称', 's', 'subhead');
   rows[1][1] = cell('二级渠道', 's', 'subhead');
-  rows[1][2] = cell('月累计\n(单位：元)', 's', 'subhead');
+  rows[1][2] = cell('业绩类型', 's', 'subhead');
   rows[1][3] = cell('客量\n(人)', 's', 'subhead');
   dateList.forEach((d,k)=>{ const dt = new Date(d); rows[1][4+k] = cell((dt.getMonth()+1)+'月'+dt.getDate()+'日', 's', 'subhead'); });
 
-  rep.rows.forEach(row => {
-    const a = Array.from({length:nCols}, () => null);
+  rep.rows.forEach((row, ri) => {
+    const r1 = 2 + ri * 2, r2 = r1 + 1;
+    const a = Array.from({length:nCols}, () => null);   // 当日数据
+    const b = Array.from({length:nCols}, () => null);   // 月累计
     a[0] = cell(row.platform, 's', 'cat');
     a[1] = cell(row.l2, 's', 'cat');
-    a[2] = cell(row.month, 'n', 'num');
+    a[2] = cell('当日数据', 's', 'catsub');
     a[3] = cell(row.cnt, 'n', 'target');
-    dateList.forEach((d,k)=>{ a[4+k] = cell(row.days[d] || 0, 'n', 'num'); });
-    rows.push(a);
+    b[2] = cell('月累计', 's', 'catsub');
+    dateList.forEach((d,k)=>{
+      a[4+k] = cell(row.days[d] || 0, 'n', 'num');
+      b[4+k] = cell(row.cum[d] || 0, 'n', 'num');
+    });
+    rows.push(a); rows.push(b);
+    merges.push({r:r1, c:0, r2:r2, c2:0});   // 平台名称 纵向合并
+    merges.push({r:r1, c:1, r2:r2, c2:1});   // 二级渠道 纵向合并
+    merges.push({r:r1, c:3, r2:r2, c2:3});   // 客量 纵向合并
   });
-  // 合计行
-  const t = Array.from({length:nCols}, () => null);
-  t[0] = cell('合计', 's', 'orange');
-  t[1] = cell('', 's', 'orange');
-  t[2] = cell(rep.totalMonth, 'n', 'orange');
-  t[3] = cell(rep.totalCount, 'n', 'orange');
-  dateList.forEach((d,k)=>{ t[4+k] = cell(rep.totalDays[d] || 0, 'n', 'orange'); });
-  rows.push(t);
+  // 合计：2 行（当日合计 / 累计合计），标签与客量纵向合并
+  const tr = 2 + rep.rows.length * 2;
+  const t1 = Array.from({length:nCols}, () => null);
+  const t2 = Array.from({length:nCols}, () => null);
+  t1[0] = cell('合计', 's', 'orange');
+  t1[3] = cell(rep.totalCount, 'n', 'orange');
+  dateList.forEach((d,k)=>{
+    t1[4+k] = cell(rep.totalDays[d] || 0, 'n', 'orange');
+    t2[4+k] = cell(rep.totalCum[d] || 0, 'n', 'orange');
+  });
+  rows.push(t1); rows.push(t2);
+  merges.push({r:tr, c:0, r2:tr+1, c2:2});
+  merges.push({r:tr, c:3, r2:tr+1, c2:3});
 
-  const colWidths = [26, 20, 13, 8];
+  const colWidths = [26, 18, 12, 8];
   dateList.forEach(()=>colWidths.push(11));
   return { rows, merges, colWidths, hiddenCols:[] };
 }
@@ -4577,7 +4706,7 @@ async function exportEcSubXlsx(){
   const { rows, merges, colWidths } = buildEcSubGrid();
   buildStyledXlsx({ sheetName:'电商组二级渠道', rows, merges, colWidths }).then(blob=>{
     downloadBlob(blob, `电商组二级渠道业绩-${state.cutoffDate||todayIso()}.xlsx`);
-    showToast('Excel已导出(与线上显示一致)', 'ok');
+    showToast('Excel已导出（含全部日期列）', 'ok');
   }).catch(e=>{
     console.error(e);
     showToast('导出失败：'+e.message, 'err');
@@ -4591,6 +4720,7 @@ async function exportEcSubPng(){
   const holder = document.createElement('div');
   holder.style.cssText = 'position:absolute;left:-99999px;top:0;width:auto;background:#fff;z-index:-1;';
   const clone = table.cloneNode(true);
+  clone.removeAttribute('id');                                 // 避免与线上表 id 冲突
   clone.querySelectorAll('.copy-col').forEach(n => n.remove()); // 图片不含「复制」按钮
   clone.style.width = (table.offsetWidth || 0) + 'px';
   clone.style.margin = '0';
@@ -4934,6 +5064,7 @@ function initApp(){
   if(ecSubXlsxBtn) ecSubXlsxBtn.addEventListener('click', exportEcSubXlsx);
   const ecSubPngBtn = $('export-ec-sub-png');
   if(ecSubPngBtn) ecSubPngBtn.addEventListener('click', exportEcSubPng);
+  bindEcSubControls();   // ⑤ 日期列：单列收起 /「☑ 批量」/「+展开」
   // 「批量 / 展开」报表独立按钮（已移出表头）：仅绑定一次；④ 门店业绩同款
   bindBatchExpandButtons($('report-table'));
   bindStoreBatchExpandButtons($('store-table'));
