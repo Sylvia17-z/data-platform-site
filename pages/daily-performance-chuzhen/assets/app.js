@@ -21,7 +21,7 @@ function ensureHtml2canvas(){ return loadScript('assets/vendor/html2canvas.min.j
 async function ensureXlsxStyled(){
   await loadScript('assets/vendor/xlsx.full.min.js');
   await loadScript('assets/vendor/jszip.min.js');
-  await loadScript('assets/xlsx-styled.js?v=20260917-01');
+  await loadScript('assets/xlsx-styled.js?v=20261024-01');
   return true;
 }
 

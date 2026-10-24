@@ -1,10 +1,11 @@
 /* xlsx-styled.js
  * 用 JSZip 手写 OOXML，生成「与线上显示一致」的带样式 Excel（藏蓝主题 + 黑框 + 合计加粗）。
  * SheetJS 在本环境无法写入单元格填充/字体样式，故走原生 OOXML。
- * 暴露 window.buildStyledXlsx({ sheetName, rows, merges, colWidths }) -> Promise<Blob>
+ * 暴露 window.buildStyledXlsx({ sheetName, rows, merges, colWidths, freezeRows }) -> Promise<Blob>
  *   rows:   二维数组，每个元素为 {v, t:'n'|'s', s:<styleKey>} 或 null（被合并覆盖的格子）
  *   merges: [{r,c,r2,c2}] 0-based 合并区域（仅写左上角，其余置 null）
  *   colWidths: 每列字符宽度（可选）
+ *   freezeRows: 冻结前 N 行（可选，默认 1 —— 只冻结第一行；传 0 不冻结）
  * styleKey 映射见 STYLES
  */
 (function(){
@@ -95,7 +96,7 @@
       '</styleSheet>';
   }
 
-  function sheetXml(rows, merges, colWidths, hiddenCols){
+  function sheetXml(rows, merges, colWidths, hiddenCols, freezeRows){
     let cols = '';
     if(colWidths && colWidths.length){
       const hiddenSet = new Set(hiddenCols || []);
@@ -176,10 +177,15 @@
       mergeXml += '</mergeCells>';
     }
 
+    // 冻结窗格：默认只冻结第一行（2026-10-24 需求）。调用方可通过 freezeRows 覆盖行数，
+    // 传 0 表示不冻结。topLeftCell 指向冻结区首格下方。
+    const nHead = (freezeRows === undefined || freezeRows === null) ? 1 : Math.max(0, Number(freezeRows) | 0);
+    const pane = nHead > 0 ? `<pane ySplit="${nHead}" topLeftCell="A${nHead+1}" activePane="bottomLeft" state="frozen"/>` : '';
+
     return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
       '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
         '<sheetViews><sheetView workbookViewId="0">' +
-          '<pane ySplit="2" topLeftCell="A3" activePane="bottomLeft" state="frozen"/>' +
+          pane +
         '</sheetView></sheetViews>' +
         cols +
         '<sheetData>' + body + '</sheetData>' +
@@ -224,7 +230,7 @@
     xl.file('workbook.xml', workbook);
     xl.folder('_rels').file('workbook.xml.rels', workbookRels);
     xl.file('styles.xml', stylesXml());
-    xl.folder('worksheets').file('sheet1.xml', sheetXml(opts.rows, opts.merges || [], opts.colWidths || null, opts.hiddenCols || []));
+    xl.folder('worksheets').file('sheet1.xml', sheetXml(opts.rows, opts.merges || [], opts.colWidths || null, opts.hiddenCols || [], (opts.freezeRows === undefined ? 1 : opts.freezeRows)));
     return zip.generateAsync({
       type: 'blob',
       mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
