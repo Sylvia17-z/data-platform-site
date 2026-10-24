@@ -308,6 +308,8 @@ window.addEventListener('message', (e) => {
 const HIST_STORAGE_KEY = 'dailyPerformance_hist';
 // hist 是否已成功上云/从云端恢复（用于状态文案；2026-10-20 起仅明细也可上云，故不再等同「订单已导入」）
 let histClouded = false;
+// VAB 名单是否已成功上云/从云端恢复（用于状态文案；随订单整包上云，本机无订单时走 saveVabOnlyToCloud 单独上云）
+let vabClouded = false;
 
 function applyHistRaw(raw){
   if(!raw || typeof raw !== 'string') return false;
@@ -616,6 +618,8 @@ async function applyCloudObj(obj){
         setVabRows(rows);
         state.demoVab = rows.length ? !!v.demo : false;
         writeVabLocal();
+        vabClouded = true; // 从云端恢复 = 名单已在云端
+        refreshVabStatus(); // 立即刷新状态文案（含「已同步云端」），不等外部调用
         touched = true;
       }
     }
@@ -868,7 +872,9 @@ async function saveOrdersToCloud(force){
       setCloudStatus('已同步云端（' + payload.orders.length + ' 条 · VAB ' + (payload.vab && payload.vab.list ? payload.vab.list.length : 0) + ' 人）', 'ok');
       // hist 随整包上云成功 → 同步置云端标志并刷新状态文案（修复「导入后状态文案滞后为『暂仅保存在本机』」）
       if(payload.hist){ histClouded = true; }
+      vabClouded = true; // VAB 恒随整包上云
       if(typeof refreshHistMeta === 'function') refreshHistMeta();
+      refreshVabStatus();
     }catch(e){
       failSave('云端保存异常：' + (e && e.message ? e.message : '网络错误'));
     }
@@ -900,6 +906,40 @@ async function saveHistOnlyToCloud(gz){
     histClouded = true;
     state.ordersTs = payload.ts; state.snapTs = payload.ts; saveSnapTs(state.snapTs);
     setCloudStatus('已同步云端（仅明细 · '+(state.histOrders||[]).length+' 行）', 'ok');
+  }catch(e){ setCloudStatus('云端同步异常：'+(e&&e.message||'网络错误'), 'err'); }
+}
+// 仅 VAB 名单（本机无订单）时上云：合并进云端已有快照后 upsert，避免「仅 VAB 设备」把云端订单/明细清空（2026-10-24）
+async function saveVabOnlyToCloud(){
+  _vabCloudTimer = null;
+  const cloud = getCloud();
+  if(!cloud){ setCloudStatus('云端组件未就绪：VAB 名单仅保存在本机', 'err'); return; }
+  let session = null;
+  try{ const r = await cloud.auth.getSession(); session = r.data; if(r.error) session = null; }catch(e){ session = null; }
+  if(!session){ setCloudStatus('未登录云端：VAB 名单仅保存在本机', 'err'); return; }
+  try{
+    const { data: rows, error } = await cloudRun(() => cloud.database.from('dp_orders').select('id, payload').order('updated_at',{ascending:false}).limit(1));
+    if(error){ setCloudStatus('云端读取失败：'+netErrMsg(error.message), 'err'); return; }
+    const latest = Array.isArray(rows) && rows.length ? rows[0] : null;
+    // 跨设备保护：云端已有比本地更新的整包（其他设备刚写入）→ 不用过期本机 VAB 覆盖，保持一致即可
+    const cloudTsNow = Number(latest && latest.payload && latest.payload.ts) || 0;
+    if(latest && cloudTsNow > (Number(state.snapTs) || 0)){
+      setCloudStatus('云端数据更新（其他设备已保存），已跳过本次上传', 'warn');
+      return;
+    }
+    const base = (latest && latest.payload && typeof latest.payload === 'object') ? latest.payload
+               : { orders: [], cutoff: null, vab: { list: [], rows: [], demo: false }, targets: {}, manual: {} };
+    const payload = Object.assign({}, base, { vab: { list: state.vabList || [], rows: state.vabRows || [], demo: !!state.demoVab }, ts: state.snapTs || Date.now() });
+    if(latest && latest.id != null){
+      const { error: e2 } = await cloudRun(() => cloud.database.from('dp_orders').update({ payload, updated_at: new Date().toISOString() }).eq('id', latest.id));
+      if(e2){ setCloudStatus('云端保存失败：'+netErrMsg(e2.message), 'err'); return; }
+    }else{
+      const { error: e2 } = await cloudRun(() => cloud.database.from('dp_orders').insert({ payload, updated_at: new Date().toISOString() }));
+      if(e2){ setCloudStatus('云端保存失败：'+netErrMsg(e2.message), 'err'); return; }
+    }
+    state.snapTs = payload.ts; saveSnapTs(state.snapTs);
+    vabClouded = true;
+    setCloudStatus('已同步云端（VAB ' + vabUniqueCount() + ' 人）', 'ok');
+    refreshVabStatus();
   }catch(e){ setCloudStatus('云端同步异常：'+(e&&e.message||'网络错误'), 'err'); }
 }
 async function clearOrdersInCloud(){
@@ -998,8 +1038,18 @@ function persistVab(){
     }
     console.warn('VAB 保存失败', e);
   }
-  // VAB 名单同样属于「整包快照」的一部分：变更后打脏标记，随订单一起上云（修复「换机后 VAB 名单为 0」）
-  markCloudDirty();
+  // VAB 名单同样属于「整包快照」的一部分：变更后打脏标记，随订单一起上云（修复「换机后 VAB 名单为 0」）。
+  // 本机无订单时 markCloudDirty 的「无订单不推送」保护会跳过 → 改走 saveVabOnlyToCloud 单独上云（2026-10-24），
+  // 避免「新设备先传 VAB、后传订单」期间 VAB 长期仅存本机。
+  vabClouded = false; refreshVabStatus();
+  if(Array.isArray(state.orders) && state.orders.length > 0){ markCloudDirty(); }
+  else { queueVabCloudSave(); }
+}
+// VAB 单独上云防抖（与订单保存的 _cloudSaveTimer 相互独立，避免互相取消）
+let _vabCloudTimer = null;
+function queueVabCloudSave(){
+  if(_vabCloudTimer) clearTimeout(_vabCloudTimer);
+  _vabCloudTimer = setTimeout(saveVabOnlyToCloud, 800);
 }
 // 用完整行对象集合刷新 VAB 状态：vabRows(展示全部字段) / vabList(会员号) / vabSet(匹配) 三者同步
 function setVabRows(rows){
@@ -1040,7 +1090,7 @@ function refreshVabStatus(){
     meta.textContent = `⚠ 示例VAB（${vabUniqueCount()}人）· 请上传真实会员表，上传后即为默认`;
     meta.className = 'chip warn';
   }else{
-    meta.textContent = `✔ 已保存为默认（${vabUniqueCount()}人）· 重新上传/编辑可覆盖更新`;
+    meta.textContent = `✔ 已保存为默认（${vabUniqueCount()}人）· 重新上传/编辑可覆盖更新 · ` + (vabClouded ? '已同步云端' : '暂仅保存在本机');
     meta.className = 'chip ok';
   }
   renderVabList(); // 同步刷新页面上的会员清单
