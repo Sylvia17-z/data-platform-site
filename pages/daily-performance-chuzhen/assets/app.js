@@ -563,6 +563,13 @@ function setCloudStatus(text, kind){
   el.textContent = text || '';
   el.className = 'file-meta' + (kind ? ' cloud-' + kind : '');
 }
+// 登录态下显示「从云端恢复 / 推送到云端」手动按钮（2026-10-24）：给用户显式控制权，
+// 无论自动裁决结果如何都能一键补齐（手机端刷新后仍无数据 → 点「从云端恢复」；PC 登录后未入库 → 点「推送到云端」）。
+function showCloudActions(show){
+  const r = $('cloud-restore'), p = $('cloud-push');
+  if(r) r.style.display = show ? '' : 'none';
+  if(p) p.style.display = show ? '' : 'none';
+}
 function applyOrdersObj(obj){
   if(obj && Array.isArray(obj.orders)){
     state.orders = obj.orders.map(r => {
@@ -699,6 +706,7 @@ function monthOfOrders(orders){
 
 async function syncFromCloud(opts){
   const silent = !!(opts && opts.silent);   // 后台轮询触发：不弹恢复提示
+  const forcePull = !!(opts && opts.forcePull); // 「从云端恢复」手动按钮：忽略本地裁决，强制采用云端
   const cloud = getCloud();
   if(!cloud){ setCloudStatus('云端组件加载中…（多源回退）请稍候', 'warn'); return; }
   let session = null;
@@ -709,11 +717,13 @@ async function syncFromCloud(opts){
   }
   if(!session){
     _cloudUser = null;
+    showCloudActions(false);
     // 不自动弹窗（避免每次刷新都打断）；把状态条变为可点击的登录入口，用户需要时再登录
     setCloudStatus('未登录 · 未同步云端', 'warn');
     return;
   }
   _cloudUser = session.user || null;
+  showCloudActions(true);       // 已登录 → 显示手动「从云端恢复 / 推送到云端」按钮
   backupAuthSession(session);   // 保持登录：每次拿到有效会话都刷新本地备份
   startCloudKeepalive();        // 页面打开期间定时续期，避免长期闲置后 refreshToken 失效
   setCloudStatus('已登录 · 同步云端', 'ok');
@@ -751,7 +761,11 @@ async function syncFromCloud(opts){
       if(!localTs || localEmpty || cloudTs > localTs) verdict = 'cloud';
       else if(cloudTs < localTs) verdict = 'local';
       else verdict = (cloudCnt === localCnt) ? 'same' : (cloudCnt > localCnt ? 'cloud' : 'local');
-      if(verdict === 'cloud' && localMon && cloudMon && cloudMon < localMon) verdict = 'local';
+      // 「从云端恢复」手动按钮：跳过本地裁决，强制以云端为准（换设备/数据缺失时一键拉全量）
+      if(forcePull) verdict = 'cloud';
+      // 安全网：云端订单月份落后于本地 → 判定云端为陈旧快照，保留本地（防止旧快照把新数据倒退）；
+      // 手动「从云端恢复」时用户意图明确，不触发该回退。
+      if(!forcePull && verdict === 'cloud' && localMon && cloudMon && cloudMon < localMon) verdict = 'local';
       // 升级迁移（2026-10-16）：旧版快照不含 vab/targets/manual 字段，且这些老机器 state.snapTs 恒为 0，
       // 会让「本机有 VAB、云端没有」的机器误判为采用云端 → VAB 永远推不上去（另一台机器始终显示 0 人）。
       // 规则：本机无变更记录 + 云端完全没有 VAB 数据 + 本机有 VAB → 改判「本地优先推送」，把 VAB/月目标补进云端。
@@ -776,15 +790,17 @@ async function syncFromCloud(opts){
         try{ refreshVabStatus(); }catch(e){}
         setCloudStatus('已同步云端（' + cloudCnt + ' 条 · VAB ' + (state.vabList || []).length + ' 人）', 'ok');
       }else{
-        // 本地更新 → 覆盖云端，避免云端长期停留在旧数据导致下次刷新又倒退
-        if(localCnt > 0){
-          await saveOrdersToCloud(true);
+        // 本地更新 → 覆盖云端，避免云端长期停留在旧数据导致下次刷新又倒退。
+        // 2026-10-24 修复：不再仅看 orders，hist 仅/VAB 仅 的本地数据也一并推上去（见 pushLocalSnapshotToCloud）。
+        if(localCnt > 0 || (state.histOrders||[]).length > 0 || (state.vabList||[]).length > 0){
+          await pushLocalSnapshotToCloud();
         }else{
           setCloudStatus('已同步云端（' + cloudCnt + ' 条）', 'ok');
         }
       }
-    }else if(state.orders.length > 0){
-      await saveOrdersToCloud(true);
+    }else if((Array.isArray(state.orders) && state.orders.length > 0) || (state.histOrders||[]).length > 0 || (state.vabList||[]).length > 0){
+      // 云端尚无任何记录（首次登录）→ 把本机已有数据（订单/hist/VAB 任一）推上去，杜绝「仅 hist/VAB 设备登录后永不入库」
+      await pushLocalSnapshotToCloud();
     }else{
       setCloudStatus('已登录 · 云端暂无数据', 'ok');
     }
@@ -941,6 +957,19 @@ async function saveVabOnlyToCloud(){
     setCloudStatus('已同步云端（VAB ' + vabUniqueCount() + ' 人）', 'ok');
     refreshVabStatus();
   }catch(e){ setCloudStatus('云端同步异常：'+(e&&e.message||'网络错误'), 'err'); }
+}
+// 登录态下把「本机已有但云端可能缺失」的数据推上去（2026-10-24 修复根因）：
+// 旧逻辑仅当 state.orders 非空时才上传，导致「只导入了 hist 明细 / 只导入了 VAB」的设备在登录云端后
+// 永远走 else 分支报「云端暂无数据」，数据从不上云，换设备/手机端永远拉不到。
+// 优先级：有订单 → 整包上传（含 hist/VAB）；否则 有 hist → 仅明细上云；否则 有 VAB → 仅 VAB 上云。
+async function pushLocalSnapshotToCloud(){
+  if(Array.isArray(state.orders) && state.orders.length > 0){ await saveOrdersToCloud(true); return; }
+  if((state.histOrders||[]).length > 0){
+    if(state.histGz && state.histGz.gz){ await saveHistOnlyToCloud(state.histGz.gz); }
+    else { await persistHist(); } // 本机有明文明细但无 gz 缓存 → 重新压缩并上云
+    return;
+  }
+  if((state.vabList||[]).length > 0){ await saveVabOnlyToCloud(); return; }
 }
 async function clearOrdersInCloud(){
   const cloud = getCloud(); if(!cloud) return;
@@ -4679,6 +4708,22 @@ function initApp(){
   // ---- 云端：登录/改密/退出已统一至整站登录页与账号面板，页内不再提供登录入口 ----
   // 首次进入：已登录则拉取云端订单；未登录则把状态条变为登录入口（不强制弹窗打断）
   syncFromCloud();
+  // 手动云端操作按钮（2026-10-24）：给用户显式控制权，绕过自动裁决兜底
+  const cloudRestoreBtn = $('cloud-restore');
+  if(cloudRestoreBtn) cloudRestoreBtn.addEventListener('click', () => {
+    if(!_cloudUser){ showToast('请先登录云端', 'warn'); return; }
+    showToast('正在从云端恢复…', 'info');
+    syncFromCloud({ forcePull: true, silent: false });
+  });
+  const cloudPushBtn = $('cloud-push');
+  if(cloudPushBtn) cloudPushBtn.addEventListener('click', () => {
+    if(!_cloudUser){ showToast('请先登录云端', 'warn'); return; }
+    const hasLocal = (Array.isArray(state.orders) && state.orders.length > 0)
+      || (state.histOrders||[]).length > 0 || (state.vabList||[]).length > 0;
+    if(!hasLocal){ showToast('本机暂无数据可推送', 'warn'); return; }
+    showToast('正在推送到云端…', 'info');
+    pushLocalSnapshotToCloud();
+  });
   // SDK 多源回退晚于首帧加载完成时：加载成功→重试云端同步刷新状态条；全部失败→明确提示
   document.addEventListener('cloud-sdk-ready', () => { if(!_cloudUser) syncFromCloud(); });
   document.addEventListener('cloud-sdk-failed', () => { if(!_cloudUser) setCloudStatus('云端组件加载失败 · 请检查网络后刷新重试（数据仍保存在本机）', 'err'); });
