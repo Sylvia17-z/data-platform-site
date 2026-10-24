@@ -79,11 +79,13 @@ table.tbl td.editable:hover{background:#fff}
 table.tbl td.editable:focus{background:#fff;color:var(--ink);outline:none;box-shadow:none}
 
 /* ===== 报表顶部说明区 ===== */
-/* 2026-10-23：全站统一不显示口径/统计说明等解释性文字（口径说明块不在界面呈现；
-   导出 PNG 时由 exportNodePng 克隆节点强制 display:block 恢复，与 Excel 导出口径一致） */
-.report-note{display:none;}
-.report-note.export-keep{display:block;background:var(--light-blue);border:1px solid var(--navy-100);border-radius:10px;
-  padding:12px 16px;margin-bottom:14px;color:var(--navy);font-size:13px;line-height:1.7;white-space:pre-line}
+/* 2026-10-24：周客量业绩统计的「统计说明」改为页面常驻显示（靠左对齐），
+   与导出 PNG / Excel 中的说明保持一致（导出克隆仍会强制 display:block） */
+.report-note{display:block;background:var(--light-blue);border:1px solid var(--navy-100);border-radius:10px;
+  padding:12px 16px;margin-bottom:14px;color:var(--navy);font-size:13px;line-height:1.7;
+  white-space:pre-line;text-align:left}
+.report-note:empty{display:none}
+.report-note.export-keep{display:block}
 
 /* ===== KPI 总览 ===== */
 .kpi-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:18px}
@@ -343,7 +345,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
   var XLSX = window.XLSX, JSZip = window.JSZip, htmlToImage = window.htmlToImage;
 
   // 统计说明（三报表平台：页面与导出件共用）
-  var NOTE_TEXT = "统计说明：数据来源 领健系统每周一至周六数据（截止时间：{CUT} 12:00）\n1、初诊客量~周区间内到访类型为初诊 复诊客量~周区间内到访类型为复诊/疗程内/再消费/复查/为空\n2、成交率 现款支付不为0并且不是退款的消费客量 占总客量的比例\n3、如果一个客户 周一来体检 周三来解读报告 计算客量为1";
+  var NOTE_TEXT = "统计说明：数据来源 领健系统每周一至周六数据（截止时间：{CUT}）\n1、初诊客量~周区间内到访类型为初诊 复诊客量~周区间内到访类型为复诊/疗程内/再消费/复查/为空\n2、成交率 现款支付不为0并且不是退款的消费客量 占总客量的比例\n3、如果一个客户 周一来体检 周三来解读报告 计算客量为1";
 
   // 预约量统计模块专用统计说明（按所选统计日，不分周区间）
   var NEXT_NOTE_TEXT = "统计说明：\n1、数据来源 领健系统预约列表\n2、初诊预约客量~预约类型为初诊 复诊预约客量~预约类型为复诊/疗程内/再消费/复查/为空";
