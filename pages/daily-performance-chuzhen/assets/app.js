@@ -4564,9 +4564,42 @@ function updateEcSubTitleColspan(){
   if(titleTh) titleTh.colSpan = 4 + visible;
 }
 
+// ⑤ 页面 DOM/CSS 兜底：index.html 万一被 CDN/浏览器缓存成旧版本（缺按钮或宽度规则），
+// 由 app.js（带 Date.now() 穿透）补齐，保证新旧 HTML 混载时渲染依旧正确。幂等，可重复调用。
+function ensureEcSubDom(){
+  const panel = $('panel-ec-sub');
+  if(!panel) return;
+  if(!document.getElementById('ec-sub-fallback-style')){
+    const st = document.createElement('style');
+    st.id = 'ec-sub-fallback-style';
+    st.textContent = 'table.report#ec-sub-table{width:auto;}'
+      + ' table.report .type-cell{background:var(--c-blue-sub);color:#002060;font-weight:600;font-size:12px;}'
+      + ' table.report tr.ec-sub-cum td{background:#f7f9fd;}'
+      + ' table.report tr.ec-sub-cum td.type-cell{background:#dbe5f7;}';
+    document.head.appendChild(st);
+  }
+  if($('ec-sub-batch-toggle') && $('ec-sub-expand-all')) return;
+  const bar = panel.querySelector('.row .row') || panel.querySelector('.row');
+  if(!bar) return;
+  if(!$('ec-sub-batch-toggle')){
+    const b = document.createElement('button');
+    b.className = 'btn'; b.id = 'ec-sub-batch-toggle';
+    b.title = '批量选择要隐藏的日期列'; b.textContent = '☑ 批量';
+    bar.insertBefore(b, bar.firstChild);
+  }
+  if(!$('ec-sub-expand-all')){
+    const b = document.createElement('button');
+    b.className = 'btn'; b.id = 'ec-sub-expand-all';
+    b.title = '展开所有日期列'; b.textContent = '+展开';
+    const batch = $('ec-sub-batch-toggle');
+    bar.insertBefore(b, batch ? batch.nextSibling : bar.firstChild);
+  }
+}
+
 // ⑤ 日期列交互（事件委托，只绑定一次）：单列收起、「☑ 批量」多选隐藏、「+展开」
 // 隐藏列直接不渲染（避免幽灵列占宽产生空白），故所有操作都改 ecSubHidden 后重渲染
 function bindEcSubControls(){
+  ensureEcSubDom();
   const table = $('ec-sub-table');
   if(!table || table.dataset.bound) return;
   table.dataset.bound = '1';
