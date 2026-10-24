@@ -4391,8 +4391,9 @@ const EC_SUB_OV_KEYS = ['品牌组-其他','活动组-活动支持','电商组',
 function computeEcSubReport(){
   const cutoff = state.cutoffDate ? new Date(state.cutoffDate) : new Date();
   const dateStr = fmtDate(cutoff);
-  const empty = { dateStr, rows: [], totalToday: 0, totalMonth: 0, hasData: false };
-  if(!Array.isArray(state.orders) || !state.orders.length) return empty;
+  const dateList = generateDateRange(cutoff); // 当月 1 日 ~ 截止日，每天一列
+  const res = { dateStr, dateList, rows: [], totalMonth: 0, totalCount: 0, totalDays: {}, hasOrders: Array.isArray(state.orders) && state.orders.length > 0 };
+  if(!res.hasOrders) return res;
 
   const CC = r => (r.channelClass || '').trim();
   const L1 = r => (r.channelL1 || '').trim();
@@ -4417,40 +4418,36 @@ function computeEcSubReport(){
   const cy = cutoff.getFullYear(), cm = cutoff.getMonth();
   const monthSet = ecOrders.filter(r => r.payTime
     && r.payTime.getFullYear() === cy && r.payTime.getMonth() === cm && inDateRange(r.payTime, cutoff));
-  const todaySet = monthSet.filter(r => fmtDate(r.payTime) === dateStr);
 
+  // 桶：7 个平台先建好（保证「没有数据也显示 0」），数据中出现的其他二级渠道再追加
   const map = new Map();
-  const bucket = l2 => {
-    if(!map.has(l2)) map.set(l2, { l2, today: 0, month: 0, cat: '', l1: '' });
-    return map.get(l2);
-  };
+  const newBucket = () => ({ month: 0, cnt: new Set(), days: new Map() });
+  EC_SUB_ORDER.forEach(l2 => map.set(l2, newBucket()));
   monthSet.forEach(r => {
-    const b = bucket(L2(r) || '（未分类）');
-    b.month += Number(r.cashPay) || 0;
-    if(!b.cat && CC(r)) b.cat = CC(r);
-    if(!b.l1 && L1(r)) b.l1 = L1(r);
-  });
-  todaySet.forEach(r => {
-    const b = bucket(L2(r) || '（未分类）');
-    b.today += Number(r.cashPay) || 0;
+    const l2 = L2(r) || '（未分类）';
+    if(!map.has(l2)) map.set(l2, newBucket());
+    const b = map.get(l2);
+    const amt = Number(r.cashPay) || 0;
+    b.month += amt;
+    const ck = mktFirstClientKey(r);
+    if(ck && ck !== 'name:') b.cnt.add(ck);           // 客量：去重客户数
+    if(r.payTime){ const d = fmtDate(r.payTime); b.days.set(d, (b.days.get(d) || 0) + amt); }
   });
 
-  const rank = l2 => { const i = EC_SUB_ORDER.indexOf(l2); return i < 0 ? 999 : i; };
-  const rows = [...map.values()].sort((a,b) => {
-    const d = rank(a.l2) - rank(b.l2);
-    return d !== 0 ? d : a.l2.localeCompare(b.l2, 'zh');
-  }).map(b => ({
-    platform: EC_SUB_PLATFORMS[b.l2] || '—',
-    cat: b.cat || '营销部',
-    l1: b.l1 || '电商组',
-    l2: b.l2,
-    today: b.today,
-    month: b.month,
-  }));
+  const ordered = EC_SUB_ORDER.slice();
+  [...map.keys()].forEach(k => { if(!ordered.includes(k)) ordered.push(k); });
+  res.rows = ordered.map(l2 => {
+    const b = map.get(l2) || newBucket();
+    const days = {};
+    dateList.forEach(d => { days[d] = b.days.get(d) || 0; });
+    return { l2, platform: EC_SUB_PLATFORMS[l2] || '—', month: b.month, cnt: b.cnt.size, days };
+  });
 
-  const totalToday = rows.reduce((a,r) => a + r.today, 0);
-  const totalMonth = rows.reduce((a,r) => a + r.month, 0);
-  return { dateStr, rows, totalToday, totalMonth, hasData: rows.length > 0 };
+  res.totalDays = {};
+  dateList.forEach(d => { res.totalDays[d] = res.rows.reduce((a,r) => a + (r.days[d] || 0), 0); });
+  res.totalMonth = res.rows.reduce((a,r) => a + r.month, 0);
+  res.totalCount = res.rows.reduce((a,r) => a + r.cnt, 0);
+  return res;
 }
 
 function renderEcSubReport(){
@@ -4460,101 +4457,119 @@ function renderEcSubReport(){
   const rep = computeEcSubReport();
   const cutoff = state.cutoffDate ? new Date(state.cutoffDate) : new Date();
   const monthStr = (cutoff.getMonth()+1) + '月' + cutoff.getDate() + '日';
+  const dateList = rep.dateList || [];
+  const nCols = 4 + dateList.length;
 
-  if(!state.results){
-    head.innerHTML = '<tr><th colspan="6" class="sub-head" style="background:#fff;color:var(--c-text);">请先在"① 数据导入"上传订单表</th></tr>';
-    body.innerHTML = '';
-    return;
-  }
-  if(!rep.hasData){
-    head.innerHTML = '<tr><th colspan="6" class="sub-head" style="background:#fff;color:var(--c-text);">当前数据中无「电商组」初诊业绩（一级渠道=电商组 的初诊客户消费）</th></tr>';
+  if(!state.results || !rep.hasOrders){
+    const msg = !state.results ? '请先在"① 数据导入"上传订单表' : '当前数据中无「电商组」初诊业绩';
+    head.innerHTML = `<tr><th colspan="${nCols}" class="sub-head" style="background:#fff;color:var(--c-text);">${msg}</th></tr>`;
     body.innerHTML = '';
     return;
   }
 
   head.innerHTML = `
-    <tr><th colspan="6" class="title-cell">电商组各二级渠道业绩（初诊业绩，截止${monthStr}）</th></tr>
+    <tr><th colspan="${nCols}" class="title-cell">电商组各二级渠道业绩（初诊业绩，截止${monthStr}）</th></tr>
     <tr>
       <th class="sub-head">平台名称</th>
-      <th class="sub-head">渠道分类</th>
-      <th class="sub-head">一级渠道</th>
       <th class="sub-head">二级渠道</th>
-      <th class="sub-head">业绩类型</th>
-      <th class="sub-head">初诊业绩<br>(单位：元)</th>
+      <th class="sub-head">月累计<br>(单位：元)<span class="copy-col" data-col="month" title="复制月累计整列">复制</span></th>
+      <th class="sub-head">客量<br>(人)<span class="copy-col" data-col="cnt" title="复制客量整列">复制</span></th>
+      ${dateList.map((d,i)=>{
+        const dt = new Date(d);
+        return `<th class="sub-head daily-col" data-date="${d}" data-idx="${i}" title="${dt.getMonth()+1}月${dt.getDate()}日">${dt.getMonth()+1}月${dt.getDate()}日<span class="copy-col" data-col="d:${d}" title="复制该日期整列数据">复制</span></th>`;
+      }).join('')}
     </tr>`;
 
   let html = '';
   rep.rows.forEach(r => {
     html += `<tr>
-      <td rowspan="2" class="cat">${esc(r.platform)}</td>
-      <td rowspan="2">${esc(r.cat)}</td>
-      <td rowspan="2">${esc(r.l1)}</td>
-      <td rowspan="2">${esc(r.l2)}</td>
-      <td>当日数据</td>
-      <td class="num">${fmt(r.today)}</td>
-    </tr>
-    <tr>
-      <td>本月累计</td>
-      <td class="num">${fmt(r.month)}</td>
+      <td class="cat">${esc(r.platform)}</td>
+      <td>${esc(r.l2)}</td>
+      <td class="num" data-col="month" data-val="${r.month}">${fmt(r.month)}</td>
+      <td class="num" data-col="cnt" data-val="${r.cnt}">${r.cnt}</td>
+      ${dateList.map((d,i)=>`<td class="num daily-col-${i}" data-idx="${i}" data-date="${d}" data-col="d:${d}" data-val="${r.days[d] || 0}">${fmt(r.days[d] || 0)}</td>`).join('')}
     </tr>`;
   });
-  // 合计行（与 ④ 门店业绩一致）
-  html += `<tr class="row-orange" style="font-weight:700;font-size:15px;">
-      <td colspan="4" class="cat">合计</td>
-      <td>当日数据</td>
-      <td class="num">${fmt(rep.totalToday)}</td>
-    </tr>
-    <tr class="row-orange" style="font-weight:700;font-size:15px;">
-      <td colspan="4"></td>
-      <td>本月累计</td>
-      <td class="num">${fmt(rep.totalMonth)}</td>
+  // 合计行（与 ④ 门店业绩一致）；data-total 用于「单列复制」时跳过合计，避免粘贴后重复汇总
+  html += `<tr class="row-orange" data-total="1" style="font-weight:700;font-size:15px;">
+      <td colspan="2" class="cat">合计</td>
+      <td class="num" data-col="month" data-val="${rep.totalMonth}">${fmt(rep.totalMonth)}</td>
+      <td class="num" data-col="cnt" data-val="${rep.totalCount}">${rep.totalCount}</td>
+      ${dateList.map((d,i)=>`<td class="num" data-idx="${i}" data-date="${d}" data-col="d:${d}" data-val="${rep.totalDays[d] || 0}">${fmt(rep.totalDays[d] || 0)}</td>`).join('')}
     </tr>`;
   body.innerHTML = html;
+
+  // 列宽：前 4 列固定像素（内容更长时由 auto 布局自动撑开），每日列与 ③ 主表一致 90px
+  table.querySelectorAll('colgroup').forEach(c=>c.remove());
+  const cg = document.createElement('colgroup');
+  const addCol = w => { const c = document.createElement('col'); c.style.width = w; cg.appendChild(c); };
+  addCol('200px'); addCol('120px'); addCol('110px'); addCol('70px');
+  dateList.forEach(()=>addCol(DAILY_COL_PX + 'px'));
+  table.insertBefore(cg, table.firstChild);
+
+  // 单列复制（月累计 / 客量 / 每日列）
+  head.querySelectorAll('.copy-col').forEach(btn=>{
+    btn.addEventListener('click', e => { e.stopPropagation(); copyEcSubColumn(btn.dataset.col); });
+  });
 }
 
-// ⑤ 导出网格：每个二级渠道 2 行（当日数据 / 本月累计），A~D 纵向合并；末尾合计行
+// 复制 ⑤ 报表的某一整列（月累计 / 客量 / 某个日期）：读取单元格 data-val 原始数值
+// 只取各平台明细行，跳过末尾「合计」行（避免粘贴到表格后重复汇总）
+// 输出走 fmtPlain（无千分位、无强制小数），与 ③ 主表 copyDailyColumn 一致，粘贴进 Excel 即为数值
+function copyEcSubColumn(colKey){
+  const body = $('ec-sub-body');
+  if(!body) return;
+  const tds = [...body.querySelectorAll(`tr:not([data-total]) td[data-col="${colKey}"]`)];
+  if(!tds.length){ showToast('该列暂无可复制数据', 'err', 1800); return; }
+  const vals = tds.map(td => {
+    const raw = td.dataset.val;
+    return raw !== undefined ? fmtPlain(raw) : (td.textContent || '').replace(/,/g, '').trim();
+  });
+  copyTextToClipboard(vals.join('\n')).then(ok=>{
+    showToast(ok ? `已复制该列 ${vals.length} 行` : '复制失败，请手动选择复制', ok ? 'ok' : 'err', 2200);
+  });
+}
+
+// ⑤ 导出网格：平台名称 | 二级渠道 | 月累计 | 客量 | 每日列；末尾合计行（与线上显示一致）
 function buildEcSubGrid(){
   const rep = computeEcSubReport();
   const cutoff = state.cutoffDate ? new Date(state.cutoffDate) : new Date();
   const monthStr = (cutoff.getMonth()+1) + '月' + cutoff.getDate() + '日';
-  const nCols = 6;
+  const dateList = rep.dateList || [];
+  const nCols = 4 + dateList.length;
   const rows = [];
   const merges = [];
   rows.push(Array.from({length:nCols}, () => null));
   rows[0][0] = cell('电商组各二级渠道业绩（初诊业绩，截止'+monthStr+'）', 's', 'title');
   merges.push({r:0, c:0, r2:0, c2:nCols-1});
   rows.push(Array.from({length:nCols}, () => null));
-  ['平台名称','渠道分类','一级渠道','二级渠道','业绩类型','初诊业绩\n(单位：元)'].forEach((h,i)=>{ rows[1][i] = cell(h, 's', 'subhead'); });
+  rows[1][0] = cell('平台名称', 's', 'subhead');
+  rows[1][1] = cell('二级渠道', 's', 'subhead');
+  rows[1][2] = cell('月累计\n(单位：元)', 's', 'subhead');
+  rows[1][3] = cell('客量\n(人)', 's', 'subhead');
+  dateList.forEach((d,k)=>{ const dt = new Date(d); rows[1][4+k] = cell((dt.getMonth()+1)+'月'+dt.getDate()+'日', 's', 'subhead'); });
 
-  let r = 2;
   rep.rows.forEach(row => {
     const a = Array.from({length:nCols}, () => null);
     a[0] = cell(row.platform, 's', 'cat');
-    a[1] = cell(row.cat, 's', 'cat');
-    a[2] = cell(row.l1, 's', 'cat');
-    a[3] = cell(row.l2, 's', 'cat');
-    a[4] = cell('当日数据', 's', 'cat');
-    a[5] = cell(row.today, 'n', 'num');
+    a[1] = cell(row.l2, 's', 'cat');
+    a[2] = cell(row.month, 'n', 'num');
+    a[3] = cell(row.cnt, 'n', 'target');
+    dateList.forEach((d,k)=>{ a[4+k] = cell(row.days[d] || 0, 'n', 'num'); });
     rows.push(a);
-    for(let c=0;c<4;c++) merges.push({r, c, r2:r+1, c2:c});
-    const b = Array.from({length:nCols}, () => null);
-    b[4] = cell('本月累计', 's', 'cat');
-    b[5] = cell(row.month, 'n', 'num');
-    rows.push(b);
-    r += 2;
   });
   // 合计行
-  const t1 = Array.from({length:nCols}, () => null);
-  t1[0] = cell('合计', 's', 'orange');
-  t1[4] = cell('当日数据', 's', 'orange');
-  t1[5] = cell(rep.totalToday, 'n', 'orange');
-  rows.push(t1); merges.push({r, c:0, r2:r, c2:3}); r++;
-  const t2 = Array.from({length:nCols}, () => null);
-  t2[4] = cell('本月累计', 's', 'orange');
-  t2[5] = cell(rep.totalMonth, 'n', 'orange');
-  rows.push(t2); r++;
+  const t = Array.from({length:nCols}, () => null);
+  t[0] = cell('合计', 's', 'orange');
+  t[1] = cell('', 's', 'orange');
+  t[2] = cell(rep.totalMonth, 'n', 'orange');
+  t[3] = cell(rep.totalCount, 'n', 'orange');
+  dateList.forEach((d,k)=>{ t[4+k] = cell(rep.totalDays[d] || 0, 'n', 'orange'); });
+  rows.push(t);
 
-  return { rows, merges, colWidths:[24, 12, 12, 20, 14, 16], hiddenCols:[] };
+  const colWidths = [26, 20, 13, 8];
+  dateList.forEach(()=>colWidths.push(11));
+  return { rows, merges, colWidths, hiddenCols:[] };
 }
 
 async function exportEcSubXlsx(){
@@ -4576,6 +4591,7 @@ async function exportEcSubPng(){
   const holder = document.createElement('div');
   holder.style.cssText = 'position:absolute;left:-99999px;top:0;width:auto;background:#fff;z-index:-1;';
   const clone = table.cloneNode(true);
+  clone.querySelectorAll('.copy-col').forEach(n => n.remove()); // 图片不含「复制」按钮
   clone.style.width = (table.offsetWidth || 0) + 'px';
   clone.style.margin = '0';
   holder.appendChild(clone);
