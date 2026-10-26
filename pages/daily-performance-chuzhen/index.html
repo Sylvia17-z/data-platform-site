@@ -270,6 +270,9 @@
   table.report tr.ec-sub-cum td.type-cell{background:#dbe5f7;}
   /* ⑤ 表格宽度跟随内容（隐藏日期列不渲染，避免幽灵列把表格撑出空白） */
   table.report#ec-sub-table{width:auto;}
+  /* ⑤ 每日期分组表头（colspan=2）与客量/金额子列内的复制键 */
+  table.report th.date-group{background:var(--c-blue-sub);color:#002060;text-align:center;font-weight:600;font-size:12px;}
+  table.report th.sub-head .copy-col{font-size:9.5px;line-height:1.15;margin-top:2px;}
 
   /* 业绩报表字体规范：除标题行外全部黑色 + 微软雅黑；合计行大两号加粗（v20260916） */
   table.report, table.report th, table.report td,
