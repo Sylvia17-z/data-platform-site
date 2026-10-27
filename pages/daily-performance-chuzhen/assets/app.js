@@ -3757,14 +3757,27 @@ async function onFileHistory(input){
       showToast('未读取到有效数据行，请检查文件内容', 'warn', 4200);
       return;
     }
-    const { rows: merged, added, replaced } = mergeHistOrders(state.histOrders, validRows);
-    state.histOrders = merged;
-    persistHist(); // 内部刷新 histTs 并落盘（localStorage + IndexedDB + 壳窗口桥接）
-    invalidateMktKeyCaches();
-    refreshHistMeta();
-    recompute();
+    // 导入方式：追加（默认，合并去重）/ 覆盖（清空后替换）
+    const modeEl = $('hist-import-mode');
+    const mode = (modeEl && modeEl.value === 'overwrite') ? 'overwrite' : 'append';
     const fileInfo = files.length > 1 ? `${files.length} 个文件` : '1 个文件';
-    showToast(`近一年消费明细追加成功（${fileInfo} / 本次 ${validRows.length} 行：新增 ${added}、覆盖 ${replaced}），累计 ${state.histOrders.length} 行。「营销部顾客一年内无消费记录 → 初诊客户」规则已启用`, 'ok', 6000);
+    if(mode === 'overwrite'){
+      if(state.histOrders.length && !window.confirm(`覆盖导入将清空当前已导入的 ${state.histOrders.length} 行近一年消费明细，并替换为本文件内容（${validRows.length} 行）。确定继续？`)) return;
+      state.histOrders = validRows;
+      persistHist();
+      invalidateMktKeyCaches();
+      refreshHistMeta();
+      recompute();
+      showToast(`近一年消费明细覆盖导入成功（${fileInfo} / ${validRows.length} 行，已替换原明细）。「营销部顾客一年内无消费记录 → 初诊客户」规则已启用`, 'ok', 6000);
+    }else{
+      const { rows: merged, added, replaced } = mergeHistOrders(state.histOrders, validRows);
+      state.histOrders = merged;
+      persistHist(); // 内部刷新 histTs 并落盘（localStorage + IndexedDB + 壳窗口桥接）
+      invalidateMktKeyCaches();
+      refreshHistMeta();
+      recompute();
+      showToast(`近一年消费明细追加成功（${fileInfo} / 本次 ${validRows.length} 行：新增 ${added}、覆盖 ${replaced}），累计 ${state.histOrders.length} 行。「营销部顾客一年内无消费记录 → 初诊客户」规则已启用`, 'ok', 6000);
+    }
   }catch(e){
     console.error(e);
     showToast('历史消费明细解析失败：'+e.message, 'err');
@@ -5156,6 +5169,20 @@ function initApp(){
     if(fh && !fh.multiple) fh.multiple = true;
     const lb = document.querySelector('label[for="file-history"]');
     if(lb && lb.textContent.indexOf('追加') < 0) lb.textContent = '📅 上传/追加近一年消费明细';
+    // 兼容旧缓存 HTML：补齐「覆盖导入 / 追加导入」方式选择器（缺失时动态插入）
+    if(!$('hist-import-mode') && fh){
+      const seg = fh.closest('.dataseg');
+      if(seg){
+        const sel = document.createElement('select');
+        sel.id = 'hist-import-mode';
+        sel.className = 'select';
+        sel.title = '选择导入方式：追加导入=保留已有明细并合并去重；覆盖导入=清空已有明细后替换为本文件内容';
+        sel.innerHTML = '<option value="append" selected>追加导入（合并去重）</option><option value="overwrite">覆盖导入（清空替换）</option>';
+        const statusSeg = seg.querySelector('.seg-status');
+        if(statusSeg) seg.insertBefore(sel, statusSeg);
+        else if(lb && lb.parentNode) lb.parentNode.insertBefore(sel, lb.nextSibling);
+      }
+    }
   })();
   $('clear-hist').addEventListener('click', clearHistData);
   refreshHistMeta(); // 本地恢复后的历史明细状态文案

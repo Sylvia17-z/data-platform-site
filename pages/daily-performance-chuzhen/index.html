@@ -114,6 +114,7 @@
   }
   .panel > .dataseg:last-of-type{border-bottom:none;padding-bottom:10px;}
   .dataseg .btn{padding:5px 12px;font-size:12.5px;}
+  .dataseg .select{padding:5px 8px;font-size:12px;height:30px;border-radius:8px;}
   .dataseg .file-meta{font-size:11.5px;}
   .dataseg .seg-status{display:flex;align-items:center;gap:10px;flex-wrap:wrap;min-width:0;}
   @media (min-width:721px){
@@ -506,11 +507,15 @@
       </span>
     </div>
     <!-- 近一年消费明细（2026-10-16 新增）：「营销部顾客一年内无消费记录 → 视为初诊客户」规则数据源 -->
-    <!-- 2026-10-27：支持追加上传（可一次多选多个文件；按收款单号去重，同一单号新数据覆盖旧数据） -->
+    <!-- 2026-10-27：支持「追加导入 / 覆盖导入」模式选择；可一次多选多个文件；追加以「收款单号」去重（同单号新覆盖旧） -->
     <div class="dataseg">
       <span class="seg-label">历史明细</span>
       <input type="file" id="file-history" accept=".xlsx,.xls" multiple hidden />
-      <label for="file-history" class="btn" title="上传/追加最近一年的消费明细（订单项目收退款表格式，可一次选择多个文件）——用于判定「营销部顾客一年内无消费记录 → 视为初诊客户」；追加时按「收款单号」去重（同一单号新数据覆盖旧数据），该数据不计入业绩金额，仅本地保存">📅 上传/追加近一年消费明细</label>
+      <label for="file-history" class="btn" title="上传最近一年的消费明细（订单项目收退款表格式，可一次选择多个文件）——用于判定「营销部顾客一年内无消费记录 → 视为初诊客户」；导入方式见右侧选择框，该数据不计入业绩金额，仅本地保存">📅 上传/追加近一年消费明细</label>
+      <select id="hist-import-mode" class="select" title="选择导入方式：追加导入=保留已有明细并合并去重；覆盖导入=清空已有明细后替换为本文件内容">
+        <option value="append" selected>追加导入（合并去重）</option>
+        <option value="overwrite">覆盖导入（清空替换）</option>
+      </select>
       <span class="seg-status">
         <span id="hist-meta" class="file-meta">未导入（新客规则停用）</span>
         <button class="btn btn-danger" id="clear-hist" title="清除已导入的近一年消费明细并停用新客判定规则（不影响订单 / VAB 会员 / 月目标）">🗑 清除明细</button>
