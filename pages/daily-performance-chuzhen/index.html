@@ -275,6 +275,8 @@
   table.report th.daily-col:hover{background:var(--c-blue-sub);color:var(--c-text);}
   table.report.batch-mode th.daily-col{cursor:pointer;}
   table.report th.daily-col.selected{background:#ffe08a !important;color:#5c4a00;}
+  /* ⑤ 全部口径列（2026-10-27）：与初诊两列之间加分隔线，避免四列数字混淆 */
+  #ec-sub-table th.all-col, #ec-sub-table td.all-col{border-left:2px solid #c9d8f0;}
   table.report .copy-col{display:block;font-size:10.5px;line-height:1.4;color:rgba(255,255,255,.82);cursor:pointer;margin-top:3px;user-select:none;text-align:center;}
   table.report th.daily-col:hover .copy-col{color:#fff;text-decoration:underline;}
   table.report th{position:relative;}
@@ -667,6 +669,10 @@
         <button class="btn" id="export-ec-sub-xlsx">📥 导出Excel</button>
         <button class="btn btn-orange" id="export-ec-sub-png">🖼 导出图片</button>
       </div>
+    </div>
+    <div class="legend" style="margin:0 0 8px;">
+      <span><strong>初诊客量 / 初诊金额</strong> = 30 天内营销部初诊客户口径（与 ③ 电商组一致）</span>
+      <span><strong>全部客量 / 全部金额</strong> = 该二级渠道全部订单（不限初诊），渠道范围与初诊一致</span>
     </div>
     <div class="stage" id="ec-sub-stage">
       <table class="report" id="ec-sub-table">

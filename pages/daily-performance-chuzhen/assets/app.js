@@ -4739,9 +4739,10 @@ function computeEcSubReport(){
 
   // 桶：7 个平台先建好（保证「没有数据也显示 0」），数据中出现的其他二级渠道再追加
   // dayCnt：按日去重客户集合（2026-10-26 客量区分当日/累计）
+  // allAmt/allCnt：全部口径（2026-10-27 新增）——同一渠道范围但不做初诊门槛
   // ccCnt/l1Cnt：渠道分类 / 一级渠道 众数统计（2026-10-26 界面新增两列，取桶内月订单最高频非空值）
   const map = new Map();
-  const newBucket = () => ({ month: 0, cnt: new Set(), days: new Map(), dayCnt: new Map(), ccCnt: new Map(), l1Cnt: new Map() });
+  const newBucket = () => ({ month: 0, cnt: new Set(), days: new Map(), dayCnt: new Map(), ccCnt: new Map(), l1Cnt: new Map(), allAmt: new Map(), allCnt: new Map() });
   EC_SUB_ORDER.forEach(l2 => map.set(l2, newBucket()));
   const bump = (m, v) => { if(v) m.set(v, (m.get(v) || 0) + 1); };
   const topVal = m => { let bv = '—', bc = 0; m.forEach((c, v) => { if(c > bc){ bc = c; bv = v; } }); return bv; };
@@ -4765,25 +4766,62 @@ function computeEcSubReport(){
     });
   });
 
+  // 全部口径（2026-10-27 需求）：同一「电商组」渠道范围，但不做 30 天初诊门槛过滤。
+  //   范围与 ③「电商组」行一致：营销部 + 一级渠道 ∈ {电商组, 客户转介绍, 企业团检}
+  //   ∪ 营销部 + 品牌组 + 二级渠道含「线上400」 ∪ 手动报表归属=电商组（归属优先）。
+  // 按二级渠道分桶：allAmt(当日金额) / allCnt(当日去重客户集合)
+  const dateSet = new Set(dateList);
+  const isEcRange = r => {
+    const ovk = String(r.deptOverride || '').trim();
+    if(ovk) return ovk === '电商组';
+    const cc = CC(r), l1 = L1(r), l2 = L2(r);
+    if(cc === '营销部' && ['电商组', '客户转介绍', '企业团检'].includes(l1)) return true;
+    if(cc === '营销部' && l1 === '品牌组' && l2.indexOf('线上400') >= 0) return true;
+    return false;
+  };
+  (state.orders || []).forEach(r => {
+    if(!r.payTime || !isEcRange(r)) return;
+    const d = fmtDate(r.payTime);
+    if(!dateSet.has(d)) return;              // 只统计报表日期范围内（当月 1 日 ~ 截止日）
+    const l2 = L2(r) || '（未分类）';
+    if(!map.has(l2)) map.set(l2, newBucket());
+    const b = map.get(l2);
+    b.allAmt.set(d, (b.allAmt.get(d) || 0) + (Number(r.cashPay) || 0));
+    const ck = mktFirstClientKey(r);
+    if(ck && ck !== 'name:'){
+      if(!b.allCnt.has(d)) b.allCnt.set(d, new Set());
+      b.allCnt.get(d).add(ck);
+    }
+  });
+
   const ordered = EC_SUB_ORDER.slice();
-  [...map.keys()].forEach(k => { if(!ordered.includes(k)) ordered.push(k); });
-  res.rows = ordered.map(l2 => {
+  [...map.keys()].forEach(k => { if(!ordered.includes(k)) ordered.push(k); });  res.rows = ordered.map(l2 => {
     const b = map.get(l2) || newBucket();
     const days = {}, cum = {}, cntDays = {}, cumCntDays = {};
+    const allDays = {}, cumAll = {}, allCntDays = {}, cumAllCntDays = {};
     let acc = 0; const running = new Set();
+    let accAll = 0; const runningAll = new Set();
     dateList.forEach(d => {
       const v = b.days.get(d) || 0;
       days[d] = v; acc += v; cum[d] = acc;      // 月累计行：累计至该日
       cntDays[d] = b.dayCnt.has(d) ? b.dayCnt.get(d).size : 0;   // 当日客量：当日去重客户数
       if(b.dayCnt.has(d)) b.dayCnt.get(d).forEach(k => running.add(k));
       cumCntDays[d] = running.size;            // 累计客量：到该日止去重客户并集
+      // 全部口径（不限初诊）
+      const va = b.allAmt.get(d) || 0;
+      allDays[d] = va; accAll += va; cumAll[d] = accAll;
+      allCntDays[d] = b.allCnt.has(d) ? b.allCnt.get(d).size : 0;
+      if(b.allCnt.has(d)) b.allCnt.get(d).forEach(k => runningAll.add(k));
+      cumAllCntDays[d] = runningAll.size;
     });
     return { l2, platform: EC_SUB_PLATFORMS[l2] || '—', month: b.month, cnt: b.cnt.size, days, cum, cntDays, cumCntDays, dayCntMap: b.dayCnt,
+      allDays, cumAll, allCntDays, cumAllCntDays, allCntMap: b.allCnt,
       channelClass: topVal(b.ccCnt), channelL1: topVal(b.l1Cnt) };
   });
 
   res.totalDays = {}; res.totalCum = {}; res.totalCntDays = {}; res.totalCumCntDays = {};
-  let tAcc = 0;
+  res.totalAllDays = {}; res.totalAllCum = {}; res.totalAllCntDays = {}; res.totalAllCumCntDays = {};
+  let tAcc = 0, tAccAll = 0;
   dateList.forEach(d => {
     const dv = res.rows.reduce((a,r) => a + (r.days[d] || 0), 0);
     res.totalDays[d] = dv; tAcc += dv; res.totalCum[d] = tAcc;
@@ -4794,12 +4832,23 @@ function computeEcSubReport(){
       dateList.forEach(dd => { if(dd <= d && m.get(dd)) m.get(dd).forEach(k => u.add(k)); });
     });
     res.totalCumCntDays[d] = u.size;
+    // 全部口径合计
+    const dva = res.rows.reduce((a,r) => a + (r.allDays[d] || 0), 0);
+    res.totalAllDays[d] = dva; tAccAll += dva; res.totalAllCum[d] = tAccAll;
+    res.totalAllCntDays[d] = res.rows.reduce((a,r) => a + (r.allCntDays[d] || 0), 0);
+    const ua = new Set();
+    res.rows.forEach(r => {
+      const m = r.allCntMap; if(!m) return;
+      dateList.forEach(dd => { if(dd <= d && m.get(dd)) m.get(dd).forEach(k => ua.add(k)); });
+    });
+    res.totalAllCumCntDays[d] = ua.size;
   });
   res.totalMonth = res.rows.reduce((a,r) => a + r.month, 0);
   res.totalCount = res.rows.reduce((a,r) => a + r.cnt, 0);
-  // 默认可见列：最后一个「有数据」的日期；全月无数据则取最后一列
+  // 默认可见列：最后一个「有数据」的日期（初诊或全部任一有值）；全月无数据则取最后一列
   for(let i = dateList.length - 1; i >= 0; i--){
-    if((res.totalDays[dateList[i]] || 0) > 0){ res.defaultIdx = i; break; }
+    const d = dateList[i];
+    if((res.totalDays[d] || 0) > 0 || (res.totalAllDays[d] || 0) > 0){ res.defaultIdx = i; break; }
   }
   if(res.defaultIdx < 0 && dateList.length) res.defaultIdx = dateList.length - 1;
   return res;
@@ -4824,7 +4873,7 @@ function renderEcSubReport(){
   const cutoff = state.cutoffDate ? new Date(state.cutoffDate) : new Date();
   const monthStr = (cutoff.getMonth()+1) + '月' + cutoff.getDate() + '日';
   const dateList = rep.dateList || [];
-  const nCols = 5 + 2 * dateList.length;
+  const nCols = 5 + 4 * dateList.length;
 
   if(!state.results || !rep.hasOrders){
     const msg = !state.results ? '请先在"① 数据导入"上传订单表' : '当前数据中无「电商组」初诊业绩';
@@ -4844,7 +4893,7 @@ function renderEcSubReport(){
   const idxOf = new Map(dateList.map((d,i)=>[d,i]));
 
   head.innerHTML = `
-    <tr><th colspan="${5 + 2 * vDates.length}" class="title-cell">电商组各二级渠道业绩（初诊业绩，截止${monthStr}）</th></tr>
+    <tr><th colspan="${5 + 4 * vDates.length}" class="title-cell">电商组各二级渠道业绩（初诊 / 全部口径，截止${monthStr}）</th></tr>
     <tr>
       <th class="sub-head" rowspan="2">平台名称</th>
       <th class="sub-head" rowspan="2">渠道分类</th>
@@ -4853,49 +4902,63 @@ function renderEcSubReport(){
       <th class="sub-head" rowspan="2">业绩类型</th>
       ${vDates.map(d=>{
         const dt = new Date(d);
-        return `<th class="sub-head daily-col date-group" colspan="2" data-date="${d}" data-idx="${idxOf.get(d)}" title="点击收起该日期列">${dt.getMonth()+1}月${dt.getDate()}日</th>`;
+        return `<th class="sub-head daily-col date-group" colspan="4" data-date="${d}" data-idx="${idxOf.get(d)}" title="点击收起该日期列">${dt.getMonth()+1}月${dt.getDate()}日</th>`;
       }).join('')}
     </tr>
     <tr>
       ${vDates.map(d=>{
-        return `<th class="sub-head">客量(人)<span class="copy-col" data-col="cnt:d:${d}" title="复制该日期客量列（每渠道 2 值：当日/累计）">复制</span></th>`
-             + `<th class="sub-head">金额<span class="copy-col" data-col="amt:d:${d}" title="复制该日期金额列（每渠道 2 值：当日/累计）">复制</span></th>`;
+        return `<th class="sub-head">初诊客量<span class="copy-col" data-col="cnt:d:${d}" title="复制该日期初诊客量列（每渠道 2 值：当日/累计）">复制</span></th>`
+             + `<th class="sub-head">初诊金额<span class="copy-col" data-col="amt:d:${d}" title="复制该日期初诊金额列（每渠道 2 值：当日/累计）">复制</span></th>`
+             + `<th class="sub-head all-col">全部客量<span class="copy-col" data-col="allcnt:d:${d}" title="复制该日期全部客量列（不限初诊）">复制</span></th>`
+             + `<th class="sub-head all-col">全部金额<span class="copy-col" data-col="allamt:d:${d}" title="复制该日期全部金额列（不限初诊）">复制</span></th>`;
       }).join('')}
     </tr>`;
+
+  // 每日期 4 子列：初诊客量 / 初诊金额 / 全部客量 / 全部金额（全部=不限初诊，渠道范围与初诊一致）
+  const cellsOf = (d, cnt, amt, allCnt, allAmt, tCnt, tAmt, tAllCnt, tAllAmt) => {
+    const idx = idxOf.get(d);
+    return `<td class="num" data-idx="${idx}" data-date="${d}" data-col="cnt:d:${d}" data-val="${cnt}" title="${tCnt}">${cnt}</td>`
+         + `<td class="num" data-idx="${idx}" data-date="${d}" data-col="amt:d:${d}" data-val="${amt}" title="${tAmt}">${fmt(amt)}</td>`
+         + `<td class="num all-col" data-idx="${idx}" data-date="${d}" data-col="allcnt:d:${d}" data-val="${allCnt}" title="${tAllCnt}">${allCnt}</td>`
+         + `<td class="num all-col" data-idx="${idx}" data-date="${d}" data-col="allamt:d:${d}" data-val="${allAmt}" title="${tAllAmt}">${fmt(allAmt)}</td>`;
+  };
 
   let html = '';
   rep.rows.forEach(r => {
     // 每个二级渠道 2 行：当日数据 / 月累计；平台·渠道·分类·一级纵向合并 2 行
-    // 每日期 2 子列：客量(cnt:d:) + 金额(amt:d:)
     html += `<tr class="ec-sub-today">
       <td class="cat" rowspan="2">${esc(r.platform)}</td>
       <td rowspan="2" class="chan-cell">${esc(r.channelClass || '—')}</td>
       <td rowspan="2" class="chan-cell">${esc(r.channelL1 || '—')}</td>
       <td rowspan="2">${esc(r.l2)}</td>
       <td class="type-cell">当日数据</td>
-      ${vDates.map(d=>`<td class="num" data-idx="${idxOf.get(d)}" data-date="${d}" data-col="cnt:d:${d}" data-val="${r.cntDays[d] || 0}" title="当日客量">${r.cntDays[d] || 0}</td><td class="num" data-idx="${idxOf.get(d)}" data-date="${d}" data-col="amt:d:${d}" data-val="${r.days[d] || 0}">${fmt(r.days[d] || 0)}</td>`).join('')}
+      ${vDates.map(d=>cellsOf(d, r.cntDays[d]||0, r.days[d]||0, r.allCntDays[d]||0, r.allDays[d]||0,
+        '当日初诊客量', '当日初诊金额', '当日全部客量（不限初诊）', '当日全部金额（不限初诊）')).join('')}
     </tr>
     <tr class="ec-sub-cum">
       <td class="type-cell">月累计</td>
-      ${vDates.map(d=>`<td class="num" data-idx="${idxOf.get(d)}" data-date="${d}" data-col="cnt:d:${d}" data-val="${r.cumCntDays[d] || 0}" title="到该日止去重客量">${r.cumCntDays[d] || 0}</td><td class="num" data-idx="${idxOf.get(d)}" data-date="${d}" data-col="amt:d:${d}" data-val="${r.cum[d] || 0}">${fmt(r.cum[d] || 0)}</td>`).join('')}
+      ${vDates.map(d=>cellsOf(d, r.cumCntDays[d]||0, r.cum[d]||0, r.cumAllCntDays[d]||0, r.cumAll[d]||0,
+        '到该日止初诊去重客量', '到该日止初诊金额', '到该日止全部去重客量', '到该日止全部金额')).join('')}
     </tr>`;
   });
   // 合计：2 行（当日合计 / 累计合计）；data-total 用于「单列复制」时跳过合计，避免粘贴后重复汇总
   html += `<tr class="row-orange" data-total="1">
       <td class="cat" colspan="5" rowspan="2">合计</td>
-      ${vDates.map(d=>`<td class="num" data-idx="${idxOf.get(d)}" data-date="${d}" data-col="cnt:d:${d}" data-val="${rep.totalCntDays[d] || 0}">${rep.totalCntDays[d] || 0}</td><td class="num" data-idx="${idxOf.get(d)}" data-date="${d}" data-col="amt:d:${d}" data-val="${rep.totalDays[d] || 0}">${fmt(rep.totalDays[d] || 0)}</td>`).join('')}
+      ${vDates.map(d=>cellsOf(d, rep.totalCntDays[d]||0, rep.totalDays[d]||0, rep.totalAllCntDays[d]||0, rep.totalAllDays[d]||0,
+        '当日初诊客量合计', '当日初诊金额合计', '当日全部客量合计', '当日全部金额合计')).join('')}
     </tr>
     <tr class="row-orange" data-total="1">
-      ${vDates.map(d=>`<td class="num" data-idx="${idxOf.get(d)}" data-date="${d}" data-col="cnt:d:${d}" data-val="${rep.totalCumCntDays[d] || 0}">${rep.totalCumCntDays[d] || 0}</td><td class="num" data-idx="${idxOf.get(d)}" data-date="${d}" data-col="amt:d:${d}" data-val="${rep.totalCum[d] || 0}">${fmt(rep.totalCum[d] || 0)}</td>`).join('')}
+      ${vDates.map(d=>cellsOf(d, rep.totalCumCntDays[d]||0, rep.totalCum[d]||0, rep.totalAllCumCntDays[d]||0, rep.totalAllCum[d]||0,
+        '累计初诊客量合计', '累计初诊金额合计', '累计全部客量合计', '累计全部金额合计')).join('')}
     </tr>`;
   body.innerHTML = html;
 
-  // 列宽：前 5 列固定像素（内容更长时由 auto 布局自动撑开），每日 = 客量(52px) + 金额(82px)
+  // 列宽：前 5 列固定像素（内容更长时由 auto 布局自动撑开），每日 = 初诊客量/初诊金额/全部客量/全部金额
   table.querySelectorAll('colgroup').forEach(c=>c.remove());
   const cg = document.createElement('colgroup');
   const addCol = w => { const c = document.createElement('col'); c.style.width = w; cg.appendChild(c); };
   addCol('230px'); addCol('90px'); addCol('90px'); addCol('120px'); addCol('92px');
-  vDates.forEach(()=>{ addCol('52px'); addCol('82px'); });
+  vDates.forEach(()=>{ addCol('60px'); addCol('86px'); addCol('60px'); addCol('86px'); });
   table.insertBefore(cg, table.firstChild);
 
   if(ecSubBatchMode) table.classList.add('batch-mode');
@@ -4907,7 +4970,7 @@ function updateEcSubTitleColspan(){
   if(!table) return;
   const visible = table.querySelectorAll('th.daily-col').length;   // 隐藏列已不渲染
   const titleTh = table.querySelector('thead tr:first-child th');
-  if(titleTh) titleTh.colSpan = 5 + 2 * visible;
+  if(titleTh) titleTh.colSpan = 5 + 4 * visible;
 }
 
 // ===== 只保留指定日期列（2026-10-27 需求）=====
@@ -5125,7 +5188,8 @@ function ensureEcSubDom(){
     st.textContent = 'table.report#ec-sub-table{width:auto;}'
       + ' table.report .type-cell{background:var(--c-blue-sub);color:#002060;font-weight:600;font-size:12px;}'
       + ' table.report tr.ec-sub-cum td{background:#f7f9fd;}'
-      + ' table.report tr.ec-sub-cum td.type-cell{background:#dbe5f7;}';
+      + ' table.report tr.ec-sub-cum td.type-cell{background:#dbe5f7;}'
+      + ' #ec-sub-table th.all-col, #ec-sub-table td.all-col{border-left:2px solid #c9d8f0;}';
     document.head.appendChild(st);
   }
   if($('ec-sub-batch-toggle') && $('ec-sub-expand-all')) return;
@@ -5234,13 +5298,13 @@ function buildEcSubGrid(){
   const cutoff = state.cutoffDate ? new Date(state.cutoffDate) : new Date();
   const monthStr = (cutoff.getMonth()+1) + '月' + cutoff.getDate() + '日';
   const dateList = rep.dateList || [];
-  const nCols = 5 + 2 * dateList.length;
+  const nCols = 5 + 4 * dateList.length;
   const rows = [];
   const merges = [];
   rows.push(Array.from({length:nCols}, () => null));
-  rows[0][0] = cell('电商组各二级渠道业绩（初诊业绩，截止'+monthStr+'）', 's', 'title');
+  rows[0][0] = cell('电商组各二级渠道业绩（初诊 / 全部口径，截止'+monthStr+'）', 's', 'title');
   merges.push({r:0, c:0, r2:0, c2:nCols-1});
-  // 表头两行：第 1 行固定列(rowspan 2) + 每日期分组(colspan 2)；第 2 行每日期 客量/金额 子表头
+  // 表头两行：第 1 行固定列(rowspan 2) + 每日期分组(colspan 4)；第 2 行每日期 初诊客量/初诊金额/全部客量/全部金额 子表头
   rows.push(Array.from({length:nCols}, () => null));
   rows[1][0] = cell('平台名称', 's', 'subhead');
   rows[1][1] = cell('渠道分类', 's', 'subhead');
@@ -5252,11 +5316,16 @@ function buildEcSubGrid(){
   dateList.forEach((d,k)=>{
     const dt = new Date(d);
     const label = (dt.getMonth()+1)+'月'+dt.getDate()+'日';
-    rows[1][5+2*k] = cell(label, 's', 'subhead');
-    rows[1][5+2*k+1] = cell(label, 's', 'subhead');
-    rows[2][5+2*k] = cell('客量\n(人)', 's', 'subhead');
-    rows[2][5+2*k+1] = cell('金额', 's', 'subhead');
-    merges.push({r:1, c:5+2*k, r2:1, c2:5+2*k+1});   // 日期分组横跨 客量/金额
+    const c0 = 5 + 4*k;
+    rows[1][c0] = cell(label, 's', 'subhead');
+    rows[1][c0+1] = cell(label, 's', 'subhead');
+    rows[1][c0+2] = cell(label, 's', 'subhead');
+    rows[1][c0+3] = cell(label, 's', 'subhead');
+    rows[2][c0] = cell('初诊客量\n(人)', 's', 'subhead');
+    rows[2][c0+1] = cell('初诊金额', 's', 'subhead');
+    rows[2][c0+2] = cell('全部客量\n(人)', 's', 'subhead');
+    rows[2][c0+3] = cell('全部金额', 's', 'subhead');
+    merges.push({r:1, c:c0, r2:1, c2:c0+3});   // 日期分组横跨 4 子列
   });
 
   rep.rows.forEach((row, ri) => {
@@ -5270,10 +5339,15 @@ function buildEcSubGrid(){
     a[4] = cell('当日数据', 's', 'catsub');
     b[4] = cell('月累计', 's', 'catsub');
     dateList.forEach((d,k)=>{
-      a[5+2*k]   = cell(row.cntDays[d] || 0, 'n', 'target');   // 当日客量
-      a[5+2*k+1] = cell(row.days[d] || 0, 'n', 'num');         // 当日金额
-      b[5+2*k]   = cell(row.cumCntDays[d] || 0, 'n', 'target'); // 累计客量（到该日止去重）
-      b[5+2*k+1] = cell(row.cum[d] || 0, 'n', 'num');          // 累计金额
+      const c0 = 5 + 4*k;
+      a[c0]   = cell(row.cntDays[d] || 0, 'n', 'target');      // 当日初诊客量
+      a[c0+1] = cell(row.days[d] || 0, 'n', 'num');            // 当日初诊金额
+      a[c0+2] = cell(row.allCntDays[d] || 0, 'n', 'target');   // 当日全部客量
+      a[c0+3] = cell(row.allDays[d] || 0, 'n', 'num');         // 当日全部金额
+      b[c0]   = cell(row.cumCntDays[d] || 0, 'n', 'target');   // 累计初诊客量
+      b[c0+1] = cell(row.cum[d] || 0, 'n', 'num');             // 累计初诊金额
+      b[c0+2] = cell(row.cumAllCntDays[d] || 0, 'n', 'target'); // 累计全部客量
+      b[c0+3] = cell(row.cumAll[d] || 0, 'n', 'num');          // 累计全部金额
     });
     rows.push(a); rows.push(b);
     merges.push({r:r1, c:0, r2:r2, c2:0});   // 平台名称 纵向合并
@@ -5287,16 +5361,21 @@ function buildEcSubGrid(){
   const t2 = Array.from({length:nCols}, () => null);
   t1[0] = cell('合计', 's', 'orange');
   dateList.forEach((d,k)=>{
-    t1[5+2*k]   = cell(rep.totalCntDays[d] || 0, 'n', 'orange');    // 当日客量合计
-    t1[5+2*k+1] = cell(rep.totalDays[d] || 0, 'n', 'orange');       // 当日金额合计
-    t2[5+2*k]   = cell(rep.totalCumCntDays[d] || 0, 'n', 'orange'); // 累计客量合计
-    t2[5+2*k+1] = cell(rep.totalCum[d] || 0, 'n', 'orange');        // 累计金额合计
+    const c0 = 5 + 4*k;
+    t1[c0]   = cell(rep.totalCntDays[d] || 0, 'n', 'orange');       // 当日初诊客量合计
+    t1[c0+1] = cell(rep.totalDays[d] || 0, 'n', 'orange');          // 当日初诊金额合计
+    t1[c0+2] = cell(rep.totalAllCntDays[d] || 0, 'n', 'orange');    // 当日全部客量合计
+    t1[c0+3] = cell(rep.totalAllDays[d] || 0, 'n', 'orange');       // 当日全部金额合计
+    t2[c0]   = cell(rep.totalCumCntDays[d] || 0, 'n', 'orange');    // 累计初诊客量合计
+    t2[c0+1] = cell(rep.totalCum[d] || 0, 'n', 'orange');           // 累计初诊金额合计
+    t2[c0+2] = cell(rep.totalAllCumCntDays[d] || 0, 'n', 'orange'); // 累计全部客量合计
+    t2[c0+3] = cell(rep.totalAllCum[d] || 0, 'n', 'orange');        // 累计全部金额合计
   });
   rows.push(t1); rows.push(t2);
   merges.push({r:tr, c:0, r2:tr+1, c2:4});
 
   const colWidths = [26, 10, 10, 18, 12];
-  dateList.forEach(()=>{ colWidths.push(8); colWidths.push(11); });   // 每日期：客量(窄) + 金额(宽)
+  dateList.forEach(()=>{ colWidths.push(9, 12, 9, 12); });   // 每日期：初诊客量/初诊金额/全部客量/全部金额
   return { rows, merges, colWidths, hiddenCols:[] };
 }
 
