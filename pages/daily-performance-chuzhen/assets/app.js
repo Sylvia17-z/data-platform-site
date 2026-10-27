@@ -90,7 +90,7 @@ const state = {
   ordersTs: 0,     // 订单快照写入时刻（epoch ms），用于本地/云端新旧裁决（防云端旧快照覆盖本地新数据）
   snapTs: 0,       // 整包快照变更时刻（epoch ms）：orders/VAB/月目标/手动覆盖 任一变更都更新，随快照上云做跨设备裁决
   results: null,   // 最新计算结果
-  histOrders: [],  // 近一年消费明细（2026-10-16 新增）：仅用于「营销部顾客一年内无消费 → 初诊客户」判定，不计入业绩金额
+  histOrders: [],  // 历史消费明细数据（2026-10-16 新增）：仅用于「营销部顾客一年内无消费 → 初诊客户」判定，不计入业绩金额
   histTs: 0,       // 历史明细写入时刻（epoch ms），参与初诊键集合缓存失效签名
   colWidths: {},   // 用户拖拽调整的列宽（index -> width）
   manual: {        // 手动修改的数据（覆盖计算值）
@@ -287,7 +287,7 @@ window.addEventListener('message', (e) => {
     if(applyOrdersRaw(m.payload)) runRestoredRecompute();
     return;
   }
-  // 近一年消费明细：壳窗口推送 / 应答恢复（恢复后缓存失效；订单已在场时立即重算，
+  // 历史消费明细数据：壳窗口推送 / 应答恢复（恢复后缓存失效；订单已在场时立即重算，
   // 2026-10-20 修复「待下次重算生效」实际等不到下次重算 → 刷新后新客规则失效）
   if(m.key === HIST_STORAGE_KEY){
     if(state.histOrders.length > 0) return;
@@ -301,7 +301,7 @@ window.addEventListener('message', (e) => {
   }
 });
 
-/* =================== 近一年消费明细（历史）本地持久化 ===================
+/* =================== 历史消费明细数据本地持久化 ===================
  * 用途：2026-10-16 新增「营销部顾客一年内无消费记录 → 视为初诊客户」判定规则的数据源。
  * 与订单表相互独立：仅参与初诊判定，不计入任何业绩金额；未导入时该规则自动停用（保持既有口径）。
  * 持久化与订单同构：localStorage 同步 + IndexedDB 兜底 + 壳窗口桥接（dp:persist / dp:request）。 */
@@ -592,7 +592,7 @@ function cloudPayload(){
     vab: { list: state.vabList || [], rows: state.vabRows || [], demo: !!state.demoVab },
     targets: state.targets,
     manual: state.manual,
-    // 近一年消费明细随快照上云（2026-10-19）：瘦行仅保留判定所需 4 字段（memberNo/name/payTime/_uid，见 histKeysCached）
+    // 历史消费明细数据随快照上云（2026-10-19）：瘦行仅保留判定所需 4 字段（memberNo/name/payTime/_uid，见 histKeysCached）
     hist: state.histGz || undefined,
     ts: state.snapTs || Date.now(),
   };
@@ -1107,7 +1107,7 @@ function restoreVab(){
 restoreVab();
 restoreColWidths(); // 恢复列宽（拖拽调整后保留）
 restoreOrders(); // 恢复历史导入订单（刷新网页后保留，含月累计/每日所需原始数据）
-restoreHist(); // 恢复近一年消费明细（刷新网页后保留，用于「一年内无消费→初诊」新客判定）
+restoreHist(); // 恢复历史消费明细数据（刷新网页后保留，用于「一年内无消费→初诊」新客判定）
 // 统一刷新 VAB 状态文案（示例 vs 已保存默认，且可覆盖更新）
 function refreshVabStatus(){
   const meta = $('vab-meta');
@@ -1432,7 +1432,7 @@ function clearAllData(){
     || Object.keys(state.manual.month).length > 0 || Object.keys(state.manual.daily).length > 0
     || Object.keys(state.colWidths).length > 0;
   if(!hasData){ showToast('当前本机数据已为空，无需清除', 'warn'); return; }
-  if(!window.confirm('确定清除本机保存的全部页面数据？\n（订单、月目标、手动调整、列宽将全部清空，刷新后恢复为空；VAB会员与近一年消费明细不受影响。此操作不可撤销）')) return;
+  if(!window.confirm('确定清除本机保存的全部页面数据？\n（订单、月目标、手动调整、列宽将全部清空，刷新后恢复为空；VAB会员与历史消费明细数据不受影响。此操作不可撤销）')) return;
   try{
     localStorage.removeItem(ORDERS_STORAGE_KEY);
     localStorage.removeItem(MANUAL_STORAGE_KEY);
@@ -1636,7 +1636,7 @@ function inDateRange(d, cutoff){
   return true;
 }
 
-// 「近一年消费明细」键集合（2026-10-16 新增）：历史明细中 payTime 在 [截止日-365天, 截止日]
+// 「历史消费明细数据」键集合（2026-10-16 新增）：历史明细中 payTime 在 [截止日-365天, 截止日]
 // 窗口内的客户键（会员号优先，无会员号按姓名）。规则B数据源：营销部渠道顾客若不在此集合中
 // → 一年内无消费记录 → 视为初诊客户。带缓存（按 截止日 + 历史行数 + 时间戳 失效）。
 let _histKeysCache = { sig:'', date:'', set:null };
@@ -1664,11 +1664,11 @@ function histKeysCached(cutoff){
 // 「营销部初诊客户」键集合（会员号优先，无会员号按姓名）——营销部各类别业绩仅计入这些客户的消费。
 // 规则A（既有口径）：滚动 30 天（含两端，可跨月）窗口内 来源渠道=营销部 且 到访类型=初诊；
 //   窗口起点=截止日往前推 29 天：9.30 → 9.1~9.30，10.1 → 9.2~10.1（2026-10-15 需求）。
-// 规则B（2026-10-16 新增）：营销部渠道顾客（渠道分类=营销部 或 推荐→营销部）在「近一年消费明细」
+// 规则B（2026-10-16 新增）：营销部渠道顾客（渠道分类=营销部 或 推荐→营销部）在「历史消费明细数据」
 //   中无任何消费记录（截止日往前推一年窗口内无该客户键）→ 视为初诊客户。
-//   仅导入「近一年消费明细」后启用（集合非空才算启用），未导入时保持既有口径，防止复诊老客误判。
+//   仅导入「历史消费明细数据」后启用（集合非空才算启用），未导入时保持既有口径，防止复诊老客误判。
 // 规则C（2026-10-27 新增）：到访类型【空白】的营销部渠道顾客，往前倒推 365 天无消费记录 → 视为初诊客户。
-//   判定数据源 = 「近一年消费明细」（若导入）∪ 订单表中更早的消费（多月份合并导入后订单表可跨月）；
+//   判定数据源 = 「历史消费明细数据」（若导入）∪ 订单表中更早的消费（多月份合并导入后订单表可跨月）；
 //   不依赖历史明细导入状态——未导入时仅按订单表判定（当月首笔空白客户即视为新客初诊）。
 //   复诊等明确类型的顾客仍走规则B，不受本条影响。
 // 三条规则取并集；客户键口径一致（mktFirstClientKey）。
@@ -3747,7 +3747,7 @@ function toggleVabList(){
   }
 }
 
-// ===== 近一年消费明细导入（2026-10-16 新增；2026-10-27 支持追加上传）=====
+// ===== 历史消费明细数据导入（2026-10-16 新增；2026-10-27 支持追加上传）=====
 // 「营销部顾客一年内无消费记录 → 视为初诊客户」规则的数据源。表结构与订单表一致（订单项目收退款表），
 // 仅读取 会员号/姓名/收款时间 参与判定；该数据不计入任何业绩金额；未导入时新客规则自动停用。
 // 追加上传：多次/多月上传累加；按「收款单号」去重（同一单号新数据覆盖旧数据），无单号时用组合键防重复累加。
@@ -3794,13 +3794,13 @@ async function onFileHistory(input){
     const mode = (modeEl && modeEl.value === 'overwrite') ? 'overwrite' : 'append';
     const fileInfo = files.length > 1 ? `${files.length} 个文件` : '1 个文件';
     if(mode === 'overwrite'){
-      if(state.histOrders.length && !window.confirm(`覆盖导入将清空当前已导入的 ${state.histOrders.length} 行近一年消费明细，并替换为本文件内容（${validRows.length} 行）。确定继续？`)) return;
+      if(state.histOrders.length && !window.confirm(`覆盖导入将清空当前已导入的 ${state.histOrders.length} 行历史消费明细数据，并替换为本文件内容（${validRows.length} 行）。确定继续？`)) return;
       state.histOrders = validRows;
       persistHist();
       invalidateMktKeyCaches();
       refreshHistMeta();
       recompute();
-      showToast(`近一年消费明细覆盖导入成功（${fileInfo} / ${validRows.length} 行，已替换原明细）。「营销部顾客一年内无消费记录 → 初诊客户」规则已启用`, 'ok', 6000);
+      showToast(`历史消费明细数据覆盖导入成功（${fileInfo} / ${validRows.length} 行，已替换原明细）。「营销部顾客一年内无消费记录 → 初诊客户」规则已启用`, 'ok', 6000);
     }else{
       const { rows: merged, added, replaced } = mergeHistOrders(state.histOrders, validRows);
       state.histOrders = merged;
@@ -3808,7 +3808,7 @@ async function onFileHistory(input){
       invalidateMktKeyCaches();
       refreshHistMeta();
       recompute();
-      showToast(`近一年消费明细追加成功（${fileInfo} / 本次 ${validRows.length} 行：新增 ${added}、覆盖 ${replaced}），累计 ${state.histOrders.length} 行。「营销部顾客一年内无消费记录 → 初诊客户」规则已启用`, 'ok', 6000);
+      showToast(`历史消费明细数据追加成功（${fileInfo} / 本次 ${validRows.length} 行：新增 ${added}、覆盖 ${replaced}），累计 ${state.histOrders.length} 行。「营销部顾客一年内无消费记录 → 初诊客户」规则已启用`, 'ok', 6000);
     }
   }catch(e){
     console.error(e);
@@ -3818,20 +3818,20 @@ async function onFileHistory(input){
   }
 }
 
-// 清除近一年消费明细（不影响订单/VAB/月目标）；清除后新客规则自动停用
+// 清除历史消费明细数据（不影响订单/VAB/月目标）；清除后新客规则自动停用
 function clearHistData(){
-  if(!state.histOrders.length){ showToast('尚未导入近一年消费明细，无需清除', 'warn'); return; }
-  if(!window.confirm('确定清除已导入的近一年消费明细？\n清除后「营销部顾客一年内无消费记录 → 初诊客户」规则将停用，业绩报表恢复既有口径（30天内 到访类型=初诊）。\n订单 / VAB 会员 / 月目标不受影响。此操作不可撤销。')) return;
+  if(!state.histOrders.length){ showToast('尚未导入历史消费明细数据，无需清除', 'warn'); return; }
+  if(!window.confirm('确定清除已导入的历史消费明细数据？\n清除后「营销部顾客一年内无消费记录 → 初诊客户」规则将停用，业绩报表恢复既有口径（30天内 到访类型=初诊）。\n订单 / VAB 会员 / 月目标不受影响。此操作不可撤销。')) return;
   state.histOrders = [];
   histClouded = false;
   persistHist(); // 写入空快照（含壳窗口桥接，防刷新后旧数据回灌）
   invalidateMktKeyCaches();
   refreshHistMeta();
   recompute();
-  showToast('已清除近一年消费明细，新客规则已停用', 'ok');
+  showToast('已清除历史消费明细数据，新客规则已停用', 'ok');
 }
 
-// ===== 近一年消费明细：只读清单（核验合并 / 覆盖结果）=====
+// ===== 历史消费明细数据：只读清单（核验合并 / 覆盖结果）=====
 let histPage = 1, histPageSize = 20;
 // 清单筛选（2026-10-27 需求：2.6 万行需能筛）：
 //   关键字   = 会员号 / 姓名 / 收款单号 任一包含（不区分大小写）
@@ -3895,7 +3895,7 @@ function renderHistList(){
   const sum = $('hist-list-summary');
   const anyF = histFiltersActive();
   const rows = filterHistRows(all);
-  if(sum) sum.textContent = `📋 近一年消费明细（共 ${all.length} 行${anyF ? ` · 筛选后 ${rows.length} 行` : ''}）`;
+  if(sum) sum.textContent = `📋 历史消费明细数据（共 ${all.length} 行${anyF ? ` · 筛选后 ${rows.length} 行` : ''}）`;
   const f = histFilters || {};
   // 到访类型选项取自全部明细（与当前筛选无关，保证跨筛选稳定）
   const vtSet = histVisitTypeOptions();
@@ -3948,6 +3948,16 @@ function renderHistList(){
     const vals = [r.memberNo, r.name, d, r.receiptNo, r.payType, fmt(r.cashPay||0), fmt(r.assetDeduct||0), r.visitType, r.channelClass, r.channelL1, r.channelL2];
     return '<tr>' + vals.map(v=>`<td>${esc(v==null?'':v)}</td>`).join('') + '</tr>';
   }).join('');
+  // 汇总合计行（2026-10-27）：合计对象 = 当前筛选后的「全部行」（不只是当前页），
+  // 金额列（现款支付 / 资产抵扣）求和；其余列为文本/日期，不参与合计。
+  const sumCash = rows.reduce((a,r)=>a + (Number(r.cashPay) || 0), 0);
+  const sumAsset = rows.reduce((a,r)=>a + (Number(r.assetDeduct) || 0), 0);
+  const footHtml = `<tfoot><tr class="hist-sum-row">
+    <td colspan="5" class="hist-sum-label">合计（${anyF ? `筛选后 ${rows.length} / 共 ${all.length} 行` : `共 ${all.length} 行`}）</td>
+    <td class="num">${fmt(sumCash)}</td>
+    <td class="num">${fmt(sumAsset)}</td>
+    <td colspan="4"></td>
+  </tr></tfoot>`;
   const pager = `<div class="detail-pager" style="margin:6px 2px 12px;">
     <button type="button" class="pg-btn" data-hpg="first" title="第一页"${histPage<=1?' disabled':''}>«</button>
     <button type="button" class="pg-btn" data-hpg="prev" title="上一页"${histPage<=1?' disabled':''}>‹ 上一页</button>
@@ -3958,7 +3968,7 @@ function renderHistList(){
       ${[20,50,100,200].map(n=>`<option value="${n}"${histPageSize===n?' selected':''}>${n} 条/页</option>`).join('')}
     </select>
   </div>`;
-  box.innerHTML = filterBar + `<div class="table-wrap vab-table-wrap" style="max-height:none;overflow:auto;border:1px solid var(--c-border);border-radius:8px;margin:8px 0;"><table class="data"><thead>${headHtml}</thead><tbody>${bodyHtml}</tbody></table></div>` + pager;
+  box.innerHTML = filterBar + `<div class="table-wrap vab-table-wrap" style="max-height:none;overflow:auto;border:1px solid var(--c-border);border-radius:8px;margin:8px 0;"><table class="data"><thead>${headHtml}</thead><tbody>${bodyHtml}</tbody>${footHtml}</table></div>` + pager;
   // 分页 / 筛选交互只绑定一次（容器常驻，内部随 innerHTML 重建）
   if(!box.dataset.bound){
     box.dataset.bound = '1';
@@ -5626,14 +5636,14 @@ function initApp(){
     if(mmBox.checked) showToast('已勾选「合并历史数据」——但这不会自动导入数据；仍需点击「📤 上传订单表」并选择 10 月的订单文件（重叠日期会覆盖，其它日期保留）', 'warn', 7000);
   });
   $('file-vab').addEventListener('change', e=>onFileVab(e.target));
-  // 近一年消费明细导入 / 清除（2026-10-16 新增：一年内无消费→初诊 新客规则数据源）
+  // 历史消费明细数据导入 / 清除（2026-10-16 新增：一年内无消费→初诊 新客规则数据源）
   $('file-history').addEventListener('change', e=>onFileHistory(e.target));
   // 追加上传（2026-10-27）：兼容旧缓存 HTML —— 确保可一次多选多个文件；并同步入口文案
   (function ensureHistAppendUi(){
     const fh = $('file-history');
     if(fh && !fh.multiple) fh.multiple = true;
     const lb = document.querySelector('label[for="file-history"]');
-    if(lb && lb.textContent.indexOf('追加') < 0) lb.textContent = '📅 上传/追加近一年消费明细';
+    if(lb && lb.textContent.indexOf('追加') < 0) lb.textContent = '📅 上传/追加历史消费明细数据';
     // 兼容旧缓存 HTML：补齐「覆盖导入 / 追加导入」方式选择器（缺失时动态插入）
     if(!$('hist-import-mode') && fh){
       const seg = fh.closest('.dataseg');
@@ -5655,7 +5665,7 @@ function initApp(){
       const vb = document.createElement('button');
       vb.className = 'btn'; vb.id = 'view-hist';
       vb.textContent = '📋 查看明细';
-      vb.title = '展开/收起已导入并合并后的近一年消费明细（只读，支持按关键字 / 收款时间 / 到访类型 / 渠道筛选）';
+      vb.title = '展开/收起已导入并合并后的历史消费明细数据（只读，支持按关键字 / 收款时间 / 到访类型 / 渠道筛选）';
       if(clr && clr.parentNode) clr.parentNode.insertBefore(vb, clr);
       else seg2.appendChild(vb);
     }
@@ -5663,7 +5673,7 @@ function initApp(){
       const det = document.createElement('details');
       det.className = 'vab-list-details'; det.id = 'hist-list-details';
       det.style.margin = '0 0 10px';
-      det.innerHTML = '<summary id="hist-list-summary" class="vab-list-summary">📋 近一年消费明细（共 0 行）</summary><div id="hist-list" class="vab-list-wrap"></div>';
+      det.innerHTML = '<summary id="hist-list-summary" class="vab-list-summary">📋 历史消费明细数据（共 0 行）</summary><div id="hist-list" class="vab-list-wrap"></div>';
       seg2.parentNode.insertBefore(det, seg2.nextSibling);
     }
   })();

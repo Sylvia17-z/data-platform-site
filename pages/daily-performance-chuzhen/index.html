@@ -163,6 +163,9 @@
   .vab-list-summary{cursor:pointer;user-select:none;font-size:13px;font-weight:600;color:var(--c-head);} /* 点击 summary 可收起/展开 */
   /* VAB 新增会员弹窗 */
   .modal-mask{position:fixed;inset:0;background:rgba(15,23,42,.42);display:flex;align-items:center;justify-content:center;z-index:1000;padding:16px;}
+  /* 历史消费明细数据：汇总合计行（tfoot 基础样式沿用 table.data tfoot td） */
+  #hist-list table.data tfoot td.num{text-align:right;font-variant-numeric:tabular-nums;}
+  #hist-list table.data tfoot td.hist-sum-label{text-align:left;}
   /* ============ 指定日期列弹窗（2026-10-27）：只保留勾选的日期列 ============ */
   .datepick-box{width:min(580px,94vw);}
   .datepick-tools{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 10px;}
@@ -519,25 +522,25 @@
         <button class="btn btn-danger" id="clear-vab" title="清空本机保存的VAB清单（重置旧版本残留/示例数据），清空后重新上传真实会员表" data-page-node-id="clearVabBtn">🗑 清空VAB</button>
       </span>
     </div>
-    <!-- 近一年消费明细（2026-10-16 新增）：「营销部顾客一年内无消费记录 → 视为初诊客户」规则数据源 -->
+    <!-- 历史消费明细数据（2026-10-16 新增）：「营销部顾客一年内无消费记录 → 视为初诊客户」规则数据源 -->
     <!-- 2026-10-27：支持「追加导入 / 覆盖导入」模式选择；可一次多选多个文件；追加以「收款单号」去重（同单号新覆盖旧） -->
     <div class="dataseg">
       <span class="seg-label">历史明细</span>
       <input type="file" id="file-history" accept=".xlsx,.xls" multiple hidden />
-      <label for="file-history" class="btn" title="上传最近一年的消费明细（订单项目收退款表格式，可一次选择多个文件）——用于判定「营销部顾客一年内无消费记录 → 视为初诊客户」；导入方式见右侧选择框，该数据不计入业绩金额，仅本地保存">📅 上传/追加近一年消费明细</label>
+      <label for="file-history" class="btn" title="上传最近一年的消费明细（订单项目收退款表格式，可一次选择多个文件）——用于判定「营销部顾客一年内无消费记录 → 视为初诊客户」；导入方式见右侧选择框，该数据不计入业绩金额，仅本地保存">📅 上传/追加历史消费明细数据</label>
       <select id="hist-import-mode" class="select" title="选择导入方式：追加导入=保留已有明细并合并去重；覆盖导入=清空已有明细后替换为本文件内容">
         <option value="append" selected>追加导入（合并去重）</option>
         <option value="overwrite">覆盖导入（清空替换）</option>
       </select>
       <span class="seg-status">
         <span id="hist-meta" class="file-meta">未导入（新客规则停用）</span>
-        <button class="btn" id="view-hist" title="展开/收起已导入并合并后的近一年消费明细（只读，用于核验合并 / 覆盖结果）">📋 查看明细</button>
-        <button class="btn btn-danger" id="clear-hist" title="清除已导入的近一年消费明细并停用新客判定规则（不影响订单 / VAB 会员 / 月目标）">🗑 清除明细</button>
+        <button class="btn" id="view-hist" title="展开/收起已导入并合并后的历史消费明细数据（只读，用于核验合并 / 覆盖结果）">📋 查看明细</button>
+        <button class="btn btn-danger" id="clear-hist" title="清除已导入的历史消费明细数据并停用新客判定规则（不影响订单 / VAB 会员 / 月目标）">🗑 清除明细</button>
       </span>
     </div>
-    <!-- 近一年消费明细清单（只读，用于核验合并/覆盖后的具体数据） -->
+    <!-- 历史消费明细数据清单（只读，用于核验合并/覆盖后的具体数据） -->
     <details class="vab-list-details" id="hist-list-details" style="margin:0 0 10px;">
-      <summary id="hist-list-summary" class="vab-list-summary">📋 近一年消费明细（共 0 行）</summary>
+      <summary id="hist-list-summary" class="vab-list-summary">📋 历史消费明细数据（共 0 行）</summary>
       <div id="hist-list" class="vab-list-wrap"></div>
     </details>
     <!-- VAB 会员清单（默认展开呈现导入会员，单元格可双击编辑、行内可编辑/删除） -->
@@ -564,7 +567,7 @@
       <button class="btn" id="recompute" data-page-node-id="pOgl6nqAh86a9vsgpK848M">🔄 重新计算</button>
       <button class="btn btn-danger" id="clear-manual" title="清除所有手动调整的月累计/每日数据，恢复自动计算（用于修正手动改错导致的「月累计≠当日」）">🧹 清除手动调整</button>
       <button class="btn btn-danger" id="clear-date" title="清除某个指定日期（按收款时间所在日）的全部业绩记录，各统计表自动重算">🗓 清除指定日期</button>
-      <button class="btn btn-danger" id="clear-all" title="清除本机保存的订单/月目标/手动调整/列宽，重置为空后重新导入（不影响 VAB 会员与近一年消费明细）">🗑 清除全部数据</button>
+      <button class="btn btn-danger" id="clear-all" title="清除本机保存的订单/月目标/手动调整/列宽，重置为空后重新导入（不影响 VAB 会员与历史消费明细数据）">🗑 清除全部数据</button>
       </span>
     </div>
     <div id="render-error" style="display:none;margin-top:10px;padding:10px 12px;background:#fde4e4;color:#b3261e;border:1px solid #b3261e;border-radius:6px;font-size:13px;" data-page-node-id="Cren2M9ptIxbdhlZu8Vs9i"></div>
@@ -677,7 +680,7 @@
   <div class="panel" id="panel-mkt-first">
     <details open>
       <summary>⑥ 营销部初诊客户（近30天）</summary>
-      <div class="legend" style="margin:2px 0 8px;">口径：近30天（截止日起往前30天，可跨月）内 来源渠道=营销部 的初诊客户（按客户去重）。初诊判定 = ①到访类型=初诊（30天窗口内）∪ ②一年内无消费·新客（2026-10-16 新增：导入「近一年消费明细」后，营销部顾客若在截止日往前一年内无任何消费记录即视为初诊客户；未导入历史明细时该规则停用）∪ ③到访类型空白且往前倒推365天无消费记录（2026-10-27 新增：以「近一年消费明细」+ 订单表内更早消费合并判定，不依赖历史明细导入）· 来源渠道=渠道分类-一级渠道-二级渠道 · 支持筛选 · 点击数据行查看该客户近30天消费明细</div>
+      <div class="legend" style="margin:2px 0 8px;">口径：近30天（截止日起往前30天，可跨月）内 来源渠道=营销部 的初诊客户（按客户去重）。初诊判定 = ①到访类型=初诊（30天窗口内）∪ ②一年内无消费·新客（2026-10-16 新增：导入「历史消费明细数据」后，营销部顾客若在截止日往前一年内无任何消费记录即视为初诊客户；未导入历史明细时该规则停用）∪ ③到访类型空白且往前倒推365天无消费记录（2026-10-27 新增：以「历史消费明细数据」+ 订单表内更早消费合并判定，不依赖历史明细导入）· 来源渠道=渠道分类-一级渠道-二级渠道 · 支持筛选 · 点击数据行查看该客户近30天消费明细</div>
       <div id="mkt-first-clients" style="margin-top:4px;">导入订单数据后显示近30天营销部初诊客户</div>
     </details>
   </div>
