@@ -1667,24 +1667,52 @@ function histKeysCached(cutoff){
 // 规则B（2026-10-16 新增）：营销部渠道顾客（渠道分类=营销部 或 推荐→营销部）在「近一年消费明细」
 //   中无任何消费记录（截止日往前推一年窗口内无该客户键）→ 视为初诊客户。
 //   仅导入「近一年消费明细」后启用（集合非空才算启用），未导入时保持既有口径，防止复诊老客误判。
-// 两条规则取并集；客户键口径一致（mktFirstClientKey）。
+// 规则C（2026-10-27 新增）：到访类型【空白】的营销部渠道顾客，往前倒推 365 天无消费记录 → 视为初诊客户。
+//   判定数据源 = 「近一年消费明细」（若导入）∪ 订单表中更早的消费（多月份合并导入后订单表可跨月）；
+//   不依赖历史明细导入状态——未导入时仅按订单表判定（当月首笔空白客户即视为新客初诊）。
+//   复诊等明确类型的顾客仍走规则B，不受本条影响。
+// 三条规则取并集；客户键口径一致（mktFirstClientKey）。
 function buildMktFirstKeys(list, cutoff){
   const s = new Set();
   if(!cutoff || isNaN(cutoff.getTime())) return s;
   const end = fmtDate(cutoff);
   const start = fmtDate(new Date(cutoff.getTime() - 29*86400000));
-  const histKeys = histKeysCached(cutoff); // 未导入历史明细时为空集 → 规则B自动停用
+  const histKeys = histKeysCached(cutoff); // 未导入历史明细时为空集 → 规则B自动停用（规则C不依赖）
+  const winStart365 = fmtDate(new Date(cutoff.getTime() - 366*86400000));
+  // 每个客户在订单表中的最早消费日（365 天窗口内）：规则C 判定「本笔之前是否已有消费记录」
+  const firstSeen = new Map();
   (list||[]).forEach(r => {
     if(!r.payTime) return;
     const d = fmtDate(r.payTime);
+    if(d < winStart365 || d > end) return;
+    const k = mktFirstClientKey(r);
+    if(!k || k === 'name:') return;
+    const prev = firstSeen.get(k);
+    if(prev === undefined || d < prev) firstSeen.set(k, d);
+  });
+  (list||[]).forEach(r => {
+    if(!r.payTime) return;
+    const d = fmtDate(r.payTime);
+    const k = mktFirstClientKey(r);
+    if(!k || k === 'name:') return;
     if(d >= start && d <= end && isMktChuzhenOrder(r)){
       // 规则A：30天窗口内 营销部渠道 且 到访类型=初诊
-      const k = mktFirstClientKey(r);
-      if(k && k !== 'name:') s.add(k);
-    }else if(histKeys.size && (chanHas(r,'营销部') || isRecToYingxiao(r))){
-      // 规则B：营销部渠道顾客 且 近一年历史消费明细中无该客户键 → 新客视为初诊
-      const k = mktFirstClientKey(r);
-      if(k && k !== 'name:' && !histKeys.has(k)) s.add(k);
+      s.add(k);
+    }else if(d >= start && d <= end && (chanHas(r,'营销部') || isRecToYingxiao(r))){
+      // 规则B/C 仅对 30 天窗口内的订单判定（窗口外订单不影响当月金额，
+      // 若仍触发会把客户错误拉进集合、让「365天内有更早消费」的空白订单也算初诊业绩）
+      const vt = (r.visitType||'').trim();
+      const hasEarlier = firstSeen.get(k) !== undefined && firstSeen.get(k) < d;
+      const hasHist = histKeys.size > 0 && histKeys.has(k);
+      if(vt === ''){
+        // 规则C（2026-10-27）：到访类型空白 + 往前倒推365天无消费记录
+        //（历史明细若导入且含该客户 → 有记录；订单表中存在更早消费 → 有记录；均无 → 新客初诊）
+        if(!hasEarlier && !hasHist) s.add(k);
+      }else if(histKeys.size && !histKeys.has(k)){
+        // 规则B：非初诊类型（复诊等）营销部顾客 且 近一年历史消费明细中无该客户键 → 新客视为初诊
+        //（「消费记录」专指历史明细，维持 2026-10-16 既有口径；订单表更早记录由规则C在空白类型中把关）
+        s.add(k);
+      }
     }
   });
   return s;
@@ -2927,7 +2955,8 @@ function filterOrdersByTab(key, opts){
   }
   // 营销部·类型空白：审计视图——营销部渠道下到访类型空白（未填写）的【全部】订单，
   // 不受「30天初诊客户」集合限制（2026-10-13 需求：10月闫语函/冯梓芯/魏周朝等无初诊记录的
-  // 空白类型订单需在此页签可见；此类客户在报表中落「其他」，不影响营销部业绩金额）。
+  // 空白类型订单需在此页签可见；此类客户中「往前倒推365天无消费记录」者按初诊客户统计（2026-10-27 规则C），
+  // 有更早消费记录者仍落报表「其他」，不影响营销部业绩金额）。
   else if(key === 'yx_blank')   list = orders.filter(r => (chanHas(r,'营销部') || isRecToYingxiao(r)) && !(r.visitType||'').trim());
   // 推荐页签：渠道分类=推荐 的订单（用于核对新归类逻辑落位：一级含营销部→营销部，含商务部→商务部，未匹配→其他）
   else if(key === 'recommend') list = orders.filter(r => (r.channelClass||'').trim() === '推荐');
@@ -3962,7 +3991,7 @@ function renderMktFirstClients(){
     groups.get(key).push(r);
   });
   if(groups.size === 0){
-    el.innerHTML = '<div class="file-meta" style="padding:12px 0;">近30天（'+winStart+' ~ '+winEnd+'）暂无营销部初诊客户（判定=到访类型初诊 ∪ 一年内无消费·新客）</div>';
+    el.innerHTML = '<div class="file-meta" style="padding:12px 0;">近30天（'+winStart+' ~ '+winEnd+'）暂无营销部初诊客户（判定=到访类型初诊 ∪ 一年内无消费·新客 ∪ 到访类型空白且365天无消费记录）</div>';
     return;
   }
   // 来源渠道 = 渠道分类-一级渠道-二级渠道 拼接（空段跳过）
