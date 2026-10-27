@@ -3833,14 +3833,107 @@ function clearHistData(){
 
 // ===== 近一年消费明细：只读清单（核验合并 / 覆盖结果）=====
 let histPage = 1, histPageSize = 20;
+// 清单筛选（2026-10-27 需求：2.6 万行需能筛）：
+//   关键字   = 会员号 / 姓名 / 收款单号 任一包含（不区分大小写）
+//   收款时间 = [起, 止] 闭区间，任一端留空 = 该端不限
+//   到访类型 = 精确匹配，附「（空白）」项 —— 规则C 判定所依赖的空白类型需能单独筛出来核验
+//   渠道     = 渠道分类 / 一级渠道 / 二级渠道 任一包含
+let histFilters = { kw:'', dateFrom:'', dateTo:'', visitType:'', channel:'' };
+const HIST_VT_BLANK = '__blank__';
+let _histFilterTimer = null;
+let _histFocus = null;   // 重建后恢复输入框焦点与光标：{key, pos}
+
+function histFiltersActive(){
+  const f = histFilters || {};
+  return !!(String(f.kw||'').trim() || String(f.channel||'').trim() || f.dateFrom || f.dateTo || f.visitType);
+}
+// 到访类型选项：2.6 万行下每次输入都重算 Set 太重 → 按 (行数, histTs) 签名缓存
+let _histVtCache = { sig:'', opts:[] };
+function histVisitTypeOptions(){
+  const rows = state.histOrders || [];
+  const first = rows[0] || {}, last = rows[rows.length-1] || {};
+  const sig = rows.length + '|' + (state.histTs || 0) + '|' + (first.memberNo||'') + '|' + (last.receiptNo||'');
+  if(_histVtCache.sig === sig) return _histVtCache.opts;
+  const opts = [...new Set(rows.map(r=>String(r.visitType||'').trim()).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'zh-CN'));
+  _histVtCache = { sig, opts };
+  return opts;
+}
+function filterHistRows(rows){
+  const f = histFilters || {};
+  const kw = String(f.kw||'').trim().toLowerCase();
+  const ch = String(f.channel||'').trim().toLowerCase();
+  const vt = String(f.visitType||'');
+  const from = f.dateFrom || '', to = f.dateTo || '';
+  if(!kw && !ch && !vt && !from && !to) return rows;
+  return rows.filter(r=>{
+    if(kw){
+      const hit = v => String(v==null?'':v).toLowerCase().indexOf(kw) >= 0;
+      if(!hit(r.memberNo) && !hit(r.name) && !hit(r.receiptNo)) return false;
+    }
+    if(ch){
+      const hit = v => String(v==null?'':v).toLowerCase().indexOf(ch) >= 0;
+      if(!hit(r.channelClass) && !hit(r.channelL1) && !hit(r.channelL2)) return false;
+    }
+    if(vt){
+      const cur = String(r.visitType||'').trim();
+      if(vt === HIST_VT_BLANK){ if(cur !== '') return false; }
+      else if(cur !== vt) return false;
+    }
+    if(from || to){
+      if(!r.payTime) return false;
+      const d = fmtDate(r.payTime);
+      if(from && d < from) return false;
+      if(to && d > to) return false;
+    }
+    return true;
+  });
+}
 function renderHistList(){
   const box = $('hist-list');
   if(!box) return;
-  const rows = state.histOrders || [];
+  const all = state.histOrders || [];
   const sum = $('hist-list-summary');
-  if(sum) sum.textContent = `📋 近一年消费明细（共 ${rows.length} 行）`;
-  if(!rows.length){
+  const anyF = histFiltersActive();
+  const rows = filterHistRows(all);
+  if(sum) sum.textContent = `📋 近一年消费明细（共 ${all.length} 行${anyF ? ` · 筛选后 ${rows.length} 行` : ''}）`;
+  const f = histFilters || {};
+  // 到访类型选项取自全部明细（与当前筛选无关，保证跨筛选稳定）
+  const vtSet = histVisitTypeOptions();
+  const filterBar = !all.length ? '' : `
+    <div class="detail-filters" style="margin:8px 0 6px;">
+      <div class="filters-body">
+        <label class="detail-filter"><span class="df-label">关键字</span>
+          <input type="text" class="detail-select" data-hfilter="kw" value="${esc(f.kw||'')}" placeholder="会员号/姓名/收款单号…" title="会员号 / 姓名 / 收款单号 任一包含即命中">
+        </label>
+        <label class="detail-filter"><span class="df-label">收款时间起</span>
+          <input type="date" class="detail-select" data-hfilter="dateFrom" value="${esc(f.dateFrom||'')}" title="起始日（含）；留空 = 不限">
+        </label>
+        <label class="detail-filter"><span class="df-label">收款时间止</span>
+          <input type="date" class="detail-select" data-hfilter="dateTo" value="${esc(f.dateTo||'')}" title="截止日（含）；留空 = 不限">
+        </label>
+        <label class="detail-filter"><span class="df-label">到访类型</span>
+          <select class="detail-select" data-hfilter="visitType">
+            <option value="">全部</option>
+            ${vtSet.map(v=>`<option value="${esc(v)}"${String(f.visitType||'')===v?' selected':''}>${esc(v)}</option>`).join('')}
+            <option value="${HIST_VT_BLANK}"${String(f.visitType||'')===HIST_VT_BLANK?' selected':''}>（空白）</option>
+          </select>
+        </label>
+        <label class="detail-filter"><span class="df-label">渠道</span>
+          <input type="text" class="detail-select" data-hfilter="channel" value="${esc(f.channel||'')}" placeholder="分类/一级/二级…" title="渠道分类 / 一级渠道 / 二级渠道 任一包含即命中">
+        </label>
+        <span class="filters-foot">
+          ${anyF?'<button type="button" id="hist-filter-reset" class="detail-reset" title="清除全部筛选">清除筛选</button>':''}
+          <span>${rows.length}/${all.length} 行 · 现款合计 ${fmt(rows.reduce((a,r)=>a+Number(r.cashPay||0),0))}</span>
+        </span>
+      </div>
+    </div>`;
+  if(!all.length){
     box.innerHTML = `<div class="file-meta" style="margin:8px 0;">（暂无明细，请先上传）</div>`;
+    return;
+  }
+  if(!rows.length){
+    box.innerHTML = filterBar + `<div class="file-meta" style="margin:8px 0;">（无匹配记录，请调整筛选条件）</div>`;
+    restoreHistFocus(box);
     return;
   }
   const pages = Math.max(1, Math.ceil(rows.length / histPageSize));
@@ -3858,21 +3951,28 @@ function renderHistList(){
   const pager = `<div class="detail-pager" style="margin:6px 2px 12px;">
     <button type="button" class="pg-btn" data-hpg="first" title="第一页"${histPage<=1?' disabled':''}>«</button>
     <button type="button" class="pg-btn" data-hpg="prev" title="上一页"${histPage<=1?' disabled':''}>‹ 上一页</button>
-    <span class="pg-info" style="margin:0 8px;">第 ${histPage} / ${pages} 页 · 共 ${rows.length} 行</span>
+    <span class="pg-info" style="margin:0 8px;">第 ${histPage} / ${pages} 页 · 共 ${rows.length} 行${anyF?`（全部 ${all.length} 行）`:''}</span>
     <button type="button" class="pg-btn" data-hpg="next" title="下一页"${histPage>=pages?' disabled':''}>下一页 ›</button>
     <button type="button" class="pg-btn" data-hpg="last" title="最后一页"${histPage>=pages?' disabled':''}>»</button>
     <select id="hist-page-size" class="detail-select" style="height:26px;width:auto;margin-left:8px;" title="每页显示条数">
       ${[20,50,100,200].map(n=>`<option value="${n}"${histPageSize===n?' selected':''}>${n} 条/页</option>`).join('')}
     </select>
   </div>`;
-  box.innerHTML = `<div class="table-wrap vab-table-wrap" style="max-height:none;overflow:auto;border:1px solid var(--c-border);border-radius:8px;margin:8px 0;"><table class="data"><thead>${headHtml}</thead><tbody>${bodyHtml}</tbody></table></div>` + pager;
-  // 分页交互只绑定一次（容器常驻，内部随 innerHTML 重建）
+  box.innerHTML = filterBar + `<div class="table-wrap vab-table-wrap" style="max-height:none;overflow:auto;border:1px solid var(--c-border);border-radius:8px;margin:8px 0;"><table class="data"><thead>${headHtml}</thead><tbody>${bodyHtml}</tbody></table></div>` + pager;
+  // 分页 / 筛选交互只绑定一次（容器常驻，内部随 innerHTML 重建）
   if(!box.dataset.bound){
     box.dataset.bound = '1';
     box.addEventListener('click', e=>{
+      const rst = e.target.closest && e.target.closest('#hist-filter-reset');
+      if(rst){
+        histFilters = { kw:'', dateFrom:'', dateTo:'', visitType:'', channel:'' };
+        histPage = 1; _histFocus = null;
+        renderHistList();
+        return;
+      }
       const b = e.target.closest('[data-hpg]');
       if(!b) return;
-      const pages2 = Math.max(1, Math.ceil(((state.histOrders||[]).length) / histPageSize));
+      const pages2 = Math.max(1, Math.ceil((filterHistRows(state.histOrders||[]).length) / histPageSize));
       const k = b.dataset.hpg;
       if(k === 'first') histPage = 1;
       else if(k === 'last') histPage = pages2;
@@ -3880,12 +3980,45 @@ function renderHistList(){
       else histPage = Math.min(pages2, histPage + 1);
       renderHistList();
     });
+    // 文本输入即筛（防抖 250ms）：日期与下拉走 change，避免重复重建
+    box.addEventListener('input', e=>{
+      const el = e.target;
+      const key = el && el.dataset && el.dataset.hfilter;
+      if(key !== 'kw' && key !== 'channel') return;
+      _histFocus = { key, pos: el.selectionStart == null ? null : el.selectionStart };
+      if(_histFilterTimer) clearTimeout(_histFilterTimer);
+      _histFilterTimer = setTimeout(()=>{
+        histFilters[key] = el.value;
+        histPage = 1;
+        renderHistList();
+      }, 250);
+    });
     box.addEventListener('change', e=>{
-      if(e.target.id !== 'hist-page-size') return;
-      histPageSize = Number(e.target.value) || 20;
+      const el = e.target;
+      if(!el) return;
+      if(el.id === 'hist-page-size'){
+        histPageSize = Number(el.value) || 20;
+        histPage = 1;
+        renderHistList();
+        return;
+      }
+      const key = el.dataset && el.dataset.hfilter;
+      if(key !== 'dateFrom' && key !== 'dateTo' && key !== 'visitType') return;
+      histFilters[key] = el.value || '';
       histPage = 1;
       renderHistList();
     });
+  }
+  // 重建后恢复输入框焦点与光标（否则每敲一个字都跳出输入框）
+  restoreHistFocus(box);
+}
+// 重建后恢复输入框焦点与光标（筛选无匹配 / 有结果两条路径共用）
+function restoreHistFocus(box){
+  if(!_histFocus) return;
+  const lk = _histFocus; _histFocus = null;
+  const el = box.querySelector(`[data-hfilter="${lk.key}"]`);
+  if(el){
+    try{ el.focus(); if(lk.pos != null && el.setSelectionRange) el.setSelectionRange(lk.pos, lk.pos); }catch(err){}
   }
 }
 function toggleHistList(){
@@ -5318,7 +5451,7 @@ function initApp(){
       const vb = document.createElement('button');
       vb.className = 'btn'; vb.id = 'view-hist';
       vb.textContent = '📋 查看明细';
-      vb.title = '展开/收起已导入并合并后的近一年消费明细（只读，用于核验合并 / 覆盖结果）';
+      vb.title = '展开/收起已导入并合并后的近一年消费明细（只读，支持按关键字 / 收款时间 / 到访类型 / 渠道筛选）';
       if(clr && clr.parentNode) clr.parentNode.insertBefore(vb, clr);
       else seg2.appendChild(vb);
     }
