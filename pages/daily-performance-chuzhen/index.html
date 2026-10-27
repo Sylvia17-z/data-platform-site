@@ -163,6 +163,19 @@
   .vab-list-summary{cursor:pointer;user-select:none;font-size:13px;font-weight:600;color:var(--c-head);} /* 点击 summary 可收起/展开 */
   /* VAB 新增会员弹窗 */
   .modal-mask{position:fixed;inset:0;background:rgba(15,23,42,.42);display:flex;align-items:center;justify-content:center;z-index:1000;padding:16px;}
+  /* ============ 指定日期列弹窗（2026-10-27）：只保留勾选的日期列 ============ */
+  .datepick-box{width:min(580px,94vw);}
+  .datepick-tools{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 10px;}
+  .datepick-tools button{height:27px;padding:0 11px;font-size:12px;font-family:inherit;border:1px solid var(--c-border);border-radius:6px;background:#fff;color:var(--c-head);cursor:pointer;transition:background .12s,border-color .12s;}
+  .datepick-tools button:hover{background:#eef3fd;border-color:var(--c-accent);color:var(--c-accent);}
+  .datepick-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(76px,1fr));gap:6px;max-height:42vh;overflow:auto;padding:2px;}
+  .datepick-item{display:flex;align-items:center;gap:5px;font-size:12.5px;padding:5px 7px;border:1px solid var(--c-border);border-radius:6px;background:#fff;color:var(--c-muted);cursor:pointer;user-select:none;}
+  .datepick-item.has-data{color:var(--c-text);border-color:#c8d6ef;background:#f7f9fd;}
+  .datepick-item.has-data::after{content:'';width:4px;height:4px;border-radius:50%;background:var(--c-accent);margin-left:auto;flex:none;opacity:.5;}
+  .datepick-item.checked::after{opacity:.85;}
+  .datepick-item.checked{border-color:var(--c-accent);background:#eef3fd;color:var(--c-accent);font-weight:600;}
+  .datepick-item input{margin:0;cursor:pointer;flex:none;}
+  .datepick-info{font-size:12px;color:var(--c-muted);margin-right:auto;align-self:center;}
   .modal-box{background:#fff;border-radius:12px;padding:20px;width:min(460px,94vw);max-height:86vh;overflow:auto;box-shadow:0 16px 48px rgba(0,0,0,.28);}
   .modal-title{font-size:15px;font-weight:600;color:var(--c-head);margin-bottom:14px;}
   .modal-fields{display:flex;flex-direction:column;gap:10px;}
@@ -575,6 +588,7 @@
       <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:8px;" data-page-node-id="T6vsiDPkzQB7mwVvDIAPhy">
         <h2 style="margin:0;" data-page-node-id="h6ZNdUM5PNYqJizlLOsxSs">③ 业绩报表</h2>
       <div class="row" data-page-node-id="UGvQsYwUILaU4vGkc7TQzN">
+        <button class="btn" id="datepick-main" title="只保留指定日期的列（其余日期列隐藏；不影响计算与月累计）">📅 指定日期</button>
         <button class="btn" id="batch-toggle" title="批量选择要隐藏的日期列">☑ 批量</button>
         <button class="btn" id="expand-all" title="展开所有日期列">+展开</button>
         <button class="btn" id="export-xlsx" data-page-node-id="Dl7Z2nfnhq1k54Mfn2mTHp">📥 导出Excel</button>
@@ -612,6 +626,7 @@
     <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:8px;" data-page-node-id="QvM8CY93FEiQDeGVxOZXho">
       <h2 style="margin:0;" data-page-node-id="L5ppgzmYuo1HX6A7OF8XX2">④ 门店业绩（高新店 / 经开店）</h2>
       <div class="row" data-page-node-id="SYuuyJpja5mJT090Zc0HBh">
+        <button class="btn" id="datepick-store" title="只保留指定日期的列（其余日期列隐藏；不影响计算与月累计）">📅 指定日期</button>
         <button class="btn" id="store-batch-toggle" title="批量选择要隐藏的日期列">☑ 批量</button>
         <button class="btn" id="store-expand-all" title="展开所有日期列">+展开</button>
         <button class="btn" id="export-store-xlsx" data-page-node-id="CDGlLm1AjIC85L8HAOOJ3Y">📥 导出Excel</button>
@@ -643,6 +658,7 @@
     <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:8px;">
       <h2 style="margin:0;">⑤ 电商组二级渠道业绩（初诊）</h2>
       <div class="row">
+        <button class="btn" id="datepick-ec" title="只保留指定日期的列（其余日期列隐藏；不影响计算与月累计）">📅 指定日期</button>
         <button class="btn" id="ec-sub-batch-toggle" title="批量选择要隐藏的日期列">☑ 批量</button>
         <button class="btn" id="ec-sub-expand-all" title="展开所有日期列">+展开</button>
         <button class="btn" id="export-ec-sub-xlsx">📥 导出Excel</button>

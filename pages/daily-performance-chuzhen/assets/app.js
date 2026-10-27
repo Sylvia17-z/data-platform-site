@@ -4900,6 +4900,210 @@ function updateEcSubTitleColspan(){
   if(titleTh) titleTh.colSpan = 5 + 2 * visible;
 }
 
+// ===== 只保留指定日期列（2026-10-27 需求）=====
+// 三张表共用同一个日期多选面板，逻辑各自独立：
+//   ③ report-table / ④ store-table → 通过 .col-hidden 类隐藏（沿用现有列隐藏机制）
+//   ⑤ ec-sub-table                 → 通过 ecSubHidden 集合重渲染（隐藏列不进 DOM）
+// 仅影响「展示」（导出 Excel/PNG 跟随当前显示），不影响任何计算、月累计与合计。
+const DATE_PICK_TABLES = {
+  main:  { tableId:'report-table', label:'③ 业绩报表',       btn:'datepick-main'  },
+  store: { tableId:'store-table',  label:'④ 门店业绩',       btn:'datepick-store' },
+  ec:    { tableId:'ec-sub-table', label:'⑤ 电商二级渠道业绩', btn:'datepick-ec'    },
+};
+let _datePickTarget = null;
+let _datePickSel = new Set();
+let _datePickDates = [];
+let _datePickHasData = new Set();
+
+function datePickAllDates(){
+  const cutoff = state.cutoffDate ? new Date(state.cutoffDate) : new Date();
+  return generateDateRange(cutoff);   // 当月 1 日 ~ 截止日（三张表同一口径）
+}
+// 目标表当前「可见」的日期集合（用于打开面板时的默认勾选）
+function datePickVisibleDates(target){
+  if(target === 'ec'){
+    const rep = computeEcSubReport();
+    const hidden = ecSubHiddenSet(rep);
+    return new Set((rep.dateList || []).filter(d => !hidden.has(d)));
+  }
+  const table = $(DATE_PICK_TABLES[target].tableId);
+  const set = new Set();
+  if(table) table.querySelectorAll('th.daily-col').forEach(th=>{
+    if(!th.classList.contains('col-hidden') && th.dataset.date) set.add(th.dataset.date);
+  });
+  return set;
+}
+// 目标表「有数据」的日期集合（chip 标注 + 「仅本日有数据」快捷）
+function datePickHasDataDates(target){
+  const set = new Set();
+  if(target === 'ec'){
+    const rep = computeEcSubReport();
+    (rep.dateList || []).forEach(d => { if((rep.totalDays && (rep.totalDays[d] || 0)) > 0) set.add(d); });
+  }else{
+    datePickAllDates().forEach(d => { if(!emptyDailyDates.has(d)) set.add(d); });
+  }
+  return set;
+}
+function updateDatePickInfo(){
+  const info = $('datepick-info');
+  if(!info) return;
+  info.textContent = `已选 ${_datePickSel.size} / ${_datePickDates.length} 天`;
+}
+function syncDatePickChecks(){
+  const grid = $('datepick-grid');
+  if(!grid) return;
+  grid.querySelectorAll('.datepick-item').forEach(item=>{
+    const on = _datePickSel.has(item.dataset.date);
+    item.classList.toggle('checked', on);
+    const cb = item.querySelector('input[type="checkbox"]');
+    if(cb) cb.checked = on;
+  });
+  updateDatePickInfo();
+}
+function closeDatePick(){
+  const mask = $('datepick-mask');
+  if(mask) mask.style.display = 'none';
+  _datePickTarget = null;
+}
+function openDatePick(target){
+  const cfg = DATE_PICK_TABLES[target];
+  if(!cfg || !$(cfg.tableId)) return;
+  if(!state.results){ showToast('请先在「① 数据导入」上传订单表', 'warn', 2600); return; }
+  _datePickTarget = target;
+  _datePickDates = datePickAllDates();
+  _datePickHasData = datePickHasDataDates(target);
+  _datePickSel = datePickVisibleDates(target);
+  const gridHtml = _datePickDates.map(d=>{
+    const dt = new Date(d);
+    const on = _datePickSel.has(d), hd = _datePickHasData.has(d);
+    return `<label class="datepick-item${on?' checked':''}${hd?' has-data':''}" data-date="${d}" title="${d}${hd?'（有数据）':'（无数据）'}">
+      <input type="checkbox" data-dpdate="${d}"${on?' checked':''}>
+      <span>${dt.getMonth()+1}/${String(dt.getDate()).padStart(2,'0')}</span>
+    </label>`;
+  }).join('');
+  let mask = $('datepick-mask');
+  if(!mask){
+    mask = document.createElement('div');
+    mask.id = 'datepick-mask';
+    mask.className = 'modal-mask';
+    mask.style.zIndex = '1200';
+    document.body.appendChild(mask);
+    bindDatePickEvents(mask);
+  }
+  mask.innerHTML = `<div class="modal-box datepick-box">
+    <div class="modal-title">📅 只保留指定日期列 · <span style="color:var(--c-accent);">${esc(cfg.label)}</span></div>
+    <div class="datepick-tools">
+      <button type="button" data-dp="all">全选</button>
+      <button type="button" data-dp="withdata">仅本日有数据</button>
+      <button type="button" data-dp="latest">仅最新有数据</button>
+      <button type="button" data-dp="none">全不选</button>
+    </div>
+    <div class="datepick-grid" id="datepick-grid">${gridHtml || '<div class="file-meta">（当前无日期列）</div>'}</div>
+    <div class="modal-actions">
+      <span class="datepick-info" id="datepick-info"></span>
+      <button type="button" class="btn" id="datepick-cancel">取消</button>
+      <button type="button" class="btn btn-primary" id="datepick-apply">应用</button>
+    </div>
+  </div>`;
+  mask.style.display = 'flex';   // ⚠ 必须 inline：共享 CSS 的 .modal-mask{display:none} 会覆盖默认 flex（2026-10-27 下钻弹窗同款坑）
+  updateDatePickInfo();
+}
+function bindDatePickEvents(mask){
+  mask.addEventListener('click', e=>{
+    if(e.target === mask){ closeDatePick(); return; }   // 点遮罩关闭
+    const tool = e.target.closest('[data-dp]');
+    if(tool){
+      const k = tool.dataset.dp;
+      if(k === 'all') _datePickSel = new Set(_datePickDates);
+      else if(k === 'none') _datePickSel = new Set();
+      else if(k === 'withdata') _datePickSel = new Set(_datePickDates.filter(d => _datePickHasData.has(d)));
+      else if(k === 'latest'){
+        _datePickSel = new Set();
+        for(let i=_datePickDates.length-1; i>=0; i--){
+          if(_datePickHasData.has(_datePickDates[i])){ _datePickSel.add(_datePickDates[i]); break; }
+        }
+      }
+      syncDatePickChecks();
+      return;
+    }
+    if(e.target.closest('#datepick-cancel')){ closeDatePick(); return; }
+    if(e.target.closest('#datepick-apply')){ applyDatePick(); return; }
+  });
+  mask.addEventListener('change', e=>{
+    const cb = e.target.closest('input[data-dpdate]');
+    if(!cb) return;
+    const d = cb.dataset.dpdate;
+    if(cb.checked) _datePickSel.add(d); else _datePickSel.delete(d);
+    const item = cb.closest('.datepick-item');
+    if(item) item.classList.toggle('checked', cb.checked);
+    updateDatePickInfo();
+  });
+  document.addEventListener('keydown', e=>{
+    if(e.key === 'Escape' && mask.style.display === 'flex') closeDatePick();
+  });
+}
+function applyDatePick(){
+  const target = _datePickTarget;
+  if(!target) return;
+  const sel = new Set(_datePickSel);
+  const all = _datePickDates.slice();
+  if(target === 'ec'){
+    // ⑤ 每个日期占 2 子列（客量/金额），全隐藏会让「当日数据/月累计」两行失去意义 → 至少留一天
+    if(!sel.size){ showToast('⑤ 电商二级渠道业绩至少需保留一个日期列，请用「+展开」恢复', 'warn', 3000); return; }
+    ecSubHidden = new Set(all.filter(d => !sel.has(d)));
+    ecSubBatchMode = false;
+    const t = $('ec-sub-table'); if(t) t.classList.remove('batch-mode');
+    const bb = $('ec-sub-batch-toggle'); if(bb) bb.textContent = '☑ 批量';
+    renderEcSubReport();
+  }else{
+    const table = $(DATE_PICK_TABLES[target].tableId);
+    if(table){
+      table.querySelectorAll('th.daily-col').forEach(th=>{
+        th.classList.toggle('col-hidden', !sel.has(th.dataset.date));
+        th.classList.remove('selected');
+      });
+      table.querySelectorAll('td[data-idx]').forEach(td=>{
+        const d = all[+td.dataset.idx];
+        if(d) td.classList.toggle('col-hidden', !sel.has(d));
+      });
+      if(target === 'store'){
+        storeBatchMode = false;
+        table.classList.remove('batch-mode');
+        const sb = $('store-batch-toggle'); if(sb) sb.textContent = '☑ 批量';
+        updateStoreTitleColspan(table);
+      }else{
+        batchMode = false;
+        table.classList.remove('batch-mode');
+        const mb = $('batch-toggle'); if(mb) mb.textContent = '☑ 批量';
+        updateMainTitleColspan(table);
+      }
+    }
+  }
+  closeDatePick();
+  showToast(sel.size ? `已只保留 ${sel.size} 个日期列（共 ${all.length} 天）` : '已隐藏全部日期列', sel.size ? 'ok' : 'warn');
+}
+// 旧缓存 HTML 兜底：补齐三张表的「📅 指定日期」按钮（幂等）
+function ensureDatePickButtons(){
+  [['batch-toggle','datepick-main'],['store-batch-toggle','datepick-store'],['ec-sub-batch-toggle','datepick-ec']].forEach(([anchorId, newId])=>{
+    if($(newId)) return;
+    const anchor = $(anchorId);
+    if(!anchor || !anchor.parentNode) return;
+    const b = document.createElement('button');
+    b.className = 'btn';
+    b.id = newId;
+    b.textContent = '📅 指定日期';
+    b.title = '只保留指定日期的列（其余日期列隐藏；不影响计算与月累计）';
+    anchor.parentNode.insertBefore(b, anchor);
+  });
+  [['datepick-main','main'],['datepick-store','store'],['datepick-ec','ec']].forEach(([id, t])=>{
+    const b = $(id);
+    if(b && !b.dataset.dpBound){
+      b.dataset.dpBound = '1';
+      b.addEventListener('click', ()=>openDatePick(t));
+    }
+  });
+}
+
 // ⑤ 页面 DOM/CSS 兜底：index.html 万一被 CDN/浏览器缓存成旧版本（缺按钮或宽度规则），
 // 由 app.js（带 Date.now() 穿透）补齐，保证新旧 HTML 混载时渲染依旧正确。幂等，可重复调用。
 function ensureEcSubDom(){
@@ -5491,6 +5695,7 @@ function initApp(){
   const ecSubPngBtn = $('export-ec-sub-png');
   if(ecSubPngBtn) ecSubPngBtn.addEventListener('click', exportEcSubPng);
   bindEcSubControls();   // ⑤ 日期列：单列收起 /「☑ 批量」/「+展开」
+  ensureDatePickButtons();   // 「📅 指定日期」：旧缓存 HTML 兜底补齐 + 绑定（幂等）
   // 「批量 / 展开」报表独立按钮（已移出表头）：仅绑定一次；④ 门店业绩同款
   bindBatchExpandButtons($('report-table'));
   bindStoreBatchExpandButtons($('store-table'));
