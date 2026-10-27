@@ -2758,12 +2758,15 @@ function yxReportDept(r, gateSet){
   if(isRecToYingxiao(r)) return yxGate ? (l2.includes('自然到店') ? '品牌组-自然到店' : '电商组') : null;
   return null;  // 营销部渠道但不属于任何部门类别（如一级=商务合作、二级=外拓活动、短视频组）→ 报表「其他」
 }
-// 「30天内营销部初诊客户」键集合（带缓存，按 截止月+订单数+时间戳 失效）——与 calculate 口径一致
+// 「30天内营销部初诊客户」键集合（带缓存，按 完整截止日+订单数+时间戳 失效）——与 calculate 口径一致
 let _mktKeysCache = { sig:'', set:null };
 function mktFirstKeysCached(){
-  const month = state.cutoffDate ? String(state.cutoffDate).slice(0,7) : '';
-  // 签名含历史明细签名（行数+时间戳）：导入/清除「近一年消费明细」后初诊键集合立即重建
-  const sig = month + '|' + (state.orders||[]).length + '|' + (state.ordersTs||0)
+  // 签名含【完整截止日期】（2026-10-27 修复「⑥ 营销部初诊客户随截止日滚动更新」）：
+  // 原先只含 YYYY-MM → 同月内改截止日（如 10/24 → 10/26）初诊集合不重建，
+  // ⑥ 清单的 30 天窗口标签滚动了、客户集合却停在旧窗口（窗口外新初诊的客户不出现）。
+  // 另含订单签名（行数+时间戳）与历史明细签名（行数+时间戳）。
+  const cutoffKey = state.cutoffDate ? String(state.cutoffDate) : '';
+  const sig = cutoffKey + '|' + (state.orders||[]).length + '|' + (state.ordersTs||0)
     + '|H' + (state.histOrders||[]).length + '|' + (state.histTs||0);
   if(_mktKeysCache.sig !== sig){
     // cutoff 未设置时默认 today（与 renderMktFirstClients 对齐），避免 gateSet 静默为空导致⑤清单空白
