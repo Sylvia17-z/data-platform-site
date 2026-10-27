@@ -4533,9 +4533,9 @@ function renderEcSubReport(){
     <tr><th colspan="${5 + 2 * vDates.length}" class="title-cell">电商组各二级渠道业绩（初诊业绩，截止${monthStr}）</th></tr>
     <tr>
       <th class="sub-head" rowspan="2">平台名称</th>
-      <th class="sub-head" rowspan="2">二级渠道</th>
       <th class="sub-head" rowspan="2">渠道分类</th>
       <th class="sub-head" rowspan="2">一级渠道</th>
+      <th class="sub-head" rowspan="2">二级渠道</th>
       <th class="sub-head" rowspan="2">业绩类型</th>
       ${vDates.map(d=>{
         const dt = new Date(d);
@@ -4555,9 +4555,9 @@ function renderEcSubReport(){
     // 每日期 2 子列：客量(cnt:d:) + 金额(amt:d:)
     html += `<tr class="ec-sub-today">
       <td class="cat" rowspan="2">${esc(r.platform)}</td>
-      <td rowspan="2">${esc(r.l2)}</td>
       <td rowspan="2" class="chan-cell">${esc(r.channelClass || '—')}</td>
       <td rowspan="2" class="chan-cell">${esc(r.channelL1 || '—')}</td>
+      <td rowspan="2">${esc(r.l2)}</td>
       <td class="type-cell">当日数据</td>
       ${vDates.map(d=>`<td class="num" data-idx="${idxOf.get(d)}" data-date="${d}" data-col="cnt:d:${d}" data-val="${r.cntDays[d] || 0}" title="当日客量">${r.cntDays[d] || 0}</td><td class="num" data-idx="${idxOf.get(d)}" data-date="${d}" data-col="amt:d:${d}" data-val="${r.days[d] || 0}">${fmt(r.days[d] || 0)}</td>`).join('')}
     </tr>
@@ -4580,7 +4580,7 @@ function renderEcSubReport(){
   table.querySelectorAll('colgroup').forEach(c=>c.remove());
   const cg = document.createElement('colgroup');
   const addCol = w => { const c = document.createElement('col'); c.style.width = w; cg.appendChild(c); };
-  addCol('230px'); addCol('120px'); addCol('90px'); addCol('90px'); addCol('92px');
+  addCol('230px'); addCol('90px'); addCol('90px'); addCol('120px'); addCol('92px');
   vDates.forEach(()=>{ addCol('52px'); addCol('82px'); });
   table.insertBefore(cg, table.firstChild);
 
@@ -4725,9 +4725,9 @@ function buildEcSubGrid(){
   // 表头两行：第 1 行固定列(rowspan 2) + 每日期分组(colspan 2)；第 2 行每日期 客量/金额 子表头
   rows.push(Array.from({length:nCols}, () => null));
   rows[1][0] = cell('平台名称', 's', 'subhead');
-  rows[1][1] = cell('二级渠道', 's', 'subhead');
-  rows[1][2] = cell('渠道分类', 's', 'subhead');
-  rows[1][3] = cell('一级渠道', 's', 'subhead');
+  rows[1][1] = cell('渠道分类', 's', 'subhead');
+  rows[1][2] = cell('一级渠道', 's', 'subhead');
+  rows[1][3] = cell('二级渠道', 's', 'subhead');
   rows[1][4] = cell('业绩类型', 's', 'subhead');
   rows.push(Array.from({length:nCols}, () => null));
   [0,1,2,3,4].forEach(c => merges.push({r:1, c, r2:2, c2:c}));   // 固定列表头跨 2 行
@@ -4746,9 +4746,9 @@ function buildEcSubGrid(){
     const a = Array.from({length:nCols}, () => null);   // 当日数据
     const b = Array.from({length:nCols}, () => null);   // 月累计
     a[0] = cell(row.platform, 's', 'cat');
-    a[1] = cell(row.l2, 's', 'cat');
-    a[2] = cell(row.channelClass || '—', 's', 'cat');
-    a[3] = cell(row.channelL1 || '—', 's', 'cat');
+    a[1] = cell(row.channelClass || '—', 's', 'cat');
+    a[2] = cell(row.channelL1 || '—', 's', 'cat');
+    a[3] = cell(row.l2, 's', 'cat');
     a[4] = cell('当日数据', 's', 'catsub');
     b[4] = cell('月累计', 's', 'catsub');
     dateList.forEach((d,k)=>{
@@ -4759,9 +4759,9 @@ function buildEcSubGrid(){
     });
     rows.push(a); rows.push(b);
     merges.push({r:r1, c:0, r2:r2, c2:0});   // 平台名称 纵向合并
-    merges.push({r:r1, c:1, r2:r2, c2:1});   // 二级渠道 纵向合并
-    merges.push({r:r1, c:2, r2:r2, c2:2});   // 渠道分类 纵向合并
-    merges.push({r:r1, c:3, r2:r2, c2:3});   // 一级渠道 纵向合并
+    merges.push({r:r1, c:1, r2:r2, c2:1});   // 渠道分类 纵向合并
+    merges.push({r:r1, c:2, r2:r2, c2:2});   // 一级渠道 纵向合并
+    merges.push({r:r1, c:3, r2:r2, c2:3});   // 二级渠道 纵向合并
   });
   // 合计：2 行（当日合计 / 累计合计），标签纵向合并 5 固定列
   const tr = 3 + rep.rows.length * 2;
@@ -4777,7 +4777,7 @@ function buildEcSubGrid(){
   rows.push(t1); rows.push(t2);
   merges.push({r:tr, c:0, r2:tr+1, c2:4});
 
-  const colWidths = [26, 18, 10, 10, 12];
+  const colWidths = [26, 10, 10, 18, 12];
   dateList.forEach(()=>{ colWidths.push(8); colWidths.push(11); });   // 每日期：客量(窄) + 金额(宽)
   return { rows, merges, colWidths, hiddenCols:[] };
 }
