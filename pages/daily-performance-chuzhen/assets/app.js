@@ -3799,6 +3799,73 @@ function clearHistData(){
   showToast('已清除近一年消费明细，新客规则已停用', 'ok');
 }
 
+// ===== 近一年消费明细：只读清单（核验合并 / 覆盖结果）=====
+let histPage = 1, histPageSize = 20;
+function renderHistList(){
+  const box = $('hist-list');
+  if(!box) return;
+  const rows = state.histOrders || [];
+  const sum = $('hist-list-summary');
+  if(sum) sum.textContent = `📋 近一年消费明细（共 ${rows.length} 行）`;
+  if(!rows.length){
+    box.innerHTML = `<div class="file-meta" style="margin:8px 0;">（暂无明细，请先上传）</div>`;
+    return;
+  }
+  const pages = Math.max(1, Math.ceil(rows.length / histPageSize));
+  if(histPage > pages) histPage = pages;
+  if(histPage < 1) histPage = 1;
+  const start = (histPage - 1) * histPageSize;
+  const pageRows = rows.slice(start, start + histPageSize);
+  const headers = ['会员号','姓名','收款时间','收款单号','收款类型','现款支付','资产抵扣','到访类型','渠道分类','一级渠道','二级渠道'];
+  const headHtml = '<tr>' + headers.map(h=>`<th>${h}</th>`).join('') + '</tr>';
+  const bodyHtml = pageRows.map(r=>{
+    const d = r.payTime ? fmtDate(r.payTime) : '';
+    const vals = [r.memberNo, r.name, d, r.receiptNo, r.payType, fmt(r.cashPay||0), fmt(r.assetDeduct||0), r.visitType, r.channelClass, r.channelL1, r.channelL2];
+    return '<tr>' + vals.map(v=>`<td>${esc(v==null?'':v)}</td>`).join('') + '</tr>';
+  }).join('');
+  const pager = `<div class="detail-pager" style="margin:6px 2px 12px;">
+    <button type="button" class="pg-btn" data-hpg="first" title="第一页"${histPage<=1?' disabled':''}>«</button>
+    <button type="button" class="pg-btn" data-hpg="prev" title="上一页"${histPage<=1?' disabled':''}>‹ 上一页</button>
+    <span class="pg-info" style="margin:0 8px;">第 ${histPage} / ${pages} 页 · 共 ${rows.length} 行</span>
+    <button type="button" class="pg-btn" data-hpg="next" title="下一页"${histPage>=pages?' disabled':''}>下一页 ›</button>
+    <button type="button" class="pg-btn" data-hpg="last" title="最后一页"${histPage>=pages?' disabled':''}>»</button>
+    <select id="hist-page-size" class="detail-select" style="height:26px;width:auto;margin-left:8px;" title="每页显示条数">
+      ${[20,50,100,200].map(n=>`<option value="${n}"${histPageSize===n?' selected':''}>${n} 条/页</option>`).join('')}
+    </select>
+  </div>`;
+  box.innerHTML = `<div class="table-wrap vab-table-wrap" style="max-height:none;overflow:auto;border:1px solid var(--c-border);border-radius:8px;margin:8px 0;"><table class="data"><thead>${headHtml}</thead><tbody>${bodyHtml}</tbody></table></div>` + pager;
+  // 分页交互只绑定一次（容器常驻，内部随 innerHTML 重建）
+  if(!box.dataset.bound){
+    box.dataset.bound = '1';
+    box.addEventListener('click', e=>{
+      const b = e.target.closest('[data-hpg]');
+      if(!b) return;
+      const pages2 = Math.max(1, Math.ceil(((state.histOrders||[]).length) / histPageSize));
+      const k = b.dataset.hpg;
+      if(k === 'first') histPage = 1;
+      else if(k === 'last') histPage = pages2;
+      else if(k === 'prev') histPage = Math.max(1, histPage - 1);
+      else histPage = Math.min(pages2, histPage + 1);
+      renderHistList();
+    });
+    box.addEventListener('change', e=>{
+      if(e.target.id !== 'hist-page-size') return;
+      histPageSize = Number(e.target.value) || 20;
+      histPage = 1;
+      renderHistList();
+    });
+  }
+}
+function toggleHistList(){
+  const d = $('hist-list-details');
+  if(!d) return;
+  d.open = !d.open;
+  if(d.open){
+    renderHistList();   // 展开时确保内容为最新（含刚导入/覆盖/清除后的变化）
+    if(d.scrollIntoView) d.scrollIntoView({behavior:'smooth', block:'nearest'});
+  }
+}
+
 // 历史明细状态文案（导入 / 本地恢复 / 清除 后统一刷新）
 function refreshHistMeta(){
   const meta = $('hist-meta');
@@ -3811,6 +3878,8 @@ function refreshHistMeta(){
     meta.textContent = '未导入（新客规则停用）';
   }
   meta.className = 'file-meta';
+  // 同步更新只读清单（导入/追加/覆盖/清除/云端恢复后都走这里）
+  if($('hist-list')) renderHistList();
 }
 
 // 导入数据中的最新日期（YYYY-MM-DD）
@@ -5183,7 +5252,27 @@ function initApp(){
         else if(lb && lb.parentNode) lb.parentNode.insertBefore(sel, lb.nextSibling);
       }
     }
+    // 兼容旧缓存 HTML：补齐「查看明细」按钮与只读清单容器
+    const seg2 = fh ? fh.closest('.dataseg') : null;
+    if(seg2 && !$('view-hist')){
+      const clr = $('clear-hist');
+      const vb = document.createElement('button');
+      vb.className = 'btn'; vb.id = 'view-hist';
+      vb.textContent = '📋 查看明细';
+      vb.title = '展开/收起已导入并合并后的近一年消费明细（只读，用于核验合并 / 覆盖结果）';
+      if(clr && clr.parentNode) clr.parentNode.insertBefore(vb, clr);
+      else seg2.appendChild(vb);
+    }
+    if(seg2 && !$('hist-list-details')){
+      const det = document.createElement('details');
+      det.className = 'vab-list-details'; det.id = 'hist-list-details';
+      det.style.margin = '0 0 10px';
+      det.innerHTML = '<summary id="hist-list-summary" class="vab-list-summary">📋 近一年消费明细（共 0 行）</summary><div id="hist-list" class="vab-list-wrap"></div>';
+      seg2.parentNode.insertBefore(det, seg2.nextSibling);
+    }
   })();
+  const vhBtn = $('view-hist');
+  if(vhBtn) vhBtn.addEventListener('click', toggleHistList);
   $('clear-hist').addEventListener('click', clearHistData);
   refreshHistMeta(); // 本地恢复后的历史明细状态文案
   $('edit-vab').addEventListener('click', toggleVabList);

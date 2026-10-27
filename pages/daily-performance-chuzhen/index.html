@@ -518,9 +518,15 @@
       </select>
       <span class="seg-status">
         <span id="hist-meta" class="file-meta">未导入（新客规则停用）</span>
+        <button class="btn" id="view-hist" title="展开/收起已导入并合并后的近一年消费明细（只读，用于核验合并 / 覆盖结果）">📋 查看明细</button>
         <button class="btn btn-danger" id="clear-hist" title="清除已导入的近一年消费明细并停用新客判定规则（不影响订单 / VAB 会员 / 月目标）">🗑 清除明细</button>
       </span>
     </div>
+    <!-- 近一年消费明细清单（只读，用于核验合并/覆盖后的具体数据） -->
+    <details class="vab-list-details" id="hist-list-details" style="margin:0 0 10px;">
+      <summary id="hist-list-summary" class="vab-list-summary">📋 近一年消费明细（共 0 行）</summary>
+      <div id="hist-list" class="vab-list-wrap"></div>
+    </details>
     <!-- VAB 会员清单（默认展开呈现导入会员，单元格可双击编辑、行内可编辑/删除） -->
     <details class="vab-list-details" style="margin:0 0 10px;" data-page-node-id="vabListBox">
       <summary id="vab-list-summary" class="vab-list-summary">📋 VAB 会员清单</summary>
