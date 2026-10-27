@@ -4497,12 +4497,51 @@ const EC_SUB_PLATFORMS = {
   '美大-北郊医疗': '海蓓国际医疗·医疗保健中心（未央分院）',
 };
 const EC_SUB_ORDER = Object.keys(EC_SUB_PLATFORMS);
-// 与 calculate 内 DEPT_KEYS 保持一致（手动「报表归属」键）
-const EC_SUB_OV_KEYS = ['品牌组-其他','活动组-活动支持','电商组','新媒体组','短视频组','品牌组-自然到店','商务部','其他'];
-
 // ⑤ 列可见性状态：null = 尚未手动调整（默认仅显示最新有数据日期列）；Set = 用户自定义隐藏的日期集合
 let ecSubHidden = null;
 let ecSubBatchMode = false;
+
+/* 取「每一天 ③ 业绩报表 电商组 行」的订单集合（2026-10-27 用户要求：⑤ 与日业绩初诊统计逻辑完全一致）
+ *
+ * 关键：③ 报表的每个日期列 = calculate(当天订单, …, 以【该日期】为截止日构建的 30 天初诊集合)。
+ * 也就是说，同一客户「先消费、后初诊」时，其早期消费在 ③ 的早期列里不计入电商组；
+ * 而 ⑤ 原先用「统一截止日」的初诊集合聚合整月，会把该笔消费算进当月 → 与 ③ 对不上。
+ * 改为逐日复用 ③ 的订单集合（r3 + r3b + r3c，已含初诊门槛与手动「报表归属」），口径即完全一致。
+ *
+ * 数据源优先用 renderReportInner 已算好的 state.dailyResults（同一份结果，零重复计算）；
+ * 仅当长度不匹配（截止日刚改、尚未重渲染）时按同一算法就地补算。
+ */
+function ecDailyEcOrders(dateList){
+  const cached = state.dailyResults;
+  const cachedDates = state.dateList;
+  const last = dateList.length ? dateList[dateList.length - 1] : '';
+  // 缓存有效判据：长度一致 + 末位日期一致（跨月天数可能相同，仅比长度会读到上个月的旧结果）
+  const useCache = Array.isArray(cached) && cached.length === dateList.length
+    && Array.isArray(cachedDates) && cachedDates.length === dateList.length
+    && cachedDates[cachedDates.length - 1] === last;
+  const byDate = new Map();
+  if(!useCache){
+    for(const r of (state.orders||[])){
+      if(!r.payTime) continue;
+      const k = fmtDate(r.payTime);
+      if(!byDate.has(k)) byDate.set(k, []);
+      byDate.get(k).push(r);
+    }
+  }
+  return dateList.map((d, idx) => {
+    let dr = null;
+    if(useCache){
+      dr = cached[idx];
+    }else{
+      const g = byDate.get(d);
+      // 与 ③ 完全相同的调用形式（含「用全量订单按该日为截止预构建初诊集合」）
+      dr = (g && g.length)
+        ? calculate(g, state.vabSet, new Date(d), buildMktFirstKeys(state.orders, new Date(d)))
+        : null;
+    }
+    return (dr && dr.rows && Array.isArray(dr.rows['电商组'])) ? dr.rows['电商组'] : [];
+  });
+}
 
 function computeEcSubReport(){
   const cutoff = state.cutoffDate ? new Date(state.cutoffDate) : new Date();
@@ -4514,26 +4553,10 @@ function computeEcSubReport(){
   const CC = r => (r.channelClass || '').trim();
   const L1 = r => (r.channelL1 || '').trim();
   const L2 = r => (r.channelL2 || '').trim();
-  const mktFirstKeys = buildMktFirstKeys(state.orders, cutoff);
-  const isMktFirst = r => mktFirstKeys.has(mktFirstClientKey(r));
-  const hasOv = r => EC_SUB_OV_KEYS.includes(String(r.deptOverride || '').trim());
 
-  // 电商组订单集：完全复刻 ③ 主表 电商组 行（r3 + r3c + r3b + ov），再按二级渠道下钻
-  const ecAuto = state.orders.filter(r => {
-    if(hasOv(r)) return false;
-    if(!isMktFirst(r)) return false;                       // 初诊门槛（与主表 autoYx 一致）
-    if(CC(r)==='营销部' && ['电商组','客户转介绍','企业团检'].includes(L1(r))) return true;
-    if(CC(r)==='营销部' && L1(r)==='品牌组' && L2(r).includes('线上400')) return true;
-    if(isRecToYingxiao(r) && !L2(r).includes('自然到店')) return true;
-    return false;
-  });
-  const ecOv = state.orders.filter(r => String(r.deptOverride || '').trim() === '电商组');
-  const ecOrders = ecAuto.concat(ecOv);
-
-  // 月累计：截止日所在「本月」且 <= 截止日（与 calculate 同口径，不含历史月份）
-  const cy = cutoff.getFullYear(), cm = cutoff.getMonth();
-  const monthSet = ecOrders.filter(r => r.payTime
-    && r.payTime.getFullYear() === cy && r.payTime.getMonth() === cm && inDateRange(r.payTime, cutoff));
+  // 电商组订单集：逐日取自 ③ 主表「电商组」行（r3 + r3b + r3c，含初诊门槛与手动报表归属）
+  // —— 每列用该日期自己的 30 天初诊窗口，与 ③ 每个日期列完全一致（2026-10-27 修正）
+  const ecDaily = ecDailyEcOrders(dateList);
 
   // 桶：7 个平台先建好（保证「没有数据也显示 0」），数据中出现的其他二级渠道再追加
   // dayCnt：按日去重客户集合（2026-10-26 客量区分当日/累计）
@@ -4543,24 +4566,24 @@ function computeEcSubReport(){
   EC_SUB_ORDER.forEach(l2 => map.set(l2, newBucket()));
   const bump = (m, v) => { if(v) m.set(v, (m.get(v) || 0) + 1); };
   const topVal = m => { let bv = '—', bc = 0; m.forEach((c, v) => { if(c > bc){ bc = c; bv = v; } }); return bv; };
-  monthSet.forEach(r => {
-    const l2 = L2(r) || '（未分类）';
-    if(!map.has(l2)) map.set(l2, newBucket());
-    const b = map.get(l2);
-    const amt = Number(r.cashPay) || 0;
-    b.month += amt;
-    const ck = mktFirstClientKey(r);
-    if(ck && ck !== 'name:') b.cnt.add(ck);           // 客量：去重客户数
-    if(r.payTime){
-      const d = fmtDate(r.payTime);
+  ecDaily.forEach((list, idx) => {
+    const d = dateList[idx];
+    list.forEach(r => {
+      const l2 = L2(r) || '（未分类）';
+      if(!map.has(l2)) map.set(l2, newBucket());
+      const b = map.get(l2);
+      const amt = Number(r.cashPay) || 0;
+      b.month += amt;
+      const ck = mktFirstClientKey(r);
+      if(ck && ck !== 'name:') b.cnt.add(ck);           // 客量：去重客户数
       b.days.set(d, (b.days.get(d) || 0) + amt);
       if(ck && ck !== 'name:'){
         if(!b.dayCnt.has(d)) b.dayCnt.set(d, new Set());
-        b.dayCnt.get(d).add(ck);                      // 当日客量：当日去重客户数
+        b.dayCnt.get(d).add(ck);                        // 当日客量：当日去重客户数
       }
-    }
-    bump(b.ccCnt, CC(r));                             // 渠道分类 / 一级渠道 众数
-    bump(b.l1Cnt, L1(r));
+      bump(b.ccCnt, CC(r));                            // 渠道分类 / 一级渠道 众数
+      bump(b.l1Cnt, L1(r));
+    });
   });
 
   const ordered = EC_SUB_ORDER.slice();
