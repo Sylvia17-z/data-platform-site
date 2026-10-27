@@ -4215,6 +4215,10 @@ function showClientMonthModal(r0, rows, month){
   const mask = document.createElement('div');
   mask.className = 'modal-mask';
   mask.style.zIndex = '1100';
+  // ⚠ 必须显式 inline display:flex：共享 filterbar.css 的 .modal-mask{display:none}（外链后加载、
+  // 同特异性覆盖内联样式的默认 flex）会让动态创建的弹窗永久 display:none —— 2026-10-27 修复
+  // 「⑥ 点击客户行下钻没反应」（弹窗 DOM 已创建但不可见）。与 vab-add-modal 的打开方式同模式。
+  mask.style.display = 'flex';
   const sorted = rows.slice().sort((a,b)=>(a.payTime&&b.payTime)?(a.payTime-b.payTime):0);
   const total = sorted.reduce((a,b)=>a+(Number(b.cashPay)||0),0);
   const totalAsset = sorted.reduce((a,b)=>a+(Number(b.assetDeduct)||0),0);
