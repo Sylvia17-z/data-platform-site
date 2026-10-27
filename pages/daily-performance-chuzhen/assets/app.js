@@ -3715,31 +3715,61 @@ function toggleVabList(){
   }
 }
 
-// ===== 近一年消费明细导入（2026-10-16 新增）=====
+// ===== 近一年消费明细导入（2026-10-16 新增；2026-10-27 支持追加上传）=====
 // 「营销部顾客一年内无消费记录 → 视为初诊客户」规则的数据源。表结构与订单表一致（订单项目收退款表），
 // 仅读取 会员号/姓名/收款时间 参与判定；该数据不计入任何业绩金额；未导入时新客规则自动停用。
+// 追加上传：多次/多月上传累加；按「收款单号」去重（同一单号新数据覆盖旧数据），无单号时用组合键防重复累加。
+function histDedupKey(r){
+  const rn = String(r.receiptNo || '').trim();
+  if(rn) return 'rn:' + rn;
+  return 'cb:' + [String(r.memberNo||'').trim(), r.payTime ? fmtDate(r.payTime) : '', r.cashPay||0, r.assetDeduct||0, String(r.name||'').trim()].join('|');
+}
+function mergeHistOrders(existing, incoming){
+  const map = new Map();
+  (existing || []).forEach(r => map.set(histDedupKey(r), r));
+  let added = 0, replaced = 0;
+  (incoming || []).forEach(r => {
+    const k = histDedupKey(r);
+    if(map.has(k)) replaced++; else added++;
+    map.set(k, r);   // 新覆盖旧
+  });
+  return { rows: [...map.values()], added, replaced };
+}
+
 async function onFileHistory(input){
-  const f = input.files?.[0];
-  if(!f) return;
+  const files = [...(input.files || [])];
+  if(!files.length) return;
   try{
     await ensureXlsx();
-    const parsed = await parseExcelFile(f);
-    const allRows = parsed.map(normalizeOrder);
-    const rows = allRows.filter(r => r.payTime).map(ensureUid);
-    if(parsed.length > 0 && rows.length === 0){
-      showToast(`❌ 历史明细导入失败：已读到 ${parsed.length} 行，但「收款时间」全部无法解析。请确认表头含「收款时间」列且为可识别日期格式`, 'err', 9000);
+    let parsedTotal = 0;
+    let validRows = [];
+    for(const f of files){
+      const parsed = await parseExcelFile(f);
+      parsedTotal += parsed.length;
+      validRows = validRows.concat(parsed.map(normalizeOrder).filter(r => r.payTime).map(ensureUid));
+    }
+    if(parsedTotal > 0 && validRows.length === 0){
+      showToast(`❌ 历史明细导入失败：已读到 ${parsedTotal} 行，但「收款时间」全部无法解析（未写入任何数据）。请确认表头含「收款时间」列且为可识别日期格式`, 'err', 9000);
       if($('hist-meta')){ $('hist-meta').textContent = '❌ 导入失败：收款时间全部无法解析'; $('hist-meta').className = 'file-meta'; }
       return;
     }
-    state.histOrders = rows;
+    if(validRows.length === 0){
+      showToast('未读取到有效数据行，请检查文件内容', 'warn', 4200);
+      return;
+    }
+    const { rows: merged, added, replaced } = mergeHistOrders(state.histOrders, validRows);
+    state.histOrders = merged;
     persistHist(); // 内部刷新 histTs 并落盘（localStorage + IndexedDB + 壳窗口桥接）
     invalidateMktKeyCaches();
     refreshHistMeta();
     recompute();
-    showToast(`近一年消费明细导入成功（${rows.length} 行）。「营销部顾客一年内无消费记录 → 初诊客户」规则已启用`, 'ok', 5200);
+    const fileInfo = files.length > 1 ? `${files.length} 个文件` : '1 个文件';
+    showToast(`近一年消费明细追加成功（${fileInfo} / 本次 ${validRows.length} 行：新增 ${added}、覆盖 ${replaced}），累计 ${state.histOrders.length} 行。「营销部顾客一年内无消费记录 → 初诊客户」规则已启用`, 'ok', 6000);
   }catch(e){
     console.error(e);
     showToast('历史消费明细解析失败：'+e.message, 'err');
+  }finally{
+    input.value = '';   // 允许再次选择同一文件（追加模式常用）
   }
 }
 
@@ -5120,6 +5150,13 @@ function initApp(){
   $('file-vab').addEventListener('change', e=>onFileVab(e.target));
   // 近一年消费明细导入 / 清除（2026-10-16 新增：一年内无消费→初诊 新客规则数据源）
   $('file-history').addEventListener('change', e=>onFileHistory(e.target));
+  // 追加上传（2026-10-27）：兼容旧缓存 HTML —— 确保可一次多选多个文件；并同步入口文案
+  (function ensureHistAppendUi(){
+    const fh = $('file-history');
+    if(fh && !fh.multiple) fh.multiple = true;
+    const lb = document.querySelector('label[for="file-history"]');
+    if(lb && lb.textContent.indexOf('追加') < 0) lb.textContent = '📅 上传/追加近一年消费明细';
+  })();
   $('clear-hist').addEventListener('click', clearHistData);
   refreshHistMeta(); // 本地恢复后的历史明细状态文案
   $('edit-vab').addEventListener('click', toggleVabList);

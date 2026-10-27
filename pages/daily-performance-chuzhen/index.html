@@ -506,10 +506,11 @@
       </span>
     </div>
     <!-- 近一年消费明细（2026-10-16 新增）：「营销部顾客一年内无消费记录 → 视为初诊客户」规则数据源 -->
+    <!-- 2026-10-27：支持追加上传（可一次多选多个文件；按收款单号去重，同一单号新数据覆盖旧数据） -->
     <div class="dataseg">
       <span class="seg-label">历史明细</span>
-      <input type="file" id="file-history" accept=".xlsx,.xls" hidden />
-      <label for="file-history" class="btn" title="导入最近一年的消费明细（订单项目收退款表格式）——用于判定「营销部顾客一年内无消费记录 → 视为初诊客户」；该数据不计入业绩金额，仅本地保存">📅 上传近一年消费明细</label>
+      <input type="file" id="file-history" accept=".xlsx,.xls" multiple hidden />
+      <label for="file-history" class="btn" title="上传/追加最近一年的消费明细（订单项目收退款表格式，可一次选择多个文件）——用于判定「营销部顾客一年内无消费记录 → 视为初诊客户」；追加时按「收款单号」去重（同一单号新数据覆盖旧数据），该数据不计入业绩金额，仅本地保存">📅 上传/追加近一年消费明细</label>
       <span class="seg-status">
         <span id="hist-meta" class="file-meta">未导入（新客规则停用）</span>
         <button class="btn btn-danger" id="clear-hist" title="清除已导入的近一年消费明细并停用新客判定规则（不影响订单 / VAB 会员 / 月目标）">🗑 清除明细</button>
