@@ -501,6 +501,56 @@
   .cloud-warn{color:var(--c-warn);}
   .cloud-err{color:var(--c-error);}
   /* 登录浮层（复用 .modal-mask/.modal-box 体系，单独抬高层级避免被其它浮层遮挡） */
+
+  /* ============ ⑧ 汇总数据下钻（全屏覆盖层） ============
+     ⚠ 不使用 transform/filter/backdrop-filter：否则会成为 fixed 的包含块，
+     导致筛选面板（.msel-panel 用 fixed 定位逃出滚动容器）被错误裁剪。 */
+  #drill-mask{position:fixed;inset:0;z-index:9000;background:#fff;display:flex;flex-direction:column;overflow:hidden;}
+  #drill-mask .drill-head{flex:0 0 auto;display:flex;align-items:center;gap:10px;padding:9px 14px;
+    background:linear-gradient(180deg,var(--c-head),var(--c-head-2));color:#fff;}
+  #drill-mask .drill-back,#drill-mask .drill-close{flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;gap:5px;
+    height:30px;padding:0 12px;border-radius:8px;border:1px solid rgba(255,255,255,.34);background:rgba(255,255,255,.12);
+    color:#fff;font-family:inherit;font-size:12.5px;cursor:pointer;transition:background-color .12s;}
+  #drill-mask .drill-back:hover,#drill-mask .drill-close:hover{background:rgba(255,255,255,.26);}
+  #drill-mask .drill-close{margin-left:auto;font-size:15px;padding:0 11px;}
+  #drill-mask .drill-titles{min-width:0;flex:1 1 auto;}
+  #drill-mask .drill-title{font-size:14.5px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  #drill-mask .drill-sub{font-size:11.5px;opacity:.82;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px;}
+  #drill-sum{flex:0 0 auto;display:flex;flex-wrap:wrap;align-items:center;gap:5px 20px;padding:8px 14px;
+    background:#f2f6fd;border-bottom:1px solid var(--c-border);font-size:12.5px;color:var(--c-text);}
+  #drill-sum b{color:var(--c-head);font-variant-numeric:tabular-nums;font-weight:700;}
+  #drill-sum .drill-warn{color:#b3261e;font-weight:600;}
+  #drill-filters{flex:0 0 auto;padding:7px 14px 9px;border-bottom:1px solid var(--c-border);background:#fbfcfe;overflow-y:auto;}
+  #drill-filters .drill-fbody{display:flex;flex-wrap:wrap;gap:7px 10px;margin-top:6px;}
+  #drill-filters .drill-fbody.collapsed{display:none;}
+  #drill-filters .ftoggle{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 10px;border-radius:7px;
+    border:1px solid var(--c-border);background:#fff;color:var(--c-head);font-family:inherit;font-size:12px;cursor:pointer;}
+  #drill-filters .fttoggle:hover{border-color:var(--c-head);}
+  #drill-filters .ft-count{background:var(--c-head);color:#fff;border-radius:9px;padding:0 6px;font-size:11px;line-height:15px;}
+  #drill-body{flex:1 1 auto;min-height:0;overflow:auto;padding:10px 14px 14px;}
+  #drill-body table.data th,#drill-body table.data td{padding:4px 6px;}
+  #drill-body table.data thead th{white-space:nowrap;}
+  #drill-body .drill-empty{padding:40px 0;text-align:center;color:var(--c-muted);font-size:13px;}
+  #drill-mask .drill-cards{display:flex;flex-direction:column;gap:8px;}
+  #drill-mask .drill-note{margin:8px 0 0;font-size:11.5px;color:var(--c-muted);line-height:1.6;}
+  #drill-mask .drill-ov{display:inline-block;margin-left:5px;padding:0 5px;border-radius:5px;background:#e8f0fe;
+    color:var(--c-accent);font-size:10.5px;line-height:15px;vertical-align:1px;}
+  /* 可下钻单元格：鼠标放大镜 + 悬停描边，提示「单击查看明细」 */
+  #report-table td.num[data-rowkey],
+  #store-table td.num[data-rowkey],
+  #ec-sub-table td.num[data-col]{cursor:zoom-in;}
+  #report-table td.num[data-rowkey]:hover,
+  #store-table td.num[data-rowkey]:hover,
+  #ec-sub-table td.num[data-col]:hover{background:#eef4ff;box-shadow:inset 0 0 0 1px var(--c-accent);}
+  /* 下钻分页条（与 ⑦ 同款外观，独立 id 避免与 ⑦ 冲突） */
+  #drill-mask .detail-pager{display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:10px 0 0;}
+  @media (max-width:640px){
+    #drill-filters{padding:6px 10px 8px;max-height:42vh;}
+    #drill-filters .drill-fbody{gap:6px 8px;}
+    #drill-body{padding:8px 10px 12px;}
+    #drill-sum{padding:7px 10px;gap:4px 14px;font-size:12px;}
+    #drill-mask .drill-title{font-size:13.5px;}
+  }
 </style>
 <link rel="stylesheet" href="/shared/filterbar.css?v=20261019a">
 <link rel="manifest" href="/manifest.json">

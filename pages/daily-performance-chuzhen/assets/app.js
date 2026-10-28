@@ -2207,7 +2207,7 @@ function renderReportInner(){
       const dispDay = recomputeDerived(dr ? dr.values : {}, state.manual.daily[dateStr] || {});
       const v = dispDay[rowKey] ?? 0;
       const cls = 'num daily-col-' + idx;
-      return `<td class="${cls}" data-idx="${idx}" data-rowkey="${rowKey}" data-date="${dateStr}" title="${dateStr}（双击可编辑）">${fmt(v)}</td>`;
+      return `<td class="${cls}" data-idx="${idx}" data-rowkey="${rowKey}" data-date="${dateStr}" title="${dateStr}（单击查看明细，双击可编辑）">${fmt(v)}</td>`;
     }).join('');
 
     if(row.mergedLabel){
@@ -2218,7 +2218,7 @@ function renderReportInner(){
       // 月目标列：双击可编辑
       const targetCell = `<td class="target" data-targetkey="${row.targetKey}" title="双击修改月目标">${target||'-'}</td>`;
       // 月累计列：override-aware（已含派生行联动，不含黄色高亮）
-      const monthCell = `<td class="num" data-rowkey="${rowKey}" title="双击可编辑">${fmt(monthVal)}</td>`;
+      const monthCell = `<td class="num" data-rowkey="${rowKey}" title="单击查看明细，双击可编辑">${fmt(monthVal)}</td>`;
       html += `<tr class="${cls}"${rowStyle}>${labelCell}${targetCell}${monthCell}${dailyCells}</tr>`;
       return;
     }
@@ -2381,10 +2381,10 @@ function renderStoreReport(dateList, dailyResults){
       const dispDay = recomputeDerived(dr ? dr.values : {}, state.manual.daily[dateStr] || {});
       const v = dispDay[row.targetKey] ?? 0;
       const cls = 'num daily-col-' + idx;
-      const title = dateStr + '（双击可编辑）';
+      const title = dateStr + '（单击查看明细，双击可编辑）';
       return `<td class="${cls}" data-idx="${idx}" data-rowkey="${row.targetKey}" data-date="${dateStr}" title="${title}">${fmt(v)}</td>`;
     }).join('');
-    const monthCell = `<td class="num" data-rowkey="${row.targetKey}" title="双击可编辑">${fmt(monthVal)}</td>`;
+    const monthCell = `<td class="num" data-rowkey="${row.targetKey}" title="单击查看明细，双击可编辑">${fmt(monthVal)}</td>`;
     html += `<tr class="${cls}"${rowStyle}><td class="cat">${row.name}</td>${monthCell}${dailyCells}</tr>`;
   });
 
@@ -2902,6 +2902,41 @@ function applyDetailSort(list){
   });
 }
 
+// 字段筛选（纯函数，2026-10-28 抽出供「汇总下钻」复用）：
+//   name/memberNo 模糊包含；其余多选精确命中（'__blank__' 匹配空白）；
+//   cashPay/assetDeduct 为「运算符+数值」（op 存 <key>Op，''=等于）；vab 为 hit/miss。
+// 与页签口径无关，只做「字段级」过滤，故 ⑦ 明细与下钻共用同一实现（保证两处筛选语义一致）。
+function applyFieldFilters(list, f){
+  f = f || {};
+  if(f.name){ const q=String(f.name).toLowerCase(); list=list.filter(r=>String(r.name||'').toLowerCase().includes(q)); }
+  if(f.memberNo){ const q=String(f.memberNo).toLowerCase(); list=list.filter(r=>String(r.memberNo||'').toLowerCase().includes(q)); }
+  // 多选命中：空数组=不过滤；'__blank__' 匹配「字段值为空白」的行，其余按 trim 后精确匹配
+  const multiHit = (set, raw) => {
+    const v = String(raw==null?'':raw).trim();
+    if(set.includes(MS_BLANK) && v==='') return true;
+    return set.includes(v);
+  };
+  ['channelClass','channelL1','channelL2','visitType','consultant','developer','cashier'].forEach(k=>{
+    if(f[k] && f[k].length) list=list.filter(r=>multiHit(f[k], r[k]));
+  });
+  if(f.dept && f.dept.length) list=list.filter(r=>multiHit(f.dept, effectiveDept(r)));
+  // 金额筛选（运算符+数值）：数值非空才生效；op 存于 <key>Op（''=等于）
+  const applyAmt = (field) => {
+    const raw = String(f[field]||'').trim();
+    if(raw === '' || isNaN(Number(raw))) return;
+    const t = Number(raw), op = f[field+'Op'] || 'eq';
+    list = list.filter(r => cmpNum(Number(r[field])||0, op, t));
+  };
+  applyAmt('cashPay');
+  applyAmt('assetDeduct');
+  if(f.vab && f.vab.length){
+    const hit=f.vab.includes('hit'), miss=f.vab.includes('miss');
+    if(hit && !miss) list=list.filter(r=>isVabMember(r.memberNo));
+    else if(miss && !hit) list=list.filter(r=>!isVabMember(r.memberNo));
+  }
+  return list;
+}
+
 // 按标签筛选导入订单。
 // 日期口径说明：所有页签不再内置"当日"过滤，统一由下方日期筛选承担 ——
 // detailDate 默认 '__latest__'（=数据中最新日期，即"当日"），可通过日期下拉切换到其他日期或"全部日期"。
@@ -2974,39 +3009,13 @@ function filterOrdersByTab(key, opts){
     return detailMonth.includes(MS_BLANK);
   });
   if(effDate && !ignoreFilters) list = list.filter(r => r.payTime && fmtDate(r.payTime) === effDate);
-  // 字段筛选叠加（展示的全部字段）：姓名/会员号模糊包含，其余多选精确命中；收款时间用月度/日期承担，VAB 按命中状态
-  const f = detailFilters || {};
   if(ignoreFilters){
-    // 导出全部页签：跳过下方全部字段/金额/VAB 筛选，仅保留页签口径
+    // 导出全部页签：跳过全部字段/金额/VAB 筛选，仅保留页签口径
     return list;
   }
-  if(f.name){ const q=String(f.name).toLowerCase(); list=list.filter(r=>String(r.name||'').toLowerCase().includes(q)); }
-  if(f.memberNo){ const q=String(f.memberNo).toLowerCase(); list=list.filter(r=>String(r.memberNo||'').toLowerCase().includes(q)); }
-  // 多选命中：空数组=不过滤；'__blank__' 匹配「字段值为空白」的行，其余按 trim 后精确匹配
-  const multiHit = (set, raw) => {
-    const v = String(raw==null?'':raw).trim();
-    if(set.includes(MS_BLANK) && v==='') return true;
-    return set.includes(v);
-  };
-  ['channelClass','channelL1','channelL2','visitType','consultant','developer','cashier'].forEach(k=>{
-    if(f[k] && f[k].length) list=list.filter(r=>multiHit(f[k], r[k]));
-  });
-  if(f.dept && f.dept.length) list=list.filter(r=>multiHit(f.dept, effectiveDept(r)));
-  // 金额筛选（运算符+数值）：数值非空才生效；op 存于 <key>Op（''=等于）
-  const applyAmt = (field) => {
-    const raw = String(f[field]||'').trim();
-    if(raw === '' || isNaN(Number(raw))) return;
-    const t = Number(raw), op = f[field+'Op'] || 'eq';
-    list = list.filter(r => cmpNum(Number(r[field])||0, op, t));
-  };
-  applyAmt('cashPay');
-  applyAmt('assetDeduct');
-  if(f.vab && f.vab.length){
-    const hit=f.vab.includes('hit'), miss=f.vab.includes('miss');
-    if(hit && !miss) list=list.filter(r=>isVabMember(r.memberNo));
-    else if(miss && !hit) list=list.filter(r=>!isVabMember(r.memberNo));
-  }
-  return list;
+  // 字段筛选叠加（展示的全部字段）：姓名/会员号模糊包含，其余多选精确命中；收款时间用月度/日期承担，VAB 按命中状态
+  // 具体实现见 applyFieldFilters()（与「汇总下钻」共用同一份筛选语义）
+  return applyFieldFilters(list, detailFilters);
 }
 
 // ===== 「⑥ 导入数据明细」导出（各页签均可导出）=====
@@ -4722,6 +4731,26 @@ function ecDailyEcOrders(dateList){
   });
 }
 
+/* 「电商组」渠道范围判定（⑤ 表「全部口径」与「下钻」共用）
+ * 必须与 ③ 主表「电商组」行（r3 ∪ r3b ∪ r3c）**逐条对齐**：
+ *   营销部 + 一级渠道 ∈ {电商组, 客户转介绍, 企业团检}
+ *   ∪ 营销部 + 品牌组 + 二级渠道含「线上400」
+ *   ∪ 渠道分类=推荐 + 一级渠道含「营销部」+ 二级不含「自然到店」（r3b）
+ *   ∪ 手动报表归属 = 电商组（归属优先）
+ * 2026-10-28：原先内联在 computeEcSubReport 内，抽出为模块级函数供下钻复用，避免两处口径漂移。
+ */
+function isEcSubScope(r){
+  const ovk = String(r.deptOverride || '').trim();
+  if(DEPT_OPTIONS.includes(ovk)) return ovk === '电商组';
+  const cc = (r.channelClass || '').trim();
+  const l1 = (r.channelL1 || '').trim();
+  const l2 = (r.channelL2 || '').trim();
+  if(cc === '营销部' && ['电商组', '客户转介绍', '企业团检'].includes(l1)) return true;
+  if(cc === '营销部' && l1 === '品牌组' && l2.indexOf('线上400') >= 0) return true;
+  if(isRecToYingxiao(r) && l2.indexOf('自然到店') < 0) return true;
+  return false;
+}
+
 function computeEcSubReport(){
   const cutoff = state.cutoffDate ? new Date(state.cutoffDate) : new Date();
   const dateStr = fmtDate(cutoff);
@@ -4778,15 +4807,7 @@ function computeEcSubReport(){
   //   避免历史脏值（非白名单归属值）把整行剔出全部口径。
   // 按二级渠道分桶：allAmt(当日金额) / allCnt(当日去重客户集合)
   const dateSet = new Set(dateList);
-  const isEcRange = r => {
-    const ovk = String(r.deptOverride || '').trim();
-    if(DEPT_OPTIONS.includes(ovk)) return ovk === '电商组';
-    const cc = CC(r), l1 = L1(r), l2 = L2(r);
-    if(cc === '营销部' && ['电商组', '客户转介绍', '企业团检'].includes(l1)) return true;
-    if(cc === '营销部' && l1 === '品牌组' && l2.indexOf('线上400') >= 0) return true;
-    if(isRecToYingxiao(r) && l2.indexOf('自然到店') < 0) return true;   // r3b 同源分支
-    return false;
-  };
+  const isEcRange = isEcSubScope;   // 与「下钻」共用同一谓词，避免两处口径漂移（定义见上方 isEcSubScope）
   (state.orders || []).forEach(r => {
     if(!r.payTime || !isEcRange(r)) return;
     const d = fmtDate(r.payTime);
@@ -5999,6 +6020,654 @@ function manualOverrideDiag(){
   const parts = keys.map(k => `${k}=${m.month[k]}`);
   return ` | 手动覆盖[${parts.join(', ')}]`;
 }
+
+/* ===================================================================
+ * ⑧ 汇总数据下钻（2026-10-28 需求）
+ * ===================================================================
+ * 需求：③④⑤ 三张表上的所有汇总数字均可点击下钻，下钻页字段与 ⑦ 导入数据明细一致，
+ *      且下钻页同样支持筛选、排序、分页。
+ *
+ * 设计要点
+ * 1) 数据同源：下钻集合直接取自渲染该单元格时用的同一份订单数组
+ *    （③④ → state.dailyResults[idx].rows[rowKey]；⑤ → 逐日「电商组」集合 / 全部口径谓词），
+ *    不做任何重算 → 明细现款合计必然等于单元格数值；手动调整过的格子单独提示差额。
+ * 2) 状态独立：⑦ 的 detailFilters/detailSort/detailPage 是模块级单例，直接复用会与 ⑦ 互相污染，
+ *    故下钻自带 drill.filters / drill.sort / drill.page / drill.pageSize。
+ * 3) 筛选同义：字段筛选统一走 applyFieldFilters()，与 ⑦ 语义完全一致。
+ * 4) 交互兼容：③④ 单元格原有「双击手动编辑」保留 —— 单击走 200ms 判定窗口，
+ *    期间若发生 dblclick 则取消下钻；⑤ 无双击编辑，立即下钻。
+ * =================================================================== */
+const DRILL_MSEL = 'd:';           // 多选下拉 key 前缀（与 ⑦ 的 detailFilters 键空间隔离）
+let _drillEl = null;               // 覆盖层根节点（懒创建）
+let _drillClickTimer = 0;          // ③④ 单击/双击判定计时器
+const drill = {
+  ctx: null,                       // { title, sub, table, base, expected, metric, dates, scope }
+  base: [],                        // 下钻口径下的原始订单集合
+  filters: {},                     // 字段筛选（与 ⑦ 同键名）
+  sort: { key:'', dir:1 },
+  page: 1,
+  pageSize: 10,
+  collapsed: false,                // 筛选区折叠（本会话内保持）
+};
+
+// —— 数据源：③ 业绩报表 / ④ 门店业绩 ——
+// 说明：calculate() 返回的 rows 里，「其他」「基础业绩」是占位（= 全量订单），
+//      必须在此按「合计 − 已归属部门」/「合计 − 新增业绩」实时求差，否则下钻会看到全月订单。
+function drillOrdersOfDaily(dr, rowKey, isStore){
+  if(!dr || !dr.rows) return [];
+  const rows = dr.rows;
+  const all = Array.isArray(rows['合计']) ? rows['合计'] : [];
+  if(isStore){
+    // ④ 门店表：高新 / 北郊 / 门店合计（门店合计 = 高新 ∪ 北郊 = 合计）
+    if(rowKey === '门店合计') return all.slice();
+    return Array.isArray(rows[rowKey]) ? rows[rowKey].slice() : [];
+  }
+  if(rowKey === '合计') return all.slice();
+  if(rowKey === '其他'){
+    // 口径对齐 calculate() 的 sumOther：合计 − (品牌组-其他 + 活动组-活动支持 + 电商组 + 新媒体组 + 品牌组-自然到店 + 商务部)
+    // 注意「短视频组」不在扣减项内（该行已隐藏、金额并入其他），故此处也不扣减。
+    const EX = ['品牌组-其他','活动组-活动支持','电商组','新媒体组','品牌组-自然到店','商务部'];
+    const used = new Set();
+    EX.forEach(k => (rows[k]||[]).forEach(r => used.add(r._uid)));
+    return all.filter(r => !used.has(r._uid));
+  }
+  if(rowKey === '基础业绩'){
+    // 基础业绩 = 合计 − 新增业绩（VAB 会员消费）
+    const used = new Set();
+    (rows['新增业绩']||[]).forEach(r => used.add(r._uid));
+    return all.filter(r => !used.has(r._uid));
+  }
+  return Array.isArray(rows[rowKey]) ? rows[rowKey].slice() : [];
+}
+// 月累计 = 各日单元格集合的并集（与「月累计 = Σ每日值」的展示口径一致，手动日覆盖也能对上）
+function drillMonthUnion(rowKey, isStore){
+  const seen = new Set(), out = [];
+  (state.dailyResults || []).forEach(dr=>{
+    drillOrdersOfDaily(dr, rowKey, isStore).forEach(r=>{
+      if(!r || seen.has(r._uid)) return;
+      seen.add(r._uid); out.push(r);
+    });
+  });
+  return out;
+}
+
+// —— 数据源：⑤ 电商二级渠道 ——
+// kind ∈ amt(初诊金额) / cnt(初诊客量) / allamt(全部金额) / allcnt(全部客量)
+// l2 = '' 表示「合计」行（不限二级渠道）；'（未分类）' 表示二级渠道为空的桶
+function drillEcBase(kind, l2, dates){
+  const want = new Set(dates);
+  const hitL2 = r => {
+    const v = (r.channelL2 || '').trim();
+    if(l2 === '（未分类）') return v === '';
+    if(!l2) return true;
+    return v === l2;
+  };
+  if(kind === 'allamt' || kind === 'allcnt'){
+    // 全部口径：同一「电商组」渠道范围、不做初诊门槛（与 computeEcSubReport 的 isEcSubScope 同源）
+    return (state.orders || []).filter(r =>
+      r.payTime && want.has(fmtDate(r.payTime)) && isEcSubScope(r) && hitL2(r));
+  }
+  // 初诊口径：逐日复用 ③ 主表「电商组」行的订单集合（含 30 天初诊窗口与手动报表归属）
+  const cutoff = state.cutoffDate ? new Date(state.cutoffDate) : new Date();
+  const fullList = generateDateRange(cutoff);
+  const daily = ecDailyEcOrders(fullList);
+  const out = [];
+  daily.forEach((list, idx)=>{
+    if(!want.has(fullList[idx])) return;
+    list.forEach(r => { if(hitL2(r)) out.push(r); });
+  });
+  return out;
+}
+
+// —— 单元格 → 下钻上下文 ——
+function drillRowLabelOf(rowKey){
+  const list = (typeof REPORT_TEMPLATE !== 'undefined' && REPORT_TEMPLATE) ? REPORT_TEMPLATE : [];
+  for(let i=0;i<list.length;i++){
+    const r = list[i];
+    const key = r.valueKey || r.targetKey || r.sub || r.item;
+    if(key !== rowKey) continue;
+    const parts = [];
+    if(r.main) parts.push(r.main);
+    else { for(let j=i-1;j>=0;j--){ if(list[j].main){ parts.push(list[j].main); break; } } }
+    const sub = r.sub || (()=>{ for(let j=i-1;j>=0;j--){ if(list[j].sub) return list[j].sub; } return ''; })();
+    if(sub) parts.push(sub);
+    if(r.item) parts.push(r.item);
+    return parts.length ? parts.join(' · ') : rowKey;
+  }
+  return rowKey;
+}
+const drillNumOf = txt => {
+  const n = parseFloat(String(txt==null?'':txt).replace(/[,\s¥%]/g,''));
+  return isNaN(n) ? 0 : n;
+};
+const drillDayLabel = d => { const t = new Date(d); return (t.getMonth()+1)+'月'+t.getDate()+'日'; };
+
+function resolveDrillTarget(td){
+  if(!state.results || !(state.orders||[]).length) return;
+  if(!Array.isArray(state.dailyResults) || !state.dailyResults.length) return;
+
+  if(td.closest('#ec-sub-table')) return resolveEcDrill(td);
+
+  const isStore = !!td.closest('#store-table');
+  const rowKey = td.dataset.rowkey;
+  if(!rowKey) return;
+  const isDay = !!td.dataset.date;
+  const expected = drillNumOf(td.textContent);
+  let base, sub, dates;
+
+  if(isDay){
+    const idx = Number(td.dataset.idx);
+    const d = td.dataset.date;
+    base = drillOrdersOfDaily(state.dailyResults[idx], rowKey, isStore);
+    dates = [d];
+    sub = d + '（当日）';
+  }else{
+    base = drillMonthUnion(rowKey, isStore);
+    dates = (state.dateList || []).slice();
+    const c = state.cutoffDate ? new Date(state.cutoffDate) : new Date();
+    sub = `${c.getFullYear()}年${c.getMonth()+1}月 月累计（${dates.length?drillDayLabel(dates[0]):''} – ${dates.length?drillDayLabel(dates[dates.length-1]):''}）`;
+  }
+
+  const storeName = isStore ? (STORE_ROWS.find(r=>r.targetKey===rowKey)||{}).name : '';
+  openDrill({
+    table: isStore ? 'store' : 'main',
+    title: (isStore ? '④ 门店业绩 » ' : '③ 业绩报表 » ') + (isStore ? (storeName||rowKey) : drillRowLabelOf(rowKey)),
+    sub,
+    base, expected, metric: 'amount', dates, scope: isDay ? 'day' : 'cum',
+  });
+}
+
+function resolveEcDrill(td){
+  const tr = td.closest('tr');
+  if(!tr) return;
+  const col = td.dataset.col || '';
+  const parts = col.split(':');
+  const kind = parts[0] || 'amt';
+  const d = parts[2] || td.dataset.date || '';
+  if(!d) return;
+  const isTotal = tr.hasAttribute('data-total');
+  const isCum = tr.classList.contains('ec-sub-cum');
+  // 二级渠道名在「当日」行的第 4 个 td；「月累计」行的前 4 列被上方 rowspan 占用，需回看上一条 tr
+  const refRow = isCum ? tr.previousElementSibling : tr;
+  const l2 = isTotal ? '' : ((refRow && refRow.children[3]) ? refRow.children[3].textContent.trim() : '');
+  const dateList = generateDateRange(state.cutoffDate ? new Date(state.cutoffDate) : new Date());
+  const dates = isCum ? dateList.filter(x => x <= d) : [d];
+  const base = drillEcBase(kind, l2, dates);
+  const metricLabel = kind === 'amt' ? '初诊金额' : kind === 'cnt' ? '初诊客量'
+    : kind === 'allamt' ? '全部金额' : '全部客量';
+  const platform = isTotal ? '合计' : (EC_SUB_PLATFORMS[l2] || l2 || '—');
+  openDrill({
+    table: 'ec',
+    title: '⑤ 电商二级渠道 » ' + (isTotal ? '合计' : platform),
+    sub: metricLabel + ' · ' + d + (isCum ? '（截至该日累计）' : '（当日）') + (isTotal ? '' : ' · 二级渠道「' + l2 + '」'),
+    base,
+    expected: Number(td.dataset.val),
+    metric: (kind === 'cnt' || kind === 'allcnt') ? 'count' : 'amount',
+    dates,
+    scope: isCum ? 'cum' : 'day',
+  });
+}
+
+// —— 覆盖层生命周期 ——
+function drillEnsureEl(){
+  if(_drillEl && document.body.contains(_drillEl)) return _drillEl;
+  const mask = document.createElement('div');
+  mask.id = 'drill-mask';
+  mask.style.display = 'none';
+  document.body.appendChild(mask);
+  mask.addEventListener('click', onDrillClick);
+  mask.addEventListener('change', onDrillChange);
+  mask.addEventListener('input', onDrillInput);
+  _drillEl = mask;
+  return mask;
+}
+function openDrill(ctx){
+  drill.ctx = ctx;
+  drill.base = ctx.base || [];
+  drill.filters = {};
+  drill.sort = { key:'', dir:1 };
+  drill.page = 1;
+  // 手机端筛选器一竖排会占满整屏、把明细挤到下方 → 默认折叠（电脑端保留用户上次的展开状态）
+  if(isMobileView()) drill.collapsed = true;
+  mselRuntime.open = null; mselRuntime.search = null;
+  const el = drillEnsureEl();
+  el.style.display = 'flex';
+  renderDrill();
+}
+function closeDrill(){
+  drill.ctx = null;
+  drill.base = [];
+  drill.filters = {};
+  mselRuntime.open = null; mselRuntime.search = null;
+  if(_drillEl) _drillEl.style.display = 'none';
+}
+
+// —— 筛选：多选下拉（复用 ⑦ 的 .msel 结构与样式，键空间加 d: 前缀）——
+function drillMselKey(key){ return DRILL_MSEL + key; }
+function drillGetMsel(key){
+  const v = drill.filters[key];
+  return Array.isArray(v) ? v : [];
+}
+function drillSetMsel(msKey, arr){
+  drill.filters[String(msKey).slice(DRILL_MSEL.length)] = arr;
+}
+function drillMselHTML(key, label, arr, extraCls){
+  const k = drillMselKey(key);
+  mselRuntime.options[k] = arr;
+  const set = drillGetMsel(key);
+  const items = [];
+  if(key !== 'vab')
+    items.push('<label class="msel-item"><input type="checkbox" value="'+MS_BLANK+'" '+(set.includes(MS_BLANK)?'checked':'')+'><span>（空白）</span></label>');
+  arr.forEach(x=>{
+    const v = Array.isArray(x)?x[0]:x, t = Array.isArray(x)?x[1]:x;
+    items.push('<label class="msel-item"><input type="checkbox" value="'+esc(v)+'" '+(set.includes(v)?'checked':'')+'><span>'+esc(t)+'</span></label>');
+  });
+  return '<span class="detail-filter'+(extraCls?' '+extraCls:'')+'"><span class="df-label">'+esc(label)+'</span><span class="msel" data-mskey="'+k+'">'
+    + '<button type="button" class="msel-btn detail-select" title="'+esc(label)+'（可多选、可搜索）">'+esc(mselBtnText(k,label,set))+'<span class="msel-caret">▾</span></button>'
+    + '<span class="msel-panel"><span class="msel-top">'
+    + '<input type="text" class="msel-search" placeholder="输入关键词筛选选项">'
+    + '<span class="msel-actions">'
+    + '<button type="button" class="msel-act" data-msact="all">全选</button>'
+    + '<button type="button" class="msel-act" data-msact="none">清空</button>'
+    + '</span></span>' + items.join('') + '</span></span></span>';
+}
+// 面板用 fixed 定位：下钻筛选区自身可滚动（overflow-y:auto），absolute 面板会被裁剪
+function positionDrillPanels(){
+  if(!_drillEl) return;
+  _drillEl.querySelectorAll('.msel').forEach(box=>{
+    const panel = box.querySelector('.msel-panel');
+    if(!panel) return;
+    if(!box.classList.contains('open')){
+      panel.style.position = ''; panel.style.left = ''; panel.style.top = '';
+      panel.style.width = ''; panel.style.maxWidth = ''; panel.style.maxHeight = '';
+      return;
+    }
+    const btn = box.querySelector('.msel-btn');
+    if(!btn) return;
+    const r = btn.getBoundingClientRect();
+    const w = Math.max(r.width, 210);
+    const left = Math.min(Math.max(8, r.left), Math.max(8, window.innerWidth - w - 8));
+    panel.style.position = 'fixed';
+    panel.style.left = left + 'px';
+    panel.style.top = (r.bottom + 4) + 'px';
+    panel.style.width = w + 'px';
+    panel.style.maxWidth = Math.max(160, window.innerWidth - 16) + 'px';
+    panel.style.maxHeight = Math.max(150, window.innerHeight - r.bottom - 16) + 'px';
+    panel.style.zIndex = '9100';
+  });
+}
+const drillHitPool = (set, raw) => {
+  if(!set || !set.length) return true;
+  const v = String(raw==null?'':raw).trim();
+  if(set.includes(MS_BLANK)) return v==='' || set.includes(v);
+  return set.includes(v);
+};
+function drillFilterList(list){
+  const f = drill.filters || {};
+  if(f.__date__ && f.__date__.length){
+    const set = f.__date__;
+    list = list.filter(r => r.payTime && set.includes(fmtDate(r.payTime)));
+  }
+  return applyFieldFilters(list, f);
+}
+function drillSortList(list){
+  const { key, dir } = drill.sort;
+  if(!key) return list;
+  return list.slice().sort((a,b)=>{
+    const va = detailSortVal(a,key), vb = detailSortVal(b,key);
+    if(typeof va === 'string' && typeof vb === 'string') return va.localeCompare(vb,'zh-CN')*dir;
+    return (va - vb)*dir;
+  });
+}
+
+// —— 渲染 ——
+function drillRowCellsHTML(r, i, start){
+  const vab = isVabMember(r.memberNo);
+  const ov = String(r.deptOverride||'').trim();
+  return `<tr>
+    <td style="text-align:center;color:var(--c-muted);">${start+i+1}</td>
+    <td>${esc(r.name)}</td>
+    <td>${esc(r.memberNo)}</td>
+    <td>${esc(r.developer)}</td>
+    <td>${esc(r.channelClass)}</td>
+    <td>${esc(r.channelL1)}</td>
+    <td>${esc(r.channelL2)}</td>
+    <td>${esc(r.visitType)}</td>
+    <td>${esc(r.consultant)}</td>
+    <td>${esc(r.cashier)}</td>
+    <td>${r.payTime?fmtDate(r.payTime):''}</td>
+    <td style="text-align:right;">${fmt(r.cashPay)}</td>
+    <td style="text-align:right;">${fmt(r.assetDeduct)}</td>
+    <td style="white-space:nowrap;">${esc(effectiveDept(r))}${ov?'<span class="drill-ov">手动</span>':''}</td>
+    <td style="text-align:center;${vab?'color:#1a73e8;font-weight:600;':''}">${vab?'✔':'—'}</td>
+  </tr>`;
+}
+function drillCardHTML(r){
+  const vab = isVabMember(r.memberNo);
+  const ov = String(r.deptOverride||'').trim();
+  const row = (k,v,cls='') => `<span>${k}</span><b class="${cls}">${v}</b>`;
+  return `<div class="detail-card">
+    <div class="dc-head">
+      <span class="dc-name">${esc(r.name||'—')}</span>
+      <span class="dc-vab ${vab?'hit':''}">${vab?'VAB ✔':'VAB —'}</span>
+    </div>
+    <div class="dc-rows">
+      ${row('会员号', esc(r.memberNo))}
+      ${row('客户开发人', esc(r.developer))}
+      ${row('渠道分类', esc(r.channelClass))}
+      ${row('一级渠道', esc(r.channelL1))}
+      ${row('二级渠道', esc(r.channelL2))}
+      ${row('到访类型', esc(r.visitType))}
+      ${row('咨询师', esc(r.consultant))}
+      ${row('收款员工', esc(r.cashier))}
+      ${row('收款时间', r.payTime?esc(fmtDate(r.payTime)):'')}
+      ${row('现款支付', esc(fmt(r.cashPay)), 'amt')}
+      ${row('资产抵扣金额', esc(fmt(r.assetDeduct)), 'amt')}
+      ${row('报表归属', esc(effectiveDept(r)) + (ov?'（手动）':''))}
+    </div>
+  </div>`;
+}
+function drillPagerHTML(page, pageCount){
+  if(pageCount <= 1) return '';
+  const mk = (label, no, opt) => {
+    opt = opt || {};
+    return `<button type="button" class="pg-btn ${opt.active?'active':''}" data-dpage="${no}" ${opt.disabled?'disabled':''}>${label}</button>`;
+  };
+  const nums = [...new Set([1, pageCount, page, page-1, page+1].filter(n => n>=1 && n<=pageCount))].sort((a,b)=>a-b);
+  const parts = [ mk('上一页', page-1, {disabled: page<=1}) ];
+  let prev = 0;
+  for(const n of nums){
+    if(n - prev > 1) parts.push('<span class="pg-sep">…</span>');
+    parts.push(mk(String(n), n, {active: n===page}));
+    prev = n;
+  }
+  parts.push(mk('下一页', page+1, {disabled: page>=pageCount}));
+  const sizeOpts = [10,20,50,100].map(s=>`<option value="${s}" ${s===drill.pageSize?'selected':''}>每页 ${s}</option>`).join('');
+  return `<div class="detail-pager">
+    ${parts.join('')}
+    <span class="pg-info">第 ${page}/${pageCount} 页</span>
+    <label class="detail-filter pager-size">每页
+      <select id="drill-pagesize" class="detail-select" style="min-width:auto;">${sizeOpts}</select>
+    </label>
+  </div>`;
+}
+
+function renderDrill(){
+  const ctx = drill.ctx;
+  if(!ctx || !_drillEl) return;
+  const base = drill.base || [];
+  // 级联收敛（渠道 分类→一级→二级）：上游变更后裁剪下游失效选中值（与 ⑦ 同策略）
+  const poolC = base.filter(r => drillHitPool(drill.filters.channelClass, r.channelClass));
+  if(drill.filters.channelL1 && drill.filters.channelL1.length){
+    const has = new Set(poolC.map(r=>String(r.channelL1||'').trim()).filter(Boolean));
+    drill.filters.channelL1 = drill.filters.channelL1.filter(v => v===MS_BLANK
+      ? poolC.some(r=>!String(r.channelL1||'').trim()) : has.has(v));
+  }
+  const poolL1 = poolC.filter(r => drillHitPool(drill.filters.channelL1, r.channelL1));
+  if(drill.filters.channelL2 && drill.filters.channelL2.length){
+    const has = new Set(poolL1.map(r=>String(r.channelL2||'').trim()).filter(Boolean));
+    drill.filters.channelL2 = drill.filters.channelL2.filter(v => v===MS_BLANK
+      ? poolL1.some(r=>!String(r.channelL2||'').trim()) : has.has(v));
+  }
+
+  const list = drillSortList(drillFilterList(base));
+  const total = list.reduce((a,b)=>a+(Number(b.cashPay)||0),0);
+  const totalAsset = list.reduce((a,b)=>a+(Number(b.assetDeduct)||0),0);
+  const vabCount = list.filter(r=>isVabMember(r.memberNo)).length;
+  const custSet = new Set();
+  list.forEach(r=>{ const k = mktFirstClientKey(r); if(k && k !== 'name:') custSet.add(k); });
+
+  const pageSize = drill.pageSize;
+  const pageCount = Math.max(1, Math.ceil(list.length / pageSize));
+  if(drill.page > pageCount) drill.page = pageCount;
+  if(drill.page < 1) drill.page = 1;
+  const start = (drill.page-1) * pageSize;
+  const pageItems = list.slice(start, start + pageSize);
+  const isMobile = isMobileView();
+
+  // —— 汇总条 ——
+  const exp = ctx.expected;
+  const hasExp = (exp != null && !isNaN(exp));
+  const cmp = ctx.metric === 'count' ? custSet.size : total;
+  const diff = hasExp ? (cmp - exp) : 0;
+  const mismatch = hasExp && Math.abs(diff) > 0.005;
+  const expLabel = ctx.metric === 'count' ? '客量' : '金额';
+  const sumHTML = `
+    <span>命中 <b>${list.length}</b> 行${list.length !== base.length ? `（全量 ${base.length} 行）` : ''}</span>
+    <span>现款合计 <b>¥${fmt(total)}</b></span>
+    <span>资产抵扣 <b>¥${fmt(totalAsset)}</b></span>
+    <span>命中 VAB <b>${vabCount}</b> 行</span>
+    <span>去重客户 <b>${custSet.size}</b> 人</span>
+    ${hasExp ? (mismatch
+      ? `<span class="drill-warn">⚠ 报表显示${expLabel} ${ctx.metric==='count'?fmtInt(exp):('¥'+fmt(exp))}，与明细合计差 ${ctx.metric==='count'?fmtInt(Math.abs(diff)):('¥'+fmt(Math.abs(diff)))}（该格含手动调整，明细为自动计算口径）</span>`
+      : `<span style="color:#1f8a4a;">✔ 与报表显示${expLabel}一致</span>`) : ''}`;
+
+  // —— 筛选区 ——
+  const distinct = key => [...new Set(base.map(r=>String(r[key]||'').trim()).filter(Boolean))]
+    .sort((a,b)=>a.localeCompare(b,'zh-CN'));
+  const distinctPool = (key, pool) => [...new Set(pool.map(r=>String(r[key]||'').trim()).filter(Boolean))]
+    .sort((a,b)=>a.localeCompare(b,'zh-CN'));
+  const fText = (key,label) => `<label class="detail-filter"><span class="df-label">${label}</span>`
+    + `<input type="text" class="detail-select" data-dfilter-text="${key}" value="${esc(drill.filters[key]||'')}" placeholder="含…"></label>`;
+  const fNum = (key,label) => `<span class="detail-filter num-filter"><span class="df-label">${label}</span>`
+    + `<span class="num-line">`
+    + `<select class="detail-select op-sel" data-dfilter="${key}Op" title="选择比较方式">`
+    + NUM_OPS.map(([v,l])=>`<option value="${v}" ${String(drill.filters[key+'Op']||'')===v?'selected':''}>${l}</option>`).join('')
+    + `</select>`
+    + `<input type="number" step="any" class="detail-select" data-dfilter-text="${key}" value="${esc(drill.filters[key]||'')}" placeholder="数值"></span></span>`;
+  const activeEntries = Object.entries(drill.filters||{}).filter(([k,v]) => (Array.isArray(v)?v.length:!!v) && !k.endsWith('Op'));
+  const dateChips = (ctx.dates && ctx.dates.length > 1)
+    ? drillMselHTML('__date__', '日期', ctx.dates.map(d=>[d, drillDayLabel(d)]), 'date-filter')
+    : '';
+  const fbody = `
+    <div class="drill-fbody ${drill.collapsed?'collapsed':''}">
+      ${dateChips}
+      ${fText('name','姓名')}
+      ${fText('memberNo','会员号')}
+      ${drillMselHTML('channelClass','渠道分类',distinct('channelClass'))}
+      ${drillMselHTML('channelL1','一级渠道',distinctPool('channelL1', poolC))}
+      ${drillMselHTML('channelL2','二级渠道',distinctPool('channelL2', poolL1))}
+      ${drillMselHTML('visitType','到访类型',distinct('visitType'))}
+      ${drillMselHTML('consultant','咨询师',distinct('consultant'))}
+      ${drillMselHTML('developer','客户开发人',distinct('developer'))}
+      ${drillMselHTML('cashier','收款员工',distinct('cashier'))}
+      ${fNum('cashPay','现款支付')}
+      ${fNum('assetDeduct','资产抵扣金额')}
+      ${drillMselHTML('dept','报表归属',DEPT_OPTIONS)}
+      ${drillMselHTML('vab','VAB',[['hit','✔ 命中'],['miss','— 未命中']],'span2')}
+      ${activeEntries.length?'<button type="button" id="drill-filter-reset" class="detail-reset" title="清除全部筛选">清除筛选</button>':''}
+    </div>`;
+
+  // —— 表格 ——
+  const sortThs = ['<th>#</th>']
+    .concat(DETAIL_SORT_COLS.map(([k,label])=>{
+      const on = drill.sort.key===k;
+      const arrow = on ? (drill.sort.dir===1?' ▲':' ▼') : '';
+      return `<th data-dsort="${k}" title="点击按${label}排序" style="cursor:pointer;user-select:none;white-space:nowrap;${on?'color:#1a4f8b;text-decoration:underline;':''}">${label}${arrow}</th>`;
+    })).join('');
+  let content;
+  if(!list.length){
+    content = `<div class="drill-empty">当前筛选条件下没有明细数据</div>`;
+  }else if(isMobile){
+    content = `<div class="drill-cards">${pageItems.map(r=>drillCardHTML(r)).join('')}</div>`;
+  }else{
+    content = `<table class="data">
+      <thead><tr>${sortThs}</tr></thead>
+      <tbody>${pageItems.map((r,i)=>drillRowCellsHTML(r,i,start)).join('')}</tbody>
+      <tfoot><tr>
+        <td colspan="11" style="text-align:right;">合计（${list.length} 行 · 命中VAB ${vabCount} 行）</td>
+        <td style="text-align:right;">${fmt(total)}</td>
+        <td style="text-align:right;">${fmt(totalAsset)}</td>
+        <td></td>
+        <td style="text-align:center;">${vabCount}</td>
+      </tr></tfoot>
+    </table>`;
+  }
+
+  _drillEl.innerHTML = `
+    <div class="drill-head">
+      <button type="button" class="drill-back" id="drill-back" title="关闭明细，返回报表">← 返回报表</button>
+      <div class="drill-titles">
+        <div class="drill-title">${esc(ctx.title)}</div>
+        <div class="drill-sub">${esc(ctx.sub)}</div>
+      </div>
+      <button type="button" class="drill-close" id="drill-close" title="关闭（Esc）">✕</button>
+    </div>
+    <div id="drill-sum">${sumHTML}</div>
+    <div id="drill-filters">
+      <button type="button" class="ftoggle" id="drill-filter-toggle" title="展开/收起筛选区">
+        <span>⚙ 筛选</span>${activeEntries.length?`<span class="ft-count">${activeEntries.length}</span>`:''}
+        <span>${drill.collapsed?'▸':'▾'}</span>
+      </button>
+      ${fbody}
+    </div>
+    <div id="drill-body">
+      ${content}
+      ${drillPagerHTML(drill.page, pageCount)}
+      <p class="drill-note">下钻明细只读：字段与 ⑦ 导入数据明细一致，现款支付为「收款金额-现款支付」口径。如需修改到访类型 / 报表归属，请回到下方 ⑦ 导入数据明细操作。</p>
+    </div>`;
+  applyMselOpenState();
+  positionDrillPanels();
+}
+
+// —— 交互 ——
+function onDrillClick(e){
+  const t = e.target;
+  if(!t || !t.closest) return;
+  if(!t.closest('.msel') && mselRuntime.open){
+    mselRuntime.open = null; mselRuntime.search = null; applyMselOpenState();
+    return;
+  }
+  if(t.closest('#drill-close') || t.closest('#drill-back')){ closeDrill(); return; }
+  if(t.closest('#drill-filter-toggle')){ drill.collapsed = !drill.collapsed; renderDrill(); return; }
+  if(t.closest('#drill-filter-reset')){
+    drill.filters = {}; drill.page = 1;
+    mselRuntime.open = null; mselRuntime.search = null;
+    renderDrill(); return;
+  }
+  const mb = t.closest('.msel-btn');
+  if(mb){
+    const key = mb.closest('.msel').dataset.mskey;
+    if(mselRuntime.open !== key) mselRuntime.search = null;
+    mselRuntime.open = mselRuntime.open === key ? null : key;
+    applyMselOpenState();
+    positionDrillPanels();
+    return;
+  }
+  const act = t.closest('.msel-act');
+  if(act){
+    const box = act.closest('.msel');
+    const key = box.dataset.mskey;
+    if(act.dataset.msact === 'all'){
+      const vals = [...box.querySelectorAll('label.msel-item')]
+        .filter(it => it.style.display !== 'none')
+        .map(it => it.querySelector('input').value)
+        .filter(v => v !== MS_BLANK);
+      drillSetMsel(key, vals);
+    }else{
+      drillSetMsel(key, []);
+    }
+    drill.page = 1;
+    mselRuntime.open = key;
+    renderDrill();
+    return;
+  }
+  const th = t.closest('#drill-body th[data-dsort]');
+  if(th){
+    const k = th.dataset.dsort;
+    drill.sort = (drill.sort.key === k) ? { key:k, dir: -drill.sort.dir } : { key:k, dir:1 };
+    drill.page = 1;
+    renderDrill();
+    return;
+  }
+  const pg = t.closest('#drill-body .pg-btn[data-dpage]');
+  if(pg){ drill.page = parseInt(pg.dataset.dpage,10) || 1; renderDrill(); return; }
+}
+function onDrillChange(e){
+  const t = e.target;
+  if(!t || !t.closest) return;
+  const ps = t.closest('#drill-pagesize');
+  if(ps){ drill.pageSize = parseInt(ps.value,10) || 10; drill.page = 1; renderDrill(); return; }
+  const op = t.closest('select[data-dfilter]');
+  if(op){ drill.filters[op.dataset.dfilter] = op.value || ''; drill.page = 1; renderDrill(); return; }
+  // 多选下拉复选框：更新选中集合后重渲染（展开态由 mselRuntime.open 恢复，面板不闪没）
+  const cb = t.closest('.msel input[type="checkbox"]');
+  if(cb){
+    const box = cb.closest('.msel');
+    const key = box.dataset.mskey;
+    const set = [...box.querySelectorAll('input[type="checkbox"]:checked')].map(x=>x.value);
+    drillSetMsel(key, set);
+    drill.page = 1;
+    mselRuntime.open = key;
+    renderDrill();
+    return;
+  }
+}
+function onDrillInput(e){
+  const t = e.target;
+  if(!t || !t.closest) return;
+  const search = t.closest('.msel-search');
+  if(search){
+    const box = search.closest('.msel');
+    const key = box.dataset.mskey;
+    mselRuntime.search = { key, q: search.value || '' };
+    applyMselSearchFilter(box, search.value);
+    return;
+  }
+  const ft = t.closest('input[data-dfilter-text]');
+  if(ft){
+    const key = ft.dataset.dfilterText;
+    drill.filters[key] = ft.value || '';
+    drill.page = 1;
+    // 文本输入不整体重渲染（会丢焦点）：只刷新汇总条与列表
+    drillSoftRefresh();
+    return;
+  }
+}
+// 文本/数值筛选即时生效但不重建筛选区（避免输入框失焦）：重渲列表区
+function drillSoftRefresh(){
+  const bodyEl = document.getElementById('drill-body');
+  const sumEl = document.getElementById('drill-sum');
+  if(!bodyEl || !sumEl) return;
+  const keepFocus = document.activeElement;
+  const key = keepFocus && keepFocus.dataset ? keepFocus.dataset.dfilterText : '';
+  const caret = keepFocus && keepFocus.selectionStart;
+  renderDrill();
+  if(key){
+    const again = _drillEl.querySelector(`input[data-dfilter-text="${key}"]`);
+    if(again){ again.focus(); try{ again.setSelectionRange(caret, caret); }catch(err){} }
+  }
+}
+
+// —— 触发：③④ 单击（与双击编辑共存）/ ⑤ 单击立即 ——
+function drillSchedule(td, delay){
+  const run = ()=>{ _drillClickTimer = 0; try{ resolveDrillTarget(td); }catch(err){ console.error(err); showToast('下钻失败：'+err.message,'err'); } };
+  if(delay > 0) _drillClickTimer = setTimeout(run, delay);
+  else run();
+}
+document.addEventListener('click', (e)=>{
+  const t = e.target;
+  if(!t || !t.closest) return;
+  if(_drillEl && _drillEl.contains(t)) return;            // 覆盖层内部事件由自身处理
+  if(e.detail > 1) return;                                // 双击的第二下不重复触发
+  const td = t.closest('td');
+  if(!td) return;
+  // ⑤ 电商表：单元格无编辑交互 → 立即下钻
+  if(td.matches && td.matches('#ec-sub-table td.num[data-col]')){ drillSchedule(td, 0); return; }
+  // ③④：双击=手动编辑，单击=下钻 → 200ms 判定窗口，期间 dblclick 会取消
+  if(td.matches && td.matches('#report-table td.num[data-rowkey], #store-table td.num[data-rowkey]')){
+    if(td.classList.contains('editing')) return;
+    if(td.querySelector && td.querySelector('input')) return;
+    drillSchedule(td, 200);
+  }
+}, true);
+document.addEventListener('dblclick', ()=>{
+  if(_drillClickTimer){ clearTimeout(_drillClickTimer); _drillClickTimer = 0; }
+}, true);
+document.addEventListener('keydown', (e)=>{
+  if(e.key === 'Escape' && drill.ctx){ closeDrill(); }
+});
+window.addEventListener('resize', ()=>{ if(drill.ctx) positionDrillPanels(); });
 
 // 兼容：脚本在 body 底部，DOM 可能已就绪；若仍处于 loading 则等 DOMContentLoaded
 if(document.readyState === 'loading'){
