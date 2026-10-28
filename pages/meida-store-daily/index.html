@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>美大店铺日数据</title>
+<style>
+  :root{
+    --c-bg:#eef1f6; --c-card:#fff; --c-border:#dbe3ee; --c-border-soft:#e9eef6;
+    --c-head:#002060; --c-head-2:#1e3a8a; --c-accent:#3658d3; --c-text:#1f2d4d;
+    --c-muted:#7a8aa6; --c-accent-soft:#eef3fd;
+    --radius:14px; --radius-sm:9px;
+    --shadow-card:0 1px 2px rgba(31,45,77,.05),0 8px 24px rgba(31,45,77,.07);
+    --font-sans:"PingFang SC","Microsoft YaHei","Segoe UI",system-ui,-apple-system,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0;font-family:var(--font-sans);background:var(--c-bg);color:var(--c-text);font-size:14px;-webkit-font-smoothing:antialiased;}
+  .wrap{max-width:1180px;margin:0 auto;padding:20px 18px 60px;}
+  h1{font-size:19px;color:var(--c-head);margin:0 0 3px;}
+  .sub{color:var(--c-muted);font-size:12.5px;margin-bottom:16px;}
+  .stage{background:var(--c-card);border:1px solid var(--c-border);border-radius:var(--radius);box-shadow:var(--shadow-card);padding:44px 24px 40px;text-align:center;}
+  .mark{width:56px;height:56px;margin:0 auto 14px;border-radius:16px;display:flex;align-items:center;justify-content:center;font-size:26px;background:var(--c-accent-soft);border:1px solid #cfdcf7;}
+  .mark-title{font-size:15px;font-weight:700;color:var(--c-head);margin-bottom:6px;}
+  .mark-desc{font-size:12.5px;color:var(--c-muted);line-height:1.7;max-width:480px;margin:0 auto;}
+  .facts{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:26px auto 0;max-width:760px;}
+  @media (max-width:720px){ .facts{grid-template-columns:1fr;} }
+  .fact{border:1px solid var(--c-border-soft);border-radius:var(--radius-sm);padding:12px 14px;text-align:left;background:#fafbfe;}
+  .fact .k{font-size:11px;color:var(--c-muted);letter-spacing:.4px;margin-bottom:4px;}
+  .fact .v{font-size:13px;color:var(--c-head);font-weight:600;}
+  .fact .v.pending{color:#a85b04;}
+  .hint{margin-top:18px;font-size:11.5px;color:var(--c-muted);}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>美大店铺日数据</h1>
+  <div class="sub">美团 / 大众点评 店铺维度的每日经营数据</div>
+
+  <div class="stage">
+    <div class="mark">🏪</div>
+    <div class="mark-title">模块框架已就绪，等待数据口径</div>
+    <div class="mark-desc">
+      页面、菜单入口与权限已接入完成。数据模板与构建方式确认后，即可在此接入店铺日数据。
+    </div>
+    <div class="facts">
+      <div class="fact"><div class="k">数据来源</div><div class="v pending">待定（模板导入 / 录入 / 接口）</div></div>
+      <div class="fact"><div class="k">展示维度</div><div class="v">店铺 × 日期</div></div>
+      <div class="fact"><div class="k">当前状态</div><div class="v pending">待建设</div></div>
+    </div>
+    <div class="hint">提供模板后，此页将替换为正式数据面板</div>
+  </div>
+</div>
+<script src="/shared/rbac.js?v=20261028a"></script>
+<script src="/shared/auth-gate.js?v=20261020c"></script>
+</body>
+</html>

@@ -12,7 +12,7 @@ const state = { modules: [], tabs: [], current: null };
 // 发布版本号：由 index.html 顶部的 <script>window.SITE_VER=... 注入，作为唯一权威来源，避免双文件版本漂移。
 // 此处保留兜底常量，仅在脱离 Shell 独立打开时生效。用于 iframe 缓存穿透，确保线上改动即时可见。
 // file:// 双击打开时不加查询串（带查询串的 iframe 在 file:// 下可能无法加载）。
-const SITE_VER = (typeof window !== 'undefined' && window.SITE_VER) || '20261023a';
+const SITE_VER = (typeof window !== 'undefined' && window.SITE_VER) || '20261028a';
 // 每次页面加载的唯一戳：拼到所有子页 iframe URL 之后，确保浏览器每次都重新拉取最新脚本，
 // 彻底规避「服务器无 Cache-Control 时浏览器启发式缓存旧脚本导致刷新丢数据」的问题。
 // file:// 双击打开时不加查询串。
@@ -48,13 +48,18 @@ const MODULES = [
     ],
   },
   {
+    // 2026-10-28：升为父级「日业绩」，下挂「日业绩报表」（原初诊版）与「美大店铺日数据」两个子模块
     id: 'daily-performance',
-    name: '日业绩报表·初诊',
+    name: '日业绩',
     icon: '🩺',
     group: '数据统计',
     type: 'embed',
     src: '/pages/daily-performance-chuzhen/index.html',
-    desc: '每日业绩统计（初诊版）：订单 / VAB / 月目标 / 导出',
+    desc: '日业绩系列：日业绩报表（订单 / VAB / 月目标 / 导出）、美大店铺日数据',
+    children: [
+      { id: 'dp-report', name: '日业绩报表', icon: '🩺', src: '/pages/daily-performance-chuzhen/index.html' },
+      { id: 'dp-meida', name: '美大店铺日数据', icon: '🏪', src: '/pages/meida-store-daily/index.html' },
+    ],
   },
   {
     id: 'monthly-analysis',
@@ -208,9 +213,15 @@ function renderNav() {
 /* ---------- 二级子功能解析与打开 ---------- */
 function resolveTarget(id) {
   /* 旧版 hash 兼容：合并模块前的一级菜单 id → 新的子功能 id */
-  // 2026-10-23：标准版「日业绩报表」已移除；日业绩统计改为单模块（初诊版），
-  // 旧的子功能 id（dp-std / dp-chuzhen / daily-performance-chuzhen）统一指向它。
-  if (id === 'dp-std' || id === 'dp-chuzhen' || id === 'daily-performance-chuzhen') id = 'daily-performance';
+  // 2026-10-23：标准版「日业绩报表」已移除；
+  // 2026-10-28：再升为父级「日业绩」，报表本体成为子项 dp-report —— 旧 id 全部落到它。
+  if (id === 'dp-std' || id === 'dp-chuzhen' || id === 'daily-performance-chuzhen') id = 'dp-report';
+  // 父级 hash（#daily-performance）在 openTarget 里只会展开、不开页 → 会首屏空白、书签失效，
+  // 因此这里直接解析为第一个子项（日业绩报表）。
+  if (id === 'daily-performance') {
+    const p = state.modules.find((m) => m.id === 'daily-performance');
+    if (p && p.children && p.children.length) return { kind: 'child', mod: p, child: p.children[0] };
+  }
   const mod = state.modules.find((m) => m.id === id);
   if (mod) return { kind: 'module', mod };
   for (const m of state.modules) {

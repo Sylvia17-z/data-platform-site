@@ -37,7 +37,7 @@
     ],
     modules: [
       { id: 'data-statistics',    name: '客量业绩统计报表' },
-      { id: 'daily-performance',  name: '日业绩报表·初诊' },
+      { id: 'daily-performance',  name: '日业绩' },
       { id: 'monthly-analysis',   name: '月度分析面板' },
       { id: 'medical-assessment', name: '医管考核数据统计' },
       { id: 'account-roles',      name: '账号与角色权限' }
