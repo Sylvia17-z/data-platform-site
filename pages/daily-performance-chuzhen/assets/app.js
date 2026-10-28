@@ -4767,16 +4767,24 @@ function computeEcSubReport(){
   });
 
   // 全部口径（2026-10-27 需求）：同一「电商组」渠道范围，但不做 30 天初诊门槛过滤。
-  //   范围与 ③「电商组」行一致：营销部 + 一级渠道 ∈ {电商组, 客户转介绍, 企业团检}
-  //   ∪ 营销部 + 品牌组 + 二级渠道含「线上400」 ∪ 手动报表归属=电商组（归属优先）。
+  //   范围必须与 ③「电商组」行（r3 ∪ r3b ∪ r3c）**逐条对齐**：
+  //     营销部 + 一级渠道 ∈ {电商组, 客户转介绍, 企业团检}
+  //     ∪ 营销部 + 品牌组 + 二级渠道含「线上400」
+  //     ∪ 渠道分类=推荐 + 一级渠道含「营销部」+ 二级不含「自然到店」（r3b）
+  //     ∪ 手动报表归属 = 电商组（归属优先）
+  //   2026-10-28 修复：原先漏了 r3b 分支，导致「推荐→营销部」的订单计入初诊、却不计入全部，
+  //   表现为某业务类型「全部月累计(0) < 初诊月累计(8,760)」—— 全部口径在数学上必然包含初诊。
+  //   另：覆盖值判定改用 DEPT_OPTIONS 白名单（与 calculate 的 hasOv / DEPT_KEYS 同口径，值完全一致），
+  //   避免历史脏值（非白名单归属值）把整行剔出全部口径。
   // 按二级渠道分桶：allAmt(当日金额) / allCnt(当日去重客户集合)
   const dateSet = new Set(dateList);
   const isEcRange = r => {
     const ovk = String(r.deptOverride || '').trim();
-    if(ovk) return ovk === '电商组';
+    if(DEPT_OPTIONS.includes(ovk)) return ovk === '电商组';
     const cc = CC(r), l1 = L1(r), l2 = L2(r);
     if(cc === '营销部' && ['电商组', '客户转介绍', '企业团检'].includes(l1)) return true;
     if(cc === '营销部' && l1 === '品牌组' && l2.indexOf('线上400') >= 0) return true;
+    if(isRecToYingxiao(r) && l2.indexOf('自然到店') < 0) return true;   // r3b 同源分支
     return false;
   };
   (state.orders || []).forEach(r => {
