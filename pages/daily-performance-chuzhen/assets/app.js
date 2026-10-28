@@ -5046,14 +5046,35 @@ function openDatePick(target){
   _datePickDates = datePickAllDates();
   _datePickHasData = datePickHasDataDates(target);
   _datePickSel = datePickVisibleDates(target);
-  const gridHtml = _datePickDates.map(d=>{
-    const dt = new Date(d);
-    const on = _datePickSel.has(d), hd = _datePickHasData.has(d);
-    return `<label class="datepick-item${on?' checked':''}${hd?' has-data':''}" data-date="${d}" title="${d}${hd?'（有数据）':'（无数据）'}">
-      <input type="checkbox" data-dpdate="${d}"${on?' checked':''}>
-      <span>${dt.getMonth()+1}/${String(dt.getDate()).padStart(2,'0')}</span>
-    </label>`;
-  }).join('');
+  // —— 日历网格：按月份分块，每周 7 列（日 一 二 三 四 五 六），无数据的占位格留白对齐 ——
+  _datePickDates.sort();
+  const _dpByMonth = {};
+  _datePickDates.forEach(d => { const mk = d.slice(0,7); (_dpByMonth[mk] = _dpByMonth[mk] || []).push(d); });
+  const _dpWD = ['日','一','二','三','四','五','六'];
+  const _dpCalBlock = (month, ds) => {
+    const [y, m] = month.split('-').map(Number);
+    const lead = new Date(y, m-1, 1).getDay();   // 0=周日
+    const cells = [];
+    for(let i=0; i<lead; i++) cells.push(null);
+    ds.forEach(d => cells.push(d));
+    while(cells.length % 7 !== 0) cells.push(null);   // 补齐末行
+    const wdRow = _dpWD.map(w=>`<div class="datepick-cal-wd">${w}</div>`).join('');
+    const body = cells.map(c=>{
+      if(c === null) return `<div class="datepick-cal-cell empty"></div>`;
+      const dt = new Date(c), on = _datePickSel.has(c), hd = _datePickHasData.has(c);
+      return `<label class="datepick-item${on?' checked':''}${hd?' has-data':''}" data-date="${c}" title="${c}${hd?'（有数据）':'（无数据）'}">
+        <input type="checkbox" data-dpdate="${c}"${on?' checked':''}>
+        <span>${dt.getDate()}</span>
+      </label>`;
+    }).join('');
+    return `<div class="datepick-cal">
+      <div class="datepick-cal-head">${y}年${m}月</div>
+      <div class="datepick-cal-weekdays">${wdRow}</div>
+      <div class="datepick-cal-grid">${body}</div>
+    </div>`;
+  };
+  const gridHtml = Object.keys(_dpByMonth).sort().map(mk => _dpCalBlock(mk, _dpByMonth[mk])).join('')
+    || '<div class="file-meta">（当前无日期列）</div>';
   let mask = $('datepick-mask');
   if(!mask){
     mask = document.createElement('div');

@@ -167,17 +167,26 @@
   #hist-list table.data tfoot td.num{text-align:right;font-variant-numeric:tabular-nums;}
   #hist-list table.data tfoot td.hist-sum-label{text-align:left;}
   /* ============ 指定日期列弹窗（2026-10-27）：只保留勾选的日期列 ============ */
-  .datepick-box{width:min(580px,94vw);}
+  .datepick-box{width:min(640px,96vw);}
   .datepick-tools{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 10px;}
   .datepick-tools button{height:27px;padding:0 11px;font-size:12px;font-family:inherit;border:1px solid var(--c-border);border-radius:6px;background:#fff;color:var(--c-head);cursor:pointer;transition:background .12s,border-color .12s;}
   .datepick-tools button:hover{background:#eef3fd;border-color:var(--c-accent);color:var(--c-accent);}
-  .datepick-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(76px,1fr));gap:6px;max-height:42vh;overflow:auto;padding:2px;}
+  .datepick-grid{display:flex;flex-direction:column;gap:14px;max-height:62vh;overflow:auto;padding:4px 2px;}
+  .datepick-cal{border:1px solid var(--c-border);border-radius:8px;padding:8px 10px 10px;background:#fff;}
+  .datepick-cal-head{font-size:13px;font-weight:600;color:var(--c-head);margin:0 0 6px;text-align:center;}
+  .datepick-cal-weekdays{display:grid;grid-template-columns:repeat(7,1fr);margin-bottom:4px;}
+  .datepick-cal-wd{text-align:center;font-size:11px;color:var(--c-muted);padding:2px 0;}
+  .datepick-cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;}
+  .datepick-cal-cell.empty{background:transparent;}
   .datepick-item{display:flex;align-items:center;gap:5px;font-size:12.5px;padding:5px 7px;border:1px solid var(--c-border);border-radius:6px;background:#fff;color:var(--c-muted);cursor:pointer;user-select:none;}
   .datepick-item.has-data{color:var(--c-text);border-color:#c8d6ef;background:#f7f9fd;}
   .datepick-item.has-data::after{content:'';width:4px;height:4px;border-radius:50%;background:var(--c-accent);margin-left:auto;flex:none;opacity:.5;}
   .datepick-item.checked::after{opacity:.85;}
   .datepick-item.checked{border-color:var(--c-accent);background:#eef3fd;color:var(--c-accent);font-weight:600;}
   .datepick-item input{margin:0;cursor:pointer;flex:none;}
+  .datepick-cal-grid .datepick-item{justify-content:center;min-height:34px;padding:4px 2px;}
+  .datepick-cal-grid .datepick-item input{width:13px;height:13px;}
+  .datepick-cal-grid .datepick-item.has-data::after{margin-left:3px;opacity:.7;}
   .datepick-info{font-size:12px;color:var(--c-muted);margin-right:auto;align-self:center;}
   .modal-box{background:#fff;border-radius:12px;padding:20px;width:min(460px,94vw);max-height:86vh;overflow:auto;box-shadow:0 16px 48px rgba(0,0,0,.28);}
   .modal-title{font-size:15px;font-weight:600;color:var(--c-head);margin-bottom:14px;}
