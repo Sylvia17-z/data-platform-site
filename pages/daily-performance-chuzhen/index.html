@@ -167,7 +167,12 @@
   #hist-list table.data tfoot td.num{text-align:right;font-variant-numeric:tabular-nums;}
   #hist-list table.data tfoot td.hist-sum-label{text-align:left;}
   /* ============ 指定日期列弹窗（2026-10-27）：只保留勾选的日期列 ============ */
-  .datepick-box{width:min(640px,96vw);}
+  /* 流畅化（2026-10-28）：共享 filterbar.css 在本页内联样式之后加载，会给 .modal-mask 加
+     backdrop-filter:blur(2px)，全屏模糊叠在 ③④⑤ 三张大表上，每次勾选重绘都要重新做模糊合成
+     → 用 id 特异性压掉（只作用于日期弹窗，不影响其它弹窗） */
+  #datepick-mask{backdrop-filter:none !important;-webkit-backdrop-filter:none !important;background:rgba(15,23,42,.38);}
+  /* 共享 .modal-box{width:min(460px,92vw)} 同为单类且后加载，会吃掉 640px → id 前缀提特异性 */
+  #datepick-mask .datepick-box{width:min(640px,96vw);}
   .datepick-tools{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 10px;}
   .datepick-tools button{height:27px;padding:0 11px;font-size:12px;font-family:inherit;border:1px solid var(--c-border);border-radius:6px;background:#fff;color:var(--c-head);cursor:pointer;transition:background .12s,border-color .12s;}
   .datepick-tools button:hover{background:#eef3fd;border-color:var(--c-accent);color:var(--c-accent);}
@@ -178,16 +183,24 @@
   .datepick-cal-wd{text-align:center;font-size:11px;color:var(--c-muted);padding:2px 0;}
   .datepick-cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;}
   .datepick-cal-cell.empty{background:transparent;}
-  .datepick-item{display:flex;align-items:center;gap:5px;font-size:12.5px;padding:5px 7px;border:1px solid var(--c-border);border-radius:6px;background:#fff;color:var(--c-muted);cursor:pointer;user-select:none;}
+  .datepick-item{display:flex;align-items:center;gap:5px;font-size:12.5px;padding:5px 7px;border:1px solid var(--c-border);border-radius:6px;background:#fff;color:var(--c-muted);cursor:pointer;user-select:none;touch-action:manipulation;-webkit-tap-highlight-color:transparent;/* 定向过渡，不用 all：避免 font-weight 等隐式属性参与过渡引发重排 */transition:background-color .1s ease,border-color .1s ease,color .1s ease,box-shadow .1s ease;}
   .datepick-item.has-data{color:var(--c-text);border-color:#c8d6ef;background:#f7f9fd;}
   .datepick-item.has-data::after{content:'';width:4px;height:4px;border-radius:50%;background:var(--c-accent);margin-left:auto;flex:none;opacity:.5;}
   .datepick-item.checked::after{opacity:.85;}
-  .datepick-item.checked{border-color:var(--c-accent);background:#eef3fd;color:var(--c-accent);font-weight:600;}
+  /* 选中态：色块+双描边；不再 font-weight:600（加粗会让格内文字宽度跳变、观感发飘） */
+  .datepick-item.checked{border-color:var(--c-accent);background:#dde8fd;color:var(--c-accent);box-shadow:inset 0 0 0 1px var(--c-accent);}
+  /* 按下即时反馈：由 pointerdown 加 .pressing（比 label→checkbox→change 早整条链路）
+     transition-duration:0s —— 按下必须「瞬时」变深，不能等 100ms 过渡（松手后回选中态仍走基础过渡，平滑） */
+  .datepick-item.pressing,.datepick-item:active{background:#c9daf9;border-color:var(--c-accent);transition-duration:0s;}
   .datepick-item input{margin:0;cursor:pointer;flex:none;}
   .datepick-cal-grid .datepick-item{justify-content:center;min-height:34px;padding:4px 2px;}
-  .datepick-cal-grid .datepick-item input{width:13px;height:13px;}
+  /* 自绘勾选框：Chrome 原生 checkbox 带约 150ms 勾选绘制动画，缩到 13px 仍在 → 改自绘，勾号瞬时出现 */
+  .datepick-cal-grid .datepick-item input{-webkit-appearance:none;appearance:none;width:13px;height:13px;border:1.5px solid #c3d0e4;border-radius:3px;background:#fff;transition:background-color .08s ease,border-color .08s ease;}
+  .datepick-cal-grid .datepick-item input:focus-visible{outline:2px solid var(--c-accent);outline-offset:1px;}
+  .datepick-item.checked input{background:var(--c-accent) url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.4 6.2l2.4 2.4 4.8-5' fill='none' stroke='%23fff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center/9px 9px no-repeat;border-color:var(--c-accent);}
   .datepick-cal-grid .datepick-item.has-data::after{margin-left:3px;opacity:.7;}
-  .datepick-info{font-size:12px;color:var(--c-muted);margin-right:auto;align-self:center;}
+  /* 计数文字：定宽 + 等宽数字，勾选时右侧「取消/应用」不再左右跳 */
+  .datepick-info{font-size:12px;color:var(--c-muted);margin-right:auto;align-self:center;min-width:96px;font-variant-numeric:tabular-nums;}
   .modal-box{background:#fff;border-radius:12px;padding:20px;width:min(460px,94vw);max-height:86vh;overflow:auto;box-shadow:0 16px 48px rgba(0,0,0,.28);}
   .modal-title{font-size:15px;font-weight:600;color:var(--c-head);margin-bottom:14px;}
   .modal-fields{display:flex;flex-direction:column;gap:10px;}

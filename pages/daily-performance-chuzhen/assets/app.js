@@ -4993,9 +4993,10 @@ function datePickAllDates(){
   return generateDateRange(cutoff);   // 当月 1 日 ~ 截止日（三张表同一口径）
 }
 // 目标表当前「可见」的日期集合（用于打开面板时的默认勾选）
-function datePickVisibleDates(target){
+// rep：⑤ 的 computeEcSubReport 结果，可由调用方预计算后传入，避免弹窗内重复全量计算（2026-10-28 流畅化）
+function datePickVisibleDates(target, rep){
   if(target === 'ec'){
-    const rep = computeEcSubReport();
+    rep = rep || computeEcSubReport();
     const hidden = ecSubHiddenSet(rep);
     return new Set((rep.dateList || []).filter(d => !hidden.has(d)));
   }
@@ -5007,10 +5008,10 @@ function datePickVisibleDates(target){
   return set;
 }
 // 目标表「有数据」的日期集合（chip 标注 + 「仅本日有数据」快捷）
-function datePickHasDataDates(target){
+function datePickHasDataDates(target, rep){
   const set = new Set();
   if(target === 'ec'){
-    const rep = computeEcSubReport();
+    rep = rep || computeEcSubReport();
     (rep.dateList || []).forEach(d => { if((rep.totalDays && (rep.totalDays[d] || 0)) > 0) set.add(d); });
   }else{
     datePickAllDates().forEach(d => { if(!emptyDailyDates.has(d)) set.add(d); });
@@ -5026,8 +5027,12 @@ function syncDatePickChecks(){
   const grid = $('datepick-grid');
   if(!grid) return;
   grid.querySelectorAll('.datepick-item').forEach(item=>{
-    const on = _datePickSel.has(item.dataset.date);
+    const d = item.dataset.date;
+    const on = _datePickSel.has(d);
+    const hd = _datePickHasData.has(d);
     item.classList.toggle('checked', on);
+    item.classList.toggle('has-data', hd);   // 数据可能已变（重导入/清空指定日期），秒开路径也要刷新蓝点
+    item.title = d + (hd ? '（有数据）' : '（无数据）');
     const cb = item.querySelector('input[type="checkbox"]');
     if(cb) cb.checked = on;
   });
@@ -5038,27 +5043,24 @@ function closeDatePick(){
   if(mask) mask.style.display = 'none';
   _datePickTarget = null;
 }
-function openDatePick(target){
-  const cfg = DATE_PICK_TABLES[target];
-  if(!cfg || !$(cfg.tableId)) return;
-  if(!state.results){ showToast('请先在「① 数据导入」上传订单表', 'warn', 2600); return; }
-  _datePickTarget = target;
-  _datePickDates = datePickAllDates();
-  _datePickHasData = datePickHasDataDates(target);
-  _datePickSel = datePickVisibleDates(target);
-  // —— 日历网格：按月份分块，每周 7 列（日 一 二 三 四 五 六），无数据的占位格留白对齐 ——
-  _datePickDates.sort();
-  const _dpByMonth = {};
-  _datePickDates.forEach(d => { const mk = d.slice(0,7); (_dpByMonth[mk] = _dpByMonth[mk] || []).push(d); });
-  const _dpWD = ['日','一','二','三','四','五','六'];
-  const _dpCalBlock = (month, ds) => {
+// 已渲染弹窗的内容指纹（target + 日期集）与构建序号：命中则不重建 innerHTML → 再次打开秒开
+let _dpRenderKey = '';
+let _dpBuildSeq = 0;
+
+// 日历网格 HTML：按月份分块，每周 7 列（日 一 二 三 四 五 六），无数据处留白对齐
+// 依赖 _datePickDates / _datePickSel / _datePickHasData 三个模块级状态
+function _datePickCalendarHTML(){
+  const byMonth = {};
+  _datePickDates.forEach(d => { const mk = d.slice(0,7); (byMonth[mk] = byMonth[mk] || []).push(d); });
+  const WD = ['日','一','二','三','四','五','六'];
+  const calBlock = (month, ds) => {
     const [y, m] = month.split('-').map(Number);
     const lead = new Date(y, m-1, 1).getDay();   // 0=周日
     const cells = [];
     for(let i=0; i<lead; i++) cells.push(null);
     ds.forEach(d => cells.push(d));
     while(cells.length % 7 !== 0) cells.push(null);   // 补齐末行
-    const wdRow = _dpWD.map(w=>`<div class="datepick-cal-wd">${w}</div>`).join('');
+    const wdRow = WD.map(w=>`<div class="datepick-cal-wd">${w}</div>`).join('');
     const body = cells.map(c=>{
       if(c === null) return `<div class="datepick-cal-cell empty"></div>`;
       const dt = new Date(c), on = _datePickSel.has(c), hd = _datePickHasData.has(c);
@@ -5073,8 +5075,18 @@ function openDatePick(target){
       <div class="datepick-cal-grid">${body}</div>
     </div>`;
   };
-  const gridHtml = Object.keys(_dpByMonth).sort().map(mk => _dpCalBlock(mk, _dpByMonth[mk])).join('')
+  return Object.keys(byMonth).sort().map(mk => calBlock(mk, byMonth[mk])).join('')
     || '<div class="file-meta">（当前无日期列）</div>';
+}
+
+function openDatePick(target){
+  const cfg = DATE_PICK_TABLES[target];
+  if(!cfg || !$(cfg.tableId)) return;
+  if(!state.results){ showToast('请先在「① 数据导入」上传订单表', 'warn', 2600); return; }
+  _datePickTarget = target;
+  _datePickDates = datePickAllDates();
+  _datePickDates.sort();
+
   let mask = $('datepick-mask');
   if(!mask){
     mask = document.createElement('div');
@@ -5084,6 +5096,21 @@ function openDatePick(target){
     document.body.appendChild(mask);
     bindDatePickEvents(mask);
   }
+
+  // 秒开路径（2026-10-28 流畅化）：同一张表 + 同一批日期 → 结构完全一致，只同步勾选态，不重建 DOM
+  const key = target + '|' + _datePickDates.join(',');
+  if(_dpRenderKey === key && $('datepick-grid')){
+    _dpBuildSeq++;   // 作废可能仍在排队的旧构建
+    const rep = (target === 'ec') ? computeEcSubReport() : null;
+    _datePickHasData = datePickHasDataDates(target, rep);
+    _datePickSel = datePickVisibleDates(target, rep);
+    mask.style.display = 'flex';
+    syncDatePickChecks();
+    return;
+  }
+
+  // 重建路径：先让弹窗骨架出现在首帧，重活推到下一帧，避免「点了没反应」
+  const seq = ++_dpBuildSeq;
   mask.innerHTML = `<div class="modal-box datepick-box">
     <div class="modal-title">📅 只保留指定日期列 · <span style="color:var(--c-accent);">${esc(cfg.label)}</span></div>
     <div class="datepick-tools">
@@ -5092,7 +5119,7 @@ function openDatePick(target){
       <button type="button" data-dp="latest">仅最新有数据</button>
       <button type="button" data-dp="none">全不选</button>
     </div>
-    <div class="datepick-grid" id="datepick-grid">${gridHtml || '<div class="file-meta">（当前无日期列）</div>'}</div>
+    <div class="datepick-grid" id="datepick-grid"><div class="file-meta">正在生成日历…</div></div>
     <div class="modal-actions">
       <span class="datepick-info" id="datepick-info"></span>
       <button type="button" class="btn" id="datepick-cancel">取消</button>
@@ -5100,7 +5127,21 @@ function openDatePick(target){
     </div>
   </div>`;
   mask.style.display = 'flex';   // ⚠ 必须 inline：共享 CSS 的 .modal-mask{display:none} 会覆盖默认 flex（2026-10-27 下钻弹窗同款坑）
-  updateDatePickInfo();
+
+  const build = () => {
+    if(seq !== _dpBuildSeq || _datePickTarget !== target) return;   // 已关闭 / 已切换 / 被新一次打开取代
+    // ⑤ 的 computeEcSubReport 只算一次，同时供「可见日期」与「有数据日期」使用（原先算两遍）
+    const rep = (target === 'ec') ? computeEcSubReport() : null;
+    _datePickHasData = datePickHasDataDates(target, rep);
+    _datePickSel = datePickVisibleDates(target, rep);
+    const grid = $('datepick-grid');
+    if(!grid) return;
+    grid.innerHTML = _datePickCalendarHTML();
+    _dpRenderKey = key;
+    syncDatePickChecks();
+  };
+  if(typeof requestAnimationFrame === 'function') requestAnimationFrame(build);
+  else setTimeout(build, 0);
 }
 function bindDatePickEvents(mask){
   mask.addEventListener('click', e=>{
@@ -5129,9 +5170,19 @@ function bindDatePickEvents(mask){
     const d = cb.dataset.dpdate;
     if(cb.checked) _datePickSel.add(d); else _datePickSel.delete(d);
     const item = cb.closest('.datepick-item');
-    if(item) item.classList.toggle('checked', cb.checked);
+    if(item){ item.classList.toggle('checked', cb.checked); item.classList.remove('pressing'); }
     updateDatePickInfo();
   });
+  // 按下即反馈（2026-10-28 流畅化）：pointerdown 比 label→checkbox→change 早整条点击链路，
+  // 先加 .pressing 让格子立刻变色；pointerup 延后一个 task 清理，确保 change 的选中态先落地、不闪
+  mask.addEventListener('pointerdown', e=>{
+    const it = e.target.closest('.datepick-item');
+    if(it) it.classList.add('pressing');
+  }, { passive:true });
+  const _clearPressing = () => mask.querySelectorAll('.datepick-item.pressing')
+    .forEach(x => x.classList.remove('pressing'));
+  mask.addEventListener('pointerup', ()=> setTimeout(_clearPressing, 0), { passive:true });
+  mask.addEventListener('pointercancel', _clearPressing, { passive:true });
   document.addEventListener('keydown', e=>{
     if(e.key === 'Escape' && mask.style.display === 'flex') closeDatePick();
   });
@@ -5141,40 +5192,47 @@ function applyDatePick(){
   if(!target) return;
   const sel = new Set(_datePickSel);
   const all = _datePickDates.slice();
-  if(target === 'ec'){
-    // ⑤ 每个日期占 2 子列（客量/金额），全隐藏会让「当日数据/月累计」两行失去意义 → 至少留一天
-    if(!sel.size){ showToast('⑤ 电商二级渠道业绩至少需保留一个日期列，请用「+展开」恢复', 'warn', 3000); return; }
-    ecSubHidden = new Set(all.filter(d => !sel.has(d)));
-    ecSubBatchMode = false;
-    const t = $('ec-sub-table'); if(t) t.classList.remove('batch-mode');
-    const bb = $('ec-sub-batch-toggle'); if(bb) bb.textContent = '☑ 批量';
-    renderEcSubReport();
-  }else{
-    const table = $(DATE_PICK_TABLES[target].tableId);
-    if(table){
-      table.querySelectorAll('th.daily-col').forEach(th=>{
-        th.classList.toggle('col-hidden', !sel.has(th.dataset.date));
-        th.classList.remove('selected');
-      });
-      table.querySelectorAll('td[data-idx]').forEach(td=>{
-        const d = all[+td.dataset.idx];
-        if(d) td.classList.toggle('col-hidden', !sel.has(d));
-      });
-      if(target === 'store'){
-        storeBatchMode = false;
-        table.classList.remove('batch-mode');
-        const sb = $('store-batch-toggle'); if(sb) sb.textContent = '☑ 批量';
-        updateStoreTitleColspan(table);
-      }else{
-        batchMode = false;
-        table.classList.remove('batch-mode');
-        const mb = $('batch-toggle'); if(mb) mb.textContent = '☑ 批量';
-        updateMainTitleColspan(table);
-      }
-    }
+  // ⑤ 每个日期占 2 子列（客量/金额），全隐藏会让「当日数据/月累计」两行失去意义 → 至少留一天
+  if(target === 'ec' && !sel.size){
+    showToast('⑤ 电商二级渠道业绩至少需保留一个日期列，请用「+展开」恢复', 'warn', 3000); return;
   }
+  // 即时反馈（2026-10-28）：先关弹窗、先出提示，列切换与表格重排推到下一帧，
+  // 否则 table-layout:auto 的整表重排会阻塞在点击同步链路里 → 观感「点完愣一下」
   closeDatePick();
   showToast(sel.size ? `已只保留 ${sel.size} 个日期列（共 ${all.length} 天）` : '已隐藏全部日期列', sel.size ? 'ok' : 'warn');
+  const run = () => {
+    if(target === 'ec'){
+      ecSubHidden = new Set(all.filter(d => !sel.has(d)));
+      ecSubBatchMode = false;
+      const t = $('ec-sub-table'); if(t) t.classList.remove('batch-mode');
+      const bb = $('ec-sub-batch-toggle'); if(bb) bb.textContent = '☑ 批量';
+      renderEcSubReport();
+      return;
+    }
+    const table = $(DATE_PICK_TABLES[target].tableId);
+    if(!table) return;
+    table.querySelectorAll('th.daily-col').forEach(th=>{
+      th.classList.toggle('col-hidden', !sel.has(th.dataset.date));
+      th.classList.remove('selected');
+    });
+    table.querySelectorAll('td[data-idx]').forEach(td=>{
+      const d = all[+td.dataset.idx];
+      if(d) td.classList.toggle('col-hidden', !sel.has(d));
+    });
+    if(target === 'store'){
+      storeBatchMode = false;
+      table.classList.remove('batch-mode');
+      const sb = $('store-batch-toggle'); if(sb) sb.textContent = '☑ 批量';
+      updateStoreTitleColspan(table);
+    }else{
+      batchMode = false;
+      table.classList.remove('batch-mode');
+      const mb = $('batch-toggle'); if(mb) mb.textContent = '☑ 批量';
+      updateMainTitleColspan(table);
+    }
+  };
+  if(typeof requestAnimationFrame === 'function') requestAnimationFrame(run);
+  else setTimeout(run, 0);
 }
 // 旧缓存 HTML 兜底：补齐三张表的「📅 指定日期」按钮（幂等）
 function ensureDatePickButtons(){
