@@ -45,6 +45,7 @@
   .btn-primary{background:var(--c-head);border-color:var(--c-head);color:#fff;}
   .btn-primary:hover{background:#0b2f70;color:#fff;}
   .btn-ghost{color:var(--c-muted);}
+  #btn-clear{margin-left:auto;}
   .btn-ghost:hover{color:#b3261e;border-color:#b3261e;background:#fff5f5;}
   .file-meta{font-size:12px;color:var(--c-muted);align-self:center;}
   .file-meta.ok{color:#1f8a4a;}
@@ -52,7 +53,8 @@
   .sep{width:1px;height:22px;background:var(--c-border);align-self:center;}
 
   .fld{display:inline-flex;flex-direction:column;gap:3px;}
-  .fld > span.lb{font-size:11.5px;color:var(--c-muted);}
+  .src-note{margin-top:11px;padding-top:9px;border-top:1px dashed var(--c-border-soft);font-size:11.5px;color:var(--c-muted);line-height:1.8;}
+  .src-note b{color:var(--c-head);font-weight:600;}  .fld > span.lb{font-size:11.5px;color:var(--c-muted);}
   .ctl{height:32px;border:1px solid var(--c-border);border-radius:8px;padding:0 9px;font-family:inherit;font-size:13px;
     color:var(--c-text);background:#fff;outline:none;}
   .ctl:focus{border-color:var(--c-accent);box-shadow:0 0 0 2px rgba(54,88,211,.12);}
@@ -108,6 +110,7 @@
   /* 单元格内容 */
   td.num{text-align:right;font-variant-numeric:tabular-nums;}
   td .adot{display:inline-block;width:5px;height:5px;border-radius:50%;background:#1f8a4a;margin-right:4px;vertical-align:2px;}
+  td .pdot{display:inline-block;width:5px;height:5px;border-radius:50%;background:#3658d3;margin-right:4px;vertical-align:2px;}
   td.dash{color:#9aa9c0;}
   td.fb{color:#8a6a2a;font-style:italic;}
   td.editable{cursor:cell;}
@@ -148,17 +151,25 @@
 
   <!-- ① 数据导入 -->
   <div class="panel">
-    <h2>① 数据导入 <span class="tag">订单表 → 自动算业绩/客量；七大店铺总表 → 评分、美团漏斗、投产比、好评等人工指标</span></h2>
+    <h2>① 数据导入 <span class="tag">订单表 → 业绩/客量；七大店铺总表 → 评分、榜单、投产比、好评；平台三表 → 曝光/访问/下单/核销/回复时长</span></h2>
     <div class="toolbar">
       <input type="file" id="file-orders" accept=".xlsx,.xls" hidden />
-      <button class="btn btn-primary" id="btn-orders">📁 上传订单表</button>
+      <button class="btn" id="btn-orders">📁 上传订单表</button>
       <span id="orders-meta" class="file-meta">未导入</span>
       <span class="sep"></span>
       <input type="file" id="file-stores" accept=".xlsx,.xls" hidden />
       <button class="btn" id="btn-stores">📊 上传七大店铺总表</button>
       <span id="stores-meta" class="file-meta">未导入</span>
       <span class="sep"></span>
+      <input type="file" id="file-platform" accept=".xlsx,.xls,.csv" multiple hidden />
+      <button class="btn btn-primary" id="btn-platform">📥 上传平台数据（可多选）</button>
+      <span id="platform-meta" class="file-meta">未导入</span>
+      <span class="sep"></span>
       <button class="btn btn-ghost" id="btn-clear">清除本页数据</button>
+    </div>
+    <div class="src-note">
+      <b>平台数据</b>支持一次选中多个文件，按表头自动识别类型：<b>客流数据</b> → 曝光人数 / 访问人数；<b>在线咨询数据</b> → 昨日咨客平均回复时长 / 30s内回复率；<b>门店交易数据</b> → 下单人数、下单券数、下单金、核销人数、核销券数、总核销金额。
+      当日取该日行原值；月累计按当月 1 日至所选日逐日累加，其中回复时长与回复率按当日「在线咨询人数」加权平均。
     </div>
   </div>
 
@@ -179,10 +190,10 @@
           <button data-p="cum">仅月累计</button>
         </span>
       </label>
-      <label class="fld"><span class="lb">业绩 / 客量取数</span>
+      <label class="fld"><span class="lb">取数方式</span>
         <span class="seg" id="src-seg">
-          <button data-s="auto" class="active">自动计算</button>
-          <button data-s="sheet">源表值</button>
+          <button data-s="auto" class="active">自动汇总</button>
+          <button data-s="sheet">仅总表</button>
         </span>
       </label>
       <span class="file-meta" id="date-hint" style="margin-left:auto;"></span>
@@ -219,14 +230,18 @@
     <span><i style="background:var(--xl-today-a)"></i>当日数据行</span>
     <span><i style="background:var(--xl-cum-b)"></i>本月累计行</span>
     <span><i style="background:var(--xl-sum)"></i>合计行</span>
+    <span><i style="background:#1f8a4a;border-radius:50%"></i>订单自动计算</span>
+    <span><i style="background:#3658d3;border-radius:50%"></i>平台三表汇总</span>
   </div>
 
   <p class="note">
-    <b>口径：</b>「初诊业绩（T30）」「初诊成交客量（T30）」「有效客资人数」「新增VAB客量」「客单价」由订单表自动计算 ——
+    <b>业绩 / 客量口径：</b>「初诊业绩（T30）」「初诊成交客量（T30）」「有效客资人数」「新增VAB客量」「客单价」由订单表自动计算 ——
     渠道范围 = 7 个美大二级渠道（美大-高端体检 / 国际门诊 / 口腔保健 / 新妇科·抗衰 / 新妇科·私密 / 北郊保健 / 北郊医疗）∩「电商组」，
-    初诊门槛与「日业绩报表」逐日口径完全一致。「本月累计」= 当月 1 日至所选日期的逐日累加，不取源表快照。<br />
-    格内 <b>绿色圆点</b> = 自动计算值；<b>浅棕斜体</b> = 订单侧无数据时回落到源表值。评分、美团漏斗、投产比、好评等列取自
-    「七大店铺总表」，可在格内双击手工覆盖（覆盖值随本页保存）。
+    初诊门槛与「日业绩报表」逐日口径完全一致。<br />
+    <b>平台指标口径：</b>曝光 / 访问取自客流数据，回复时长 / 30s回复率取自在线咨询数据，下单与核销 6 项取自门店交易数据；
+    当日取该日行，月累计按当月逐日累加（回复时长与回复率按在线咨询人数加权）。导入平台三表后，这些列优先于七大店铺总表的同名值。<br />
+    格内 <b>绿色圆点</b> = 订单自动计算，<b>蓝色圆点</b> = 平台三表汇总，<b>浅棕斜体</b> = 回落到七大店铺总表原值；
+    任意格子可双击手工覆盖（覆盖值随本页保存，优先级最高）。
   </p>
 </div>
 

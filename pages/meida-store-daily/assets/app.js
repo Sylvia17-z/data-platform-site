@@ -12,6 +12,12 @@
  *      → 自动算出「初诊业绩 / 初诊成交客量 / 有效客资人数 / 新增VAB客量 / 客单价」
  *   2) 七大店铺数据总表（.xlsx）—— 每个 sheet 名即日期（如 10.23），取 A4:AH17
  *      的 7 店 × 2 行数据，填充评分 / 美团漏斗 / 投产比 / 好评等人工指标。
+ *   3) 平台日报三表（可一次多选，按表头自动识别类型）—— 覆盖「美团数据」「回复时长/回复率」：
+ *        客流数据    → 曝光人数(O)、访问人数(P)
+ *        在线咨询数据 → 昨日咨客平均回复时长(AG)、30s内回复率(AH)
+ *        门店交易数据 → 下单人数(Q)、下单券数(R)、下单金(S)、核销人数(T)、核销券数(U)、总核销金额(V)
+ *      当日取该日行；月累计 = 当月 1 日~所选日逐日累加（回复时长/回复率按「在线咨询人数」加权）。
+ *      三表存在时优先于七大店铺总表的同名列；缺失的格子仍回落总表。
  *
  * 口径（与 ③④⑤ 的「电商组二级渠道业绩（初诊）」严格同源，改一处必须同步另一处）
  *   渠道范围 isEcSubScope()：营销部 + 一级渠道∈{电商组,客户转介绍,企业团检}
@@ -44,18 +50,34 @@ function toast(msg, kind, ms) {
   _toastTimer = setTimeout(() => { el.className = 'toast'; }, ms || 3000);
 }
 
-/* ---------------- 7 大店铺（与 ⑤ 的 EC_SUB_PLATFORMS 一一对应） ---------------- */
+/* ---------------- 7 大店铺（与 ⑤ 的 EC_SUB_PLATFORMS 一一对应） ----------------
+ * match = 平台导出文件里的门店名匹配规则（美团/大众点评导出名与本表名不完全一致，
+ *   例：本表「医疗保健中心（未央分院）」，平台导出为「长寿养护保健中心（未央分院）」）。
+ * 顺序有意义：先具体的，后宽松的。
+ */
 const STORES = [
-  { key: '美大-高端体检', name: '海蓓国际医疗·高端体检中心', pm: '李群', op: '段聪' },
-  { key: '美大-国际门诊', name: '海蓓国际医疗·高新中心医院', pm: '李群', op: '段聪' },
-  { key: '美大-口腔保健', name: '海蓓国际医疗·口腔保健美学中心', pm: '杜巧娟', op: '（待招）' },
-  { key: '美大-新妇科·抗衰', name: '海蓓国际医疗·女性健康中心', pm: '杜巧娟', op: '（待招）' },
-  { key: '美大-新妇科·私密', name: '海蓓Anna·皮肤私密养护中心', pm: '杜巧娟', op: '（待招）' },
-  { key: '美大-北郊保健', name: '海蓓·私享保健中心', pm: '杜巧娟', op: '杜巧娟' },
-  { key: '美大-北郊医疗', name: '海蓓国际医疗·医疗保健中心（未央分院）', pm: '杜巧娟', op: '杜巧娟' },
+  { key: '美大-高端体检', name: '海蓓国际医疗·高端体检中心', pm: '李群', op: '段聪', match: /高端体检/ },
+  { key: '美大-国际门诊', name: '海蓓国际医疗·高新中心医院', pm: '李群', op: '段聪', match: /高新/ },
+  { key: '美大-口腔保健', name: '海蓓国际医疗·口腔保健美学中心', pm: '杜巧娟', op: '（待招）', match: /口腔/ },
+  { key: '美大-新妇科·抗衰', name: '海蓓国际医疗·女性健康中心', pm: '杜巧娟', op: '（待招）', match: /女性健康/ },
+  { key: '美大-新妇科·私密', name: '海蓓Anna·皮肤私密养护中心', pm: '杜巧娟', op: '（待招）', match: /私密|anna/i },
+  { key: '美大-北郊保健', name: '海蓓·私享保健中心', pm: '杜巧娟', op: '杜巧娟', match: /私享|北郊保健/ },
+  { key: '美大-北郊医疗', name: '海蓓国际医疗·医疗保健中心（未央分院）', pm: '杜巧娟', op: '杜巧娟', match: /未央|北郊医疗/ },
 ];
 const STORE_BY_NAME = new Map(STORES.map((s) => [s.name, s]));
 const STORE_KEYS = STORES.map((s) => s.key);
+
+// 平台导出门店名 → 本表店铺（先精确，再按 match 关键字容错）
+function resolveStoreByName(name) {
+  const s = String(name == null ? '' : name).trim();
+  if (!s) return null;
+  if (STORE_BY_NAME.has(s)) return STORE_BY_NAME.get(s);
+  for (const st of STORES) {
+    if (st.match && st.match.test(s)) return st;
+  }
+  // 兜底：本表名前 8 字前缀匹配（历史行为）
+  return STORES.find((x) => s.indexOf(x.name.slice(0, 8)) === 0) || null;
+}
 
 /* ---------------- 34 列表头（严格对应原 Excel A..AH） ----------------
  * g   = 第 2 行分组id
@@ -124,6 +146,7 @@ const LS = {
   hist: 'dailyPerformance_hist',       // 与日业绩报表共用
   vab: 'dailyPerformance_vab',         // 与日业绩报表共用
   rows: 'meidaStore_rows',             // 七大店铺总表解析结果
+  daily: 'meidaStore_daily',           // 平台三表（客流/咨询/交易）逐日明细
   manual: 'meidaStore_manual',         // 本页手工覆盖
   meta: 'meidaStore_meta',             // 导入时间/年份等
 };
@@ -135,7 +158,8 @@ const state = {
   orders: [],          // 订单（含 Date 化的 payTime）
   histOrders: [],      // 历史消费明细（仅用于规则B）
   vabSet: new Set(),   // VAB 会员规范化集合
-  rows: {},            // { 'YYYY-MM-DD': { storeKey: {field:value} } }
+  rows: {},            // { 'YYYY-MM-DD': { storeKey: { pm,op,mt,dp,rank, today:{…}, cum:{…} } } }
+  daily: {},           // { 'YYYY-MM-DD': { storeKey: { expo,visit,orderU,orderC,orderAmt,woU,woC,woAmt,replySec,reply30,chatCnt } } }
   manual: {},          // { 'date|storeKey|field': value }
   date: '',            // 当前报表日期 'YYYY-MM-DD'
   period: 'both',      // both | today | cum
@@ -539,6 +563,243 @@ async function onFileStores(file) {
 }
 
 /* =====================================================================
+ * 四之二、平台日报三表解析（客流 / 在线咨询 / 门店交易，支持一次多选）
+ * ---------------------------------------------------------------------
+ * 三份导出的结构一致：第 1 行表头，其后每行 = 一个「日期 × 门店」。
+ * 类型靠**表头**判定（不看文件名，用户可能改过名）：
+ *   门店交易 含「下单券数」且「核销券数」
+ *   客流     含「曝光人数」或「访问人数」
+ *   在线咨询 含「平均响应时长」或「30秒内回复率」
+ * 列一律**精确名优先**：如「下单金额」不能误取「下单金额（原价）」，
+ * 「平均响应时长」不能误取「平均响应时长均值 / 优秀值」。
+ * ===================================================================== */
+const PLAT_FIELDS = ['expo', 'visit', 'orderU', 'orderC', 'orderAmt', 'woU', 'woC', 'woAmt', 'replySec', 'reply30'];
+const PLAT_TYPE_LABEL = { flow: '客流', chat: '在线咨询', trade: '门店交易' };
+const PLAT_TYPE_SHORT = { flow: '客流', chat: '咨询', trade: '交易' };
+
+function platNum(v) {
+  if (v == null || v === '') return 0;
+  if (typeof v === 'number') return isFinite(v) ? v : 0;
+  const n = Number(String(v).replace(/[,\s]/g, ''));
+  return isNaN(n) ? 0 : n;
+}
+// 日期单元格 → 'YYYY-MM-DD'（兼容文本 / Date / Excel 序列号）
+function parseDateCell(v) {
+  if (v == null || v === '') return '';
+  if (v instanceof Date) return fmtDate(v);
+  if (typeof v === 'number' && v > 20000 && v < 80000) {
+    const d = new Date(Date.UTC(1899, 11, 30) + Math.round(v) * 86400000);
+    return d.getUTCFullYear() + '-' + pad2(d.getUTCMonth() + 1) + '-' + pad2(d.getUTCDate());
+  }
+  const d = parseDateLoose(v);
+  return d ? fmtDate(d) : '';
+}
+function findHeaderRow(grid) {
+  for (let i = 0; i < Math.min(grid.length, 8); i++) {
+    const row = (grid[i] || []).map((v) => String(v == null ? '' : v).trim());
+    if (row.includes('日期') && row.some((h) => h.includes('门店'))) return i;
+  }
+  return -1;
+}
+// 精确名优先；否则包含匹配（可用 exclude 排除「…原价 / …均值 / …优秀值」这类近似列）
+function colIdx(hdr, names, exclude) {
+  for (const nm of names) {
+    const i = hdr.indexOf(nm);
+    if (i >= 0) return i;
+  }
+  for (const nm of names) {
+    const i = hdr.findIndex((h) => h.includes(nm) && (!exclude || !h.includes(exclude)));
+    if (i >= 0) return i;
+  }
+  return -1;
+}
+function classifyPlat(hdr) {
+  const has = (t) => hdr.some((h) => h.includes(t));
+  if (has('下单券数') && has('核销券数')) return 'trade';
+  if (has('曝光人数') || has('访问人数')) return 'flow';
+  if (has('平均响应时长') || has('30秒内回复率')) return 'chat';
+  return null;
+}
+
+async function parsePlatFile(file) {
+  await ensureXlsx();
+  const buf = await file.arrayBuffer();
+  const wb = XLSX.read(buf, { type: 'array', cellDates: true });
+  const out = { type: null, rows: [] };
+  for (const sn of wb.SheetNames) {
+    const grid = XLSX.utils.sheet_to_json(wb.Sheets[sn], { header: 1, defval: null, blankrows: false, raw: true });
+    if (!grid || grid.length < 2) continue;
+    const hi = findHeaderRow(grid);
+    if (hi < 0) continue;
+    const hdr = (grid[hi] || []).map((v) => String(v == null ? '' : v).trim());
+    const type = classifyPlat(hdr);
+    if (!type) continue;
+    const iDate = colIdx(hdr, ['日期']);
+    const iStore = colIdx(hdr, ['门店名称', '门店']);
+    if (iDate < 0 || iStore < 0) continue;
+    const idx = {};
+    if (type === 'flow') {
+      idx.expo = colIdx(hdr, ['曝光人数']);
+      idx.visit = colIdx(hdr, ['访问人数']);
+    } else if (type === 'chat') {
+      idx.replySec = colIdx(hdr, ['平均响应时长']);
+      idx.reply30 = colIdx(hdr, ['30秒内回复率']);
+      idx.chatCnt = colIdx(hdr, ['在线咨询人数']);
+    } else {
+      idx.orderU = colIdx(hdr, ['下单人数']);
+      idx.orderC = colIdx(hdr, ['下单券数']);
+      idx.orderAmt = colIdx(hdr, ['下单金额'], '原价');
+      idx.woU = colIdx(hdr, ['核销人数']);
+      idx.woC = colIdx(hdr, ['核销券数']);
+      idx.woAmt = colIdx(hdr, ['核销金额'], '原价');
+    }
+    const rows = [];
+    for (let r = hi + 1; r < grid.length; r++) {
+      const row = grid[r] || [];
+      const date = parseDateCell(row[iDate]);
+      if (!date) continue;
+      const st = resolveStoreByName(row[iStore]);
+      if (!st) continue;
+      const vals = {};
+      if (type === 'flow') {
+        vals.expo = platNum(row[idx.expo]);
+        vals.visit = platNum(row[idx.visit]);
+      } else if (type === 'trade') {
+        vals.orderU = platNum(row[idx.orderU]);
+        vals.orderC = platNum(row[idx.orderC]);
+        vals.orderAmt = platNum(row[idx.orderAmt]);
+        vals.woU = platNum(row[idx.woU]);
+        vals.woC = platNum(row[idx.woC]);
+        vals.woAmt = platNum(row[idx.woAmt]);
+      } else {
+        const sec = cleanCell(row[idx.replySec], 'sec');
+        const p30 = cleanCell(row[idx.reply30], 'pct');
+        if (isNum(sec)) vals.replySec = sec;
+        if (isNum(p30)) vals.reply30 = p30;
+        vals.chatCnt = idx.chatCnt >= 0 ? platNum(row[idx.chatCnt]) : 0;
+      }
+      rows.push({ date, store: st.key, vals });
+    }
+    if (rows.length) { out.type = type; out.rows = rows; break; }
+  }
+  return out;
+}
+
+async function onFilesPlatform(fileList) {
+  const list = Array.from(fileList || []);
+  if (!list.length) return;
+  const fileCnt = { flow: 0, chat: 0, trade: 0 };
+  const rowCnt = { flow: 0, chat: 0, trade: 0 };
+  const skipped = [];
+  // 导入前的最大日期：只有本次导入真的把可用日期往后延伸时，才自动跳到最新一天
+  const prevDates = allDates();
+  const prevMax = prevDates.length ? prevDates[prevDates.length - 1] : '';
+  try {
+    for (const f of list) {
+      const res = await parsePlatFile(f);
+      if (!res.type || !res.rows.length) { skipped.push(f.name); continue; }
+      fileCnt[res.type]++;
+      res.rows.forEach((r) => {
+        const day = state.daily[r.date] || (state.daily[r.date] = {});
+        const rec = day[r.store] || (day[r.store] = {});
+        Object.assign(rec, r.vals);
+        rowCnt[res.type]++;
+      });
+    }
+    const got = fileCnt.flow + fileCnt.chat + fileCnt.trade;
+    if (!got) {
+      toast('未识别到平台数据表。请上传「客流数据 / 在线咨询数据 / 门店交易数据」导出的 xlsx（表头需含 日期 + 门店名称）', 'err', 8000);
+      return;
+    }
+    const dates = Object.keys(state.daily)
+      .filter((d) => Object.keys(state.daily[d]).length)
+      .sort();
+    const storeSet = new Set();
+    dates.forEach((d) => Object.keys(state.daily[d]).forEach((k) => storeSet.add(k)));
+    const prev = state.meta.plat || {};
+    const types = Object.assign({}, prev.types || {});
+    Object.keys(fileCnt).forEach((t) => { if (fileCnt[t]) types[t] = 1; });
+    state.meta.plat = {
+      types,
+      files: (prev.files || 0) + got,
+      dates: dates.length,
+      from: dates[0] || '',
+      to: dates[dates.length - 1] || '',
+      stores: storeSet.size,
+      ts: Date.now(),
+    };
+    saveLocal();
+    _platCache.key = '';
+    syncDateRange();
+    // 新数据的日期范围更靠后 → 直接定位到最新一天；否则保留用户当前选择
+    const nextDates = allDates();
+    const nextMax = nextDates.length ? nextDates[nextDates.length - 1] : '';
+    if (nextMax && nextMax > prevMax) state.date = nextMax;
+    autoPickDate();
+    render();
+    const parts = Object.keys(fileCnt)
+      .filter((t) => fileCnt[t])
+      .map((t) => `${PLAT_TYPE_LABEL[t]} ${fileCnt[t]} 个（${rowCnt[t]} 行）`);
+    let msg = `平台数据导入完成：${parts.join(' · ')}；覆盖 ${storeSet.size} 店 × ${dates.length} 天`;
+    if (skipped.length) msg += `；未识别 ${skipped.length} 个文件`;
+    toast(msg, 'ok', 6500);
+  } catch (e) {
+    console.error(e);
+    toast('平台数据解析失败：' + e.message, 'err', 7000);
+  }
+}
+
+/* =====================================================================
+ * 四之三、平台三表的 当日 / 月累计 聚合
+ * ---------------------------------------------------------------------
+ * 当日 = 该日期行的原值；月累计 = 当月 1 日 ~ 所选日逐日累加。
+ * 回复时长 / 30s 回复率为**比率**，不能相加 —— 按当日「在线咨询人数」加权平均
+ * （无该列时权重取 1，退化为简单平均）。
+ * ===================================================================== */
+let _platCache = { key: '', data: null };
+const PLAT_SUM_KEYS = ['expo', 'visit', 'orderU', 'orderC', 'orderAmt', 'woU', 'woC', 'woAmt'];
+
+function platAgg() {
+  const date = state.date;
+  if (!date) return null;
+  const key = date + '|' + (state.meta.plat ? state.meta.plat.ts : 0) + '|' + Object.keys(state.daily).length;
+  if (_platCache.key === key) return _platCache.data;
+  const day = iso2date(date);
+  const start = fmtDate(new Date(day.getFullYear(), day.getMonth(), 1));
+  const today = {}, cum = {};
+  STORE_KEYS.forEach((k) => { today[k] = null; cum[k] = null; });
+  STORE_KEYS.forEach((k) => {
+    const r = (state.daily[date] || {})[k];
+    if (r) today[k] = r;
+  });
+  Object.keys(state.daily)
+    .filter((d) => d >= start && d <= date)
+    .sort()
+    .forEach((d) => {
+      const dayRec = state.daily[d] || {};
+      STORE_KEYS.forEach((k) => {
+        const r = dayRec[k];
+        if (!r) return;
+        const c = cum[k] || (cum[k] = {});
+        PLAT_SUM_KEYS.forEach((f) => { if (isNum(r[f])) c[f] = (c[f] || 0) + r[f]; });
+        const w = isNum(r.chatCnt) && r.chatCnt > 0 ? r.chatCnt : 1;
+        if (isNum(r.replySec)) { c._secW = (c._secW || 0) + r.replySec * w; c._secN = (c._secN || 0) + w; }
+        if (isNum(r.reply30)) { c._p30W = (c._p30W || 0) + r.reply30 * w; c._p30N = (c._p30N || 0) + w; }
+      });
+    });
+  STORE_KEYS.forEach((k) => {
+    const c = cum[k];
+    if (!c) return;
+    if (c._secN) c.replySec = c._secW / c._secN;
+    if (c._p30N) c.reply30 = c._p30W / c._p30N;
+    delete c._secW; delete c._secN; delete c._p30W; delete c._p30N;
+  });
+  const data = { today, cum };
+  _platCache = { key, data };
+  return data;
+}
+
+/* =====================================================================
  * 五、计算：每店 当日 / 月累计 的 初诊业绩、初诊客量、全部客量、VAB
  * ===================================================================== */
 let _aggCache = { key: '', data: null };
@@ -654,6 +915,14 @@ function cellValue(storeKey, field, which) {
   if (shared.includes(field)) sheetVal = rec[field];
   else sheetVal = (rec[which] || {})[field];
 
+  // 平台三表（客流 / 在线咨询 / 门店交易）优先于七大店铺总表的同名列；
+  // 「仅总表」模式（source === 'sheet'）下跳过，用于和原表核对。
+  if (state.source === 'auto' && PLAT_FIELDS.indexOf(field) >= 0) {
+    const p = platAgg();
+    const pr = p && p[which] ? p[which][storeKey] : null;
+    if (pr && isNum(pr[field])) return { v: pr[field], kind: 'plat' };
+  }
+
   // 自动列
   if (col && col.auto && state.source === 'auto') {
     const agg = computeAgg();
@@ -750,7 +1019,11 @@ function rowHTML(store, which) {
     const { v, kind } = cellValue(store.key, c.k, which);
     const klass = (c.type === 'text' || c.type === 'scoreText' ? 'txt' : 'num')
       + ' editable' + (c.zone ? ' z-' + c.zone : '');
-    return `<td class="${klass}" data-edit="1" data-store="${store.key}" data-field="${c.k}" data-which="${which}">${display(kind, v, c)}</td>`;
+    // 平台三表算出的格子加蓝点（区别于订单自动计算的绿点）
+    const inner = (kind === 'plat' && typeof v === 'number')
+      ? '<span class="pdot" title="由平台日报数据汇总（客流 / 在线咨询 / 门店交易）"></span>' + display(kind, v, c)
+      : display(kind, v, c);
+    return `<td class="${klass}" data-edit="1" data-store="${store.key}" data-field="${c.k}" data-which="${which}">${inner}</td>`;
   }).join('');
   return `<tr class="${cls}">${cells}</tr>`;
 }
@@ -775,7 +1048,8 @@ function sumRowHTML(label, which) {
 function renderTable() {
   const hasOrders = state.orders.length > 0;
   const hasSheet = Object.keys(state.rows).length > 0;
-  if (!hasOrders && !hasSheet) {
+  const hasPlat = Object.keys(state.daily).some((d) => Object.keys(state.daily[d] || {}).length);
+  if (!hasOrders && !hasSheet && !hasPlat) {
     $('tbl').style.display = 'none';
     $('tbl-empty').style.display = '';
     return;
@@ -847,11 +1121,31 @@ function renderStatus() {
     sm.textContent = '未导入';
     sm.className = 'file-meta';
   }
+  const pm = $('platform-meta');
+  if (pm) {
+    const p = state.meta.plat;
+    if (p && p.dates) {
+      const t = p.types || {};
+      const label = Object.keys(PLAT_TYPE_SHORT).filter((k) => t[k]).map((k) => PLAT_TYPE_SHORT[k]).join('+');
+      pm.textContent = `✔ 平台三表 ${label || '已导入'} · ${p.stores} 店 × ${p.dates} 天`;
+      pm.className = 'file-meta ok';
+    } else {
+      pm.textContent = '未导入';
+      pm.className = 'file-meta';
+    }
+  }
   const hint = $('date-hint');
   const hasAuto = state.orders.length > 0;
   const hasSheet = ds.length > 0;
+  const hasPlat = !!(state.meta.plat && state.meta.plat.dates);
+  const srcLabel = state.source === 'auto'
+    ? (hasAuto || hasPlat ? '自动汇总（订单 + 平台三表）' : '订单与平台数据均为空 → 回落总表')
+    : '仅七大店铺总表';
+  const miss = [];
+  if (!hasSheet) miss.push('未导入七大店铺总表，评分/榜单/好评列为空');
+  if (!hasPlat) miss.push('未导入平台三表，曝光/下单/核销/回复时长沿用总表');
   hint.innerHTML = state.date
-    ? `当前：<b>${state.date}</b>（${dayLabel(state.date)}）· 业绩/客量取数：${state.source === 'auto' ? (hasAuto ? '订单自动计算' : '订单为空 → 回落源表') : '源表值'}${hasSheet ? '' : ' · 未导入七大店铺总表，评分/美团列将显示 —'}`
+    ? `当前：<b>${state.date}</b>（${dayLabel(state.date)}）· 取数：${srcLabel}${miss.length ? ' · ' + miss.join(' · ') : ''}`
     : '暂无可用日期';
 }
 
@@ -870,6 +1164,7 @@ function allDates() {
   const set = new Set();
   state.orders.forEach((r) => { if (r.payTime) set.add(fmtDate(r.payTime)); });
   Object.keys(state.rows).forEach((d) => set.add(d));
+  Object.keys(state.daily).forEach((d) => { if (Object.keys(state.daily[d] || {}).length) set.add(d); });
   return [...set].sort();
 }
 function syncDateRange() {
@@ -949,12 +1244,14 @@ function saveLocal() {
   clearTimeout(_saveTimer);
   _saveTimer = setTimeout(() => {
     lsSet(LS.rows, JSON.stringify(state.rows));
+    lsSet(LS.daily, JSON.stringify(state.daily));
     lsSet(LS.manual, JSON.stringify(state.manual));
     lsSet(LS.meta, JSON.stringify(state.meta));
   }, 120);
 }
 function restoreLocal() {
   try { const r = lsGet(LS.rows); if (r) state.rows = JSON.parse(r) || {}; } catch (e) {}
+  try { const d = lsGet(LS.daily); if (d) state.daily = JSON.parse(d) || {}; } catch (e) {}
   try { const m = lsGet(LS.manual); if (m) state.manual = JSON.parse(m) || {}; } catch (e) {}
   try { const t = lsGet(LS.meta); if (t) state.meta = Object.assign(state.meta, JSON.parse(t) || {}); } catch (e) {}
 }
@@ -964,18 +1261,38 @@ function restoreLocal() {
  * ===================================================================== */
 async function init() {
   restoreLocal();
-  await loadSharedOrders();
-  await loadSharedVab();
-  await loadSharedHist();
+  // 事件与首屏先就绪：本地存储（localStorage/IndexedDB）可能被其它标签页的长事务阻塞，
+  // 若把绑定排在 await 之后，一旦读库卡住整页就完全无响应（2026-10-28 实测复现）。
+  bindUI();
   bindEdit();
   syncDateRange();
   autoPickDate();
-  _aggCache.key = '';
+  render();
 
+  // 共用数据（订单 / VAB / 历史明细）异步补入，最多等 4s；超时也不影响页面可用
+  await Promise.race([
+    (async () => { await loadSharedOrders(); await loadSharedVab(); await loadSharedHist(); })(),
+    new Promise((r) => setTimeout(r, 4000)),
+  ]);
+  syncDateRange();
+  autoPickDate();
+  _aggCache.key = '';
+  _platCache.key = '';
+  render();
+}
+
+function bindUI() {
   $('btn-orders').addEventListener('click', () => $('file-orders').click());
   $('btn-stores').addEventListener('click', () => $('file-stores').click());
+  $('btn-platform').addEventListener('click', () => $('file-platform').click());
   $('file-orders').addEventListener('change', (e) => { onFileOrders(e.target.files && e.target.files[0]); e.target.value = ''; });
   $('file-stores').addEventListener('change', (e) => { onFileStores(e.target.files && e.target.files[0]); e.target.value = ''; });
+  // 平台三表：一次可选多个文件（客流 / 在线咨询 / 门店交易任意组合）
+  $('file-platform').addEventListener('change', (e) => {
+    const files = e.target.files ? Array.from(e.target.files) : [];
+    e.target.value = '';
+    if (files.length) onFilesPlatform(files);
+  });
   $('btn-latest').addEventListener('click', gotoLatest);
 
   $('report-date').addEventListener('change', (e) => {
@@ -983,6 +1300,7 @@ async function init() {
     if (!v) return;
     state.date = v;
     _aggCache.key = '';
+    _platCache.key = '';
     render();
   });
 
@@ -1005,15 +1323,13 @@ async function init() {
   });
 
   $('btn-clear').addEventListener('click', () => {
-    if (!confirm('将清除本页的「七大店铺总表」解析结果与手工覆盖值（不会删除订单数据）。继续？')) return;
-    state.rows = {}; state.manual = {}; state.meta = {};
-    lsSet(LS.rows, '{}'); lsSet(LS.manual, '{}');
-    _aggCache.key = '';
+    if (!confirm('将清除本页的「七大店铺总表」解析结果、平台三表数据与手工覆盖值（不会删除订单数据）。继续？')) return;
+    state.rows = {}; state.daily = {}; state.manual = {}; state.meta = {};
+    lsSet(LS.rows, '{}'); lsSet(LS.daily, '{}'); lsSet(LS.manual, '{}'); lsSet(LS.meta, '{}');
+    _aggCache.key = ''; _platCache.key = '';
     syncDateRange(); autoPickDate(); render();
     toast('本页数据已清除', 'ok');
   });
-
-  render();
 }
 
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
