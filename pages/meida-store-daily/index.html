@@ -12,45 +12,228 @@
     --radius:14px; --radius-sm:9px;
     --shadow-card:0 1px 2px rgba(31,45,77,.05),0 8px 24px rgba(31,45,77,.07);
     --font-sans:"PingFang SC","Microsoft YaHei","Segoe UI",system-ui,-apple-system,sans-serif;
+
+    /* ===== 原 Excel 色板（严格取色，勿改） ===== */
+    --xl-g1:#1F497D;   /* 美大店铺 / 责任人 */
+    --xl-g2:#17375E;   /* 店铺评分、客量分组 */
+    --xl-g3:#4472C4;   /* 统计口径 + 第3行字段行 */
+    --xl-g4:#31859B;   /* 业绩（黑字） */
+    --xl-g5:#60497A;   /* 美团数据 */
+    --xl-g6:#76923C;   /* 投产比 */
+    --xl-g7:#C55A11;   /* 美团榜单维护及客资转化 */
+    --xl-today-a:#B8CCE4;  /* 当日数据 B–N */
+    --xl-today-b:#D9E2F3;  /* 当日数据 O–Z */
+    --xl-cum-a:#B8CCE4;    /* 本月累计 C–N */
+    --xl-cum-b:#E2EFDA;    /* 本月累计 O–Z */
+    --xl-orange:#FCE4D6;   /* 投产比+好评区 */
+    --xl-sum:#FFF2CC;      /* 合计行 */
   }
   *{box-sizing:border-box}
   html,body{margin:0;padding:0;font-family:var(--font-sans);background:var(--c-bg);color:var(--c-text);font-size:14px;-webkit-font-smoothing:antialiased;}
-  .wrap{max-width:1180px;margin:0 auto;padding:20px 18px 60px;}
+  .wrap{max-width:100%;margin:0 auto;padding:18px 16px 70px;}
   h1{font-size:19px;color:var(--c-head);margin:0 0 3px;}
-  .sub{color:var(--c-muted);font-size:12.5px;margin-bottom:16px;}
-  .stage{background:var(--c-card);border:1px solid var(--c-border);border-radius:var(--radius);box-shadow:var(--shadow-card);padding:44px 24px 40px;text-align:center;}
-  .mark{width:56px;height:56px;margin:0 auto 14px;border-radius:16px;display:flex;align-items:center;justify-content:center;font-size:26px;background:var(--c-accent-soft);border:1px solid #cfdcf7;}
-  .mark-title{font-size:15px;font-weight:700;color:var(--c-head);margin-bottom:6px;}
-  .mark-desc{font-size:12.5px;color:var(--c-muted);line-height:1.7;max-width:480px;margin:0 auto;}
-  .facts{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:26px auto 0;max-width:760px;}
-  @media (max-width:720px){ .facts{grid-template-columns:1fr;} }
-  .fact{border:1px solid var(--c-border-soft);border-radius:var(--radius-sm);padding:12px 14px;text-align:left;background:#fafbfe;}
-  .fact .k{font-size:11px;color:var(--c-muted);letter-spacing:.4px;margin-bottom:4px;}
-  .fact .v{font-size:13px;color:var(--c-head);font-weight:600;}
-  .fact .v.pending{color:#a85b04;}
-  .hint{margin-top:18px;font-size:11.5px;color:var(--c-muted);}
+  .sub{color:var(--c-muted);font-size:12.5px;margin-bottom:14px;}
+
+  .panel{background:var(--c-card);border:1px solid var(--c-border);border-radius:var(--radius);box-shadow:var(--shadow-card);padding:14px 16px;margin-bottom:14px;}
+  .panel h2{font-size:14.5px;color:var(--c-head);margin:0 0 10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+  .panel h2 .tag{font-size:11px;font-weight:400;color:var(--c-muted);}
+
+  .toolbar{display:flex;flex-wrap:wrap;align-items:flex-end;gap:10px 14px;}
+  .btn{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 14px;border-radius:8px;border:1px solid var(--c-border);
+    background:#fff;color:var(--c-head);font-family:inherit;font-size:13px;cursor:pointer;transition:background-color .12s,border-color .12s;}
+  .btn:hover{border-color:var(--c-head);background:#f6f9ff;}
+  .btn-primary{background:var(--c-head);border-color:var(--c-head);color:#fff;}
+  .btn-primary:hover{background:#0b2f70;color:#fff;}
+  .btn-ghost{color:var(--c-muted);}
+  .btn-ghost:hover{color:#b3261e;border-color:#b3261e;background:#fff5f5;}
+  .file-meta{font-size:12px;color:var(--c-muted);align-self:center;}
+  .file-meta.ok{color:#1f8a4a;}
+  .file-meta.err{color:#b3261e;}
+  .sep{width:1px;height:22px;background:var(--c-border);align-self:center;}
+
+  .fld{display:inline-flex;flex-direction:column;gap:3px;}
+  .fld > span.lb{font-size:11.5px;color:var(--c-muted);}
+  .ctl{height:32px;border:1px solid var(--c-border);border-radius:8px;padding:0 9px;font-family:inherit;font-size:13px;
+    color:var(--c-text);background:#fff;outline:none;}
+  .ctl:focus{border-color:var(--c-accent);box-shadow:0 0 0 2px rgba(54,88,211,.12);}
+  .seg{display:inline-flex;border:1px solid var(--c-border);border-radius:8px;overflow:hidden;height:32px;}
+  .seg button{height:30px;padding:0 13px;border:0;background:#fff;color:var(--c-muted);font-family:inherit;font-size:12.5px;cursor:pointer;}
+  .seg button + button{border-left:1px solid var(--c-border);}
+  .seg button.active{background:var(--c-head);color:#fff;}
+
+  /* ===== 概览卡 ===== */
+  .kpis{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin-bottom:14px;}
+  @media (max-width:1180px){ .kpis{grid-template-columns:repeat(3,1fr);} }
+  @media (max-width:640px){ .kpis{grid-template-columns:repeat(2,1fr);} }
+  .kpi{border:1px solid var(--c-border);border-radius:var(--radius-sm);padding:10px 12px;background:linear-gradient(180deg,#fbfcff,#f4f7fd);}
+  .kpi .k{font-size:11.5px;color:var(--c-muted);margin-bottom:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .kpi .v{font-size:17px;font-weight:700;color:var(--c-head);font-variant-numeric:tabular-nums;letter-spacing:-.2px;}
+  .kpi .v small{font-size:11px;font-weight:400;color:var(--c-muted);margin-left:3px;}
+  .kpi .v.rate{color:#0f766e;}
+
+  /* ===== 数据表 ===== */
+  .tbl-wrap{border:0;border-radius:var(--radius-sm);overflow:auto;max-height:calc(100vh - 290px);background:#fff;}
+  /* 34 列宽表：table-layout:fixed 必须配合 width:max-content，否则列宽被容器压扁（列数多时文字会被迫竖排） */
+  table.xl{border-collapse:separate;border-spacing:0;table-layout:fixed;width:max-content;min-width:100%;font-size:12px;}
+  table.xl th,table.xl td{border-right:1px solid #d6dde8;border-bottom:1px solid #d6dde8;padding:5px 6px;text-align:center;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  table.xl thead th{position:sticky;z-index:3;font-weight:700;color:#fff;white-space:normal;line-height:1.25;}
+  /* 三行表头逐层吸附：top 必须等于上方各行实际高度之和，否则滚动时错位 */
+  table.xl thead tr:nth-child(1) th{top:0;height:30px;}
+  table.xl thead tr:nth-child(2) th{top:30px;height:34px;}
+  table.xl thead tr:nth-child(3) th{top:64px;height:50px;font-size:11px;line-height:1.22;font-weight:600;}
+  table.xl .t-title{background:#fff;color:#1f2d4d;font-size:14px;letter-spacing:.5px;text-align:center;border-bottom:2px solid #9aa9c0;}
+  /* 表头分组配色 */
+  .g1{background:var(--xl-g1);} .g2{background:var(--xl-g2);} .g3{background:var(--xl-g3);}
+  .g4{background:var(--xl-g4);color:#000 !important;} .g5{background:var(--xl-g5);}
+  .g6{background:var(--xl-g6);} .g7{background:var(--xl-g7);}
+  /* 首列冻结 */
+  table.xl thead th.c-store,table.xl tbody td.c-store,table.xl tfoot td.c-store{position:sticky;left:0;z-index:4;text-align:left;white-space:normal;line-height:1.35;}
+  table.xl thead th.c-store{z-index:6;}
+  /* 冻结列底色跟随所在行（sticky 必须不透明，否则横向滚动会透出后列内容） */
+  table.xl tbody td.c-store,table.xl tfoot td.c-store{font-weight:600;color:var(--c-head);box-shadow:2px 0 0 rgba(31,45,77,.10);}
+  tr.r-today td.c-store{background:var(--xl-today-a);}
+  tr.r-cum td.c-store{background:var(--xl-cum-a);}
+  tr.r-sum td.c-store{background:var(--xl-sum);}
+  /* 行分组底色 */
+  tr.r-today td{background:var(--xl-today-a);}
+  tr.r-today td.z-b{background:var(--xl-today-b);}
+  tr.r-today td.z-c{background:var(--xl-orange);}
+  tr.r-cum td{background:var(--xl-cum-a);}
+  tr.r-cum td.z-b{background:var(--xl-cum-b);}
+  tr.r-cum td.z-c{background:var(--xl-orange);}
+  tr.r-sum td{background:var(--xl-sum);font-weight:700;color:#7a4a00;}
+  tr.r-sum td.z-c{background:var(--xl-orange);}
+  tr.r-sum td.c-store{background:var(--xl-sum);}
+  /* 单元格内容 */
+  td.num{text-align:right;font-variant-numeric:tabular-nums;}
+  td .adot{display:inline-block;width:5px;height:5px;border-radius:50%;background:#1f8a4a;margin-right:4px;vertical-align:2px;}
+  td.dash{color:#9aa9c0;}
+  td.fb{color:#8a6a2a;font-style:italic;}
+  td.editable{cursor:cell;}
+  td.editable:hover{box-shadow:inset 0 0 0 1px var(--c-accent);}
+  td.c-period{font-weight:700;color:var(--c-head);background:#eef2fa !important;}
+
+  .note{margin-top:12px;font-size:11.5px;color:var(--c-muted);line-height:1.8;}
+  .note b{color:var(--c-head);}
+  .legend{display:flex;flex-wrap:wrap;gap:6px 16px;margin-top:10px;font-size:11.5px;color:var(--c-muted);}
+  .legend i{display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:5px;vertical-align:-1px;border:1px solid rgba(0,0,0,.08);}
+
+  /* Toast */
+  .toast{position:fixed;left:50%;top:22px;transform:translateX(-50%);background:#1f2d4d;color:#fff;padding:10px 18px;border-radius:10px;
+    font-size:13px;box-shadow:0 10px 28px rgba(0,0,0,.22);z-index:9999;opacity:0;transition:opacity .22s;pointer-events:none;max-width:80vw;}
+  .toast.show{opacity:1;}
+  .toast.ok{background:#1f8a4a;} .toast.err{background:#b3261e;} .toast.warn{background:#a85b04;}
+
+  .empty{padding:44px 20px;text-align:center;color:var(--c-muted);font-size:13px;line-height:1.9;}
+  .empty b{color:var(--c-head);}
+
+  @media (max-width:640px){
+    .wrap{padding:12px 10px 60px;}
+    .panel{padding:12px;}
+    .tbl-wrap{max-height:calc(100vh - 230px);-webkit-overflow-scrolling:touch;}
+    .toolbar{gap:8px 10px;}
+    /* 窄屏下分隔线会单独占一行变成竖杠，标题徽标也会把表头挤成两行 */
+    .sep{display:none;}
+    .panel h2 .tag{display:none;}
+    .legend{gap:4px 10px;}
+    .toast{max-width:92vw;font-size:12.5px;padding:8px 14px;}
+  }
 </style>
 </head>
 <body>
 <div class="wrap">
   <h1>美大店铺日数据</h1>
-  <div class="sub">美团 / 大众点评 店铺维度的每日经营数据</div>
+  <div class="sub">七大店铺 × 美团 / 大众点评 日经营数据 · 业绩与客量由订单数据自动计算（口径同「日业绩报表 › 电商组二级渠道业绩（初诊）」）</div>
 
-  <div class="stage">
-    <div class="mark">🏪</div>
-    <div class="mark-title">模块框架已就绪，等待数据口径</div>
-    <div class="mark-desc">
-      页面、菜单入口与权限已接入完成。数据模板与构建方式确认后，即可在此接入店铺日数据。
+  <!-- ① 数据导入 -->
+  <div class="panel">
+    <h2>① 数据导入 <span class="tag">订单表 → 自动算业绩/客量；七大店铺总表 → 评分、美团漏斗、投产比、好评等人工指标</span></h2>
+    <div class="toolbar">
+      <input type="file" id="file-orders" accept=".xlsx,.xls" hidden />
+      <button class="btn btn-primary" id="btn-orders">📁 上传订单表</button>
+      <span id="orders-meta" class="file-meta">未导入</span>
+      <span class="sep"></span>
+      <input type="file" id="file-stores" accept=".xlsx,.xls" hidden />
+      <button class="btn" id="btn-stores">📊 上传七大店铺总表</button>
+      <span id="stores-meta" class="file-meta">未导入</span>
+      <span class="sep"></span>
+      <button class="btn btn-ghost" id="btn-clear">清除本页数据</button>
     </div>
-    <div class="facts">
-      <div class="fact"><div class="k">数据来源</div><div class="v pending">待定（模板导入 / 录入 / 接口）</div></div>
-      <div class="fact"><div class="k">展示维度</div><div class="v">店铺 × 日期</div></div>
-      <div class="fact"><div class="k">当前状态</div><div class="v pending">待建设</div></div>
-    </div>
-    <div class="hint">提供模板后，此页将替换为正式数据面板</div>
   </div>
+
+  <!-- ② 日期与口径 -->
+  <div class="panel">
+    <h2>② 日期与统计口径</h2>
+    <div class="toolbar">
+      <label class="fld"><span class="lb">报表日期</span>
+        <span style="display:inline-flex;align-items:center;gap:6px;">
+          <input type="date" id="report-date" class="ctl" />
+          <button class="btn" id="btn-latest" title="跳到最新有数据的一天" style="padding:0 11px;">最新</button>
+        </span>
+      </label>
+      <label class="fld"><span class="lb">行显示</span>
+        <span class="seg" id="period-seg">
+          <button data-p="both" class="active">当日 + 月累计</button>
+          <button data-p="today">仅当日</button>
+          <button data-p="cum">仅月累计</button>
+        </span>
+      </label>
+      <label class="fld"><span class="lb">业绩 / 客量取数</span>
+        <span class="seg" id="src-seg">
+          <button data-s="auto" class="active">自动计算</button>
+          <button data-s="sheet">源表值</button>
+        </span>
+      </label>
+      <span class="file-meta" id="date-hint" style="margin-left:auto;"></span>
+    </div>
+  </div>
+
+  <!-- ③ 概览 -->
+  <div class="kpis" id="kpis"></div>
+
+  <!-- ④ 主表 -->
+  <div class="panel" style="padding:0;overflow:hidden;">
+    <div class="tbl-wrap" id="tbl-wrap">
+      <div class="empty" id="tbl-empty">
+        尚未导入任何数据。<br />
+        请先上传 <b>订单表</b>（自动计算业绩 / 客量）和 / 或 <b>七大店铺总表</b>（评分、美团漏斗、好评等）。
+      </div>
+      <table class="xl" id="tbl" style="display:none;">
+        <colgroup id="tbl-colgroup"></colgroup>
+        <thead id="tbl-thead"></thead>
+        <tbody id="tbl-body"></tbody>
+        <tfoot id="tbl-foot"></tfoot>
+      </table>
+    </div>
+  </div>
+
+  <div class="legend">
+    <span><i style="background:var(--xl-g1)"></i>美大店铺 / 责任人</span>
+    <span><i style="background:var(--xl-g2)"></i>评分·榜单 / 客量</span>
+    <span><i style="background:var(--xl-g3)"></i>字段名</span>
+    <span><i style="background:var(--xl-g4)"></i>业绩</span>
+    <span><i style="background:var(--xl-g5)"></i>美团数据</span>
+    <span><i style="background:var(--xl-g6)"></i>投产比</span>
+    <span><i style="background:var(--xl-g7)"></i>榜单维护及客资转化</span>
+    <span><i style="background:var(--xl-today-a)"></i>当日数据行</span>
+    <span><i style="background:var(--xl-cum-b)"></i>本月累计行</span>
+    <span><i style="background:var(--xl-sum)"></i>合计行</span>
+  </div>
+
+  <p class="note">
+    <b>口径：</b>「初诊业绩（T30）」「初诊成交客量（T30）」「有效客资人数」「新增VAB客量」「客单价」由订单表自动计算 ——
+    渠道范围 = 7 个美大二级渠道（美大-高端体检 / 国际门诊 / 口腔保健 / 新妇科·抗衰 / 新妇科·私密 / 北郊保健 / 北郊医疗）∩「电商组」，
+    初诊门槛与「日业绩报表」逐日口径完全一致。「本月累计」= 当月 1 日至所选日期的逐日累加，不取源表快照。<br />
+    格内 <b>绿色圆点</b> = 自动计算值；<b>浅棕斜体</b> = 订单侧无数据时回落到源表值。评分、美团漏斗、投产比、好评等列取自
+    「七大店铺总表」，可在格内双击手工覆盖（覆盖值随本页保存）。
+  </p>
 </div>
+
+<div class="toast" id="toast"></div>
+
 <script src="/shared/rbac.js?v=20261028a"></script>
 <script src="/shared/auth-gate.js?v=20261020c"></script>
+<script>document.write('<script src="assets/app.js?v=' + Date.now() + '"><\/script>');</script>
 </body>
 </html>
