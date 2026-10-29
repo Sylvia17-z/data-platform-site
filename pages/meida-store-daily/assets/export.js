@@ -156,15 +156,17 @@
     });
     rows.push(r2); heights.push(H.head[2]);
 
-    /* —— 数据行：7 店 × 当日 / 本月累计（both 模式共享列纵向合并，与页面同源） —— */
-    const MERGED = ['store', 'pm', 'op', 'mt', 'dp', 'rank'];
-    function buildDataRow(store, which, merge) {
+    /* —— 数据行：7 店 × 当日 / 本月累计（合并列与页面同源：共享列 + 投产比/好评 5 列按值判定） —— */
+    function buildDataRow(store, which, merge, ms) {
       const isToday = which === 'today';
-      const rec = (state.rows[state.date] || {})[store.key] || {};
       return COLS.map((c) => {
-        if (merge && MERGED.indexOf(c.k) >= 0 && !isToday) return null;   // 第 2 行共享列由纵向合并覆盖
+        if (merge && ms.has(c.k) && !isToday) return null;   // 第 2 行合并列由纵向合并覆盖
+        // 合并列：当日为空而累计有值时取累计值（与页面同源，否则合并后这个值会消失）
+        let src = which;
+        if (merge && ms.has(c.k) && MERGED_FIELDS.indexOf(c.k) < 0
+            && !rawTextOf(store.key, c.k, 'today') && rawTextOf(store.key, c.k, 'cum')) src = 'cum';
         if (c.k === 'store') {
-          return { v: store.name, t: 's', spec: { fill: FILL.rowA, color: TEXT.navy, bold: true, size: 9, align: 'left', wrap: true } };
+          return { v: storeName(store), t: 's', spec: { fill: FILL.rowA, color: TEXT.navy, bold: true, size: 9, align: 'left', wrap: true } };
         }
         if (c.k === 'period') {
           return { v: isToday ? '当日数据' : '本月累计', t: 's', spec: { fill: FILL.period, color: TEXT.navy, bold: true, size: 9, align: 'center' } };
@@ -174,11 +176,13 @@
           : c.zone === 'c' ? FILL.orange : FILL.rowA;
         const spec = { fill: fill, color: TEXT.body, size: 9 };
         if (c.k === 'pm' || c.k === 'op') {
-          const v = rec[c.k] || store[c.k] || '';
+          // 与页面同源：先取手工覆盖，再回落源表值 / 默认责任人（否则导出的责任人与屏幕不一致）
+          const cv = cellValue(store.key, c.k, src).v;
+          const v = (cv === null || cv === undefined || cv === '') ? (store[c.k] || '') : cv;
           return v === '' ? dashCell(Object.assign(spec, { align: 'center' }))
             : { v: String(v), t: 's', spec: Object.assign(spec, { align: 'center' }) };
         }
-        return valueCell(c, store.key, which, Object.assign(spec, { align: isTextCol(c) ? 'center' : 'right' }));
+        return valueCell(c, store.key, src, Object.assign(spec, { align: isTextCol(c) ? 'center' : 'right' }));
       });
     }
     const dataRows = [];
@@ -186,14 +190,15 @@
     let dr = rows.length;   // 数据区起始行（0-indexed）
     STORES.forEach((s) => {
       if (period === 'both') {
-        const r1 = buildDataRow(s, 'today', true);
-        const r2 = buildDataRow(s, 'cum', true);
+        const ms = mergeSetFor(s);
+        const r1 = buildDataRow(s, 'today', true, ms);
+        const r2 = buildDataRow(s, 'cum', true, ms);
         dataRows.push(r1, r2);
-        COLS.forEach((c, ci) => { if (MERGED.indexOf(c.k) >= 0) dataMerges.push({ r: dr, c: ci, r2: dr + 1, c2: ci }); });
+        COLS.forEach((c, ci) => { if (ms.has(c.k)) dataMerges.push({ r: dr, c: ci, r2: dr + 1, c2: ci }); });
         dr += 2;
       } else {
         const w = period === 'cum' ? 'cum' : 'today';
-        dataRows.push(buildDataRow(s, w, false));
+        dataRows.push(buildDataRow(s, w, false, mergeSetFor(s)));
         dr += 1;
       }
     });

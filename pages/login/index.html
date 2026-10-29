@@ -411,8 +411,15 @@ body{
 
 <script>
 (function(){
-  var PK = 'wbpk_KQXIeDHLXWDHN7WQp3zqUQ_Y5IlM6hJd7n10U8UN5bYmSGUYeevVOwl';
-  var ENDPOINT = location.origin;
+  var PK = window.CLOUD_PK || 'wbpk_KQXIeDHLXWDHN7WQp3zqUQ_Y5IlM6hJd7n10U8UN5bYmSGUYeevVOwl';
+  /* 认证接口在云端服务上，不能取 location.origin：
+     本机（localhost:8123）跑时 location.origin 指向本地静态服务，没有 /.cloud/auth 路由，
+     SDK 请求会直接拿到 404「Not Found」，验证码就发不出去。
+     与其它页面（数据统计 / 日业绩 / 月度分析 / 账号权限）保持一致，默认指向云端地址；
+     需要临时切环境时在页面里先设 window.CLOUD_ENDPOINT 即可覆盖。 */
+  var ENDPOINT = window.CLOUD_ENDPOINT || 'https://haibei-medical.app.workbuddy.host';
+  window.CLOUD_ENDPOINT = ENDPOINT;
+  window.CLOUD_PK = PK;
 
   /* ---------- 回跳目标 ---------- */
   /* 2026-10-14 口径（用户明确要求，继续生效）：登录/注册/重置成功后一律进入平台首页（全部模块入口） */

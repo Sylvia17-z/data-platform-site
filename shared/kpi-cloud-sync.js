@@ -27,7 +27,7 @@
   // 凭证惰性读取：页面可能在脚本之后才设置 window.CLOUD_PK / window.CLOUD_ENDPOINT，
   // 故不在 IIFE 求值时锁定，而是在真正建 client 时再取。
   function pk(){ return (typeof window !== 'undefined' && window.CLOUD_PK) || DEFAULT_PK; }
-  function endpoint(){ return (typeof window !== 'undefined' && window.CLOUD_ENDPOINT) || (typeof location !== 'undefined' ? location.origin : ''); }
+  function endpoint(){ return (typeof window !== 'undefined' && window.CLOUD_ENDPOINT) || 'https://haibei-medical.app.workbuddy.host'; }
 
   var cloud = null, opts = null, timer = null, lastHash = null, initDone = false, dirty = false, flushing = false;
 

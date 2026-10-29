@@ -12,7 +12,7 @@
   if(window.__MA_CLOUD_SYNC__) return; window.__MA_CLOUD_SYNC__ = true;
 
   var PK = (window.CLOUD_PK) || 'wbpk_KQXIeDHLXWDHN7WQp3zqUQ_Y5IlM6hJd7n10U8UN5bYmSGUYeevVOwl';
-  var ENDPOINT = (window.CLOUD_ENDPOINT) || (typeof location !== 'undefined' ? location.origin : '');
+  var ENDPOINT = (window.CLOUD_ENDPOINT) || 'https://haibei-medical.app.workbuddy.host';
   var TABLE = 'dp_medassess';
   var LS_VAB = 'med_vab_list', LS_ORDER = 'med_order_list', LS_CHARGE = 'med_charge_list';
   var IDB_DB = 'med_assess_db', IDB_ORDER = 'order', IDB_CHARGE = 'charge';

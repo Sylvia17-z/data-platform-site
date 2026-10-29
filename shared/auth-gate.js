@@ -14,7 +14,10 @@
   if(window.__SITE_AUTH_GATE__) return; window.__SITE_AUTH_GATE__ = true;
 
   var PK = (window.CLOUD_PK) || 'wbpk_KQXIeDHLXWDHN7WQp3zqUQ_Y5IlM6hJd7n10U8UN5bYmSGUYeevVOwl';
-  var ENDPOINT = (window.CLOUD_ENDPOINT) || (typeof location !== 'undefined' ? location.origin : '');
+  /* 认证接口在云端服务上，默认不能用 location.origin：本机（localhost:8123）调试时它指向本地静态服务，
+     没有 /.cloud/auth 路由，getSession 会 404 → 被判成未登录 → 登录页与首页互相跳转成死循环。
+     与各业务页里硬编码的地址保持一致；需要切环境时先设 window.CLOUD_ENDPOINT 覆盖。 */
+  var ENDPOINT = (window.CLOUD_ENDPOINT) || 'https://haibei-medical.app.workbuddy.host';
   var SESSION_KEY = 'workbuddy-cloud.session.' + PK;
   var PING_KEY = 'site-auth-ping';
   var LOGIN_URL = '/pages/login/index.html';

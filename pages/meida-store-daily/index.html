@@ -32,8 +32,7 @@
   *{box-sizing:border-box}
   html,body{margin:0;padding:0;font-family:var(--font-sans);background:var(--c-bg);color:var(--c-text);font-size:14px;-webkit-font-smoothing:antialiased;}
   .wrap{max-width:100%;margin:0 auto;padding:18px 16px 70px;}
-  h1{font-size:19px;color:var(--c-head);margin:0 0 3px;}
-  .sub{color:var(--c-muted);font-size:12.5px;margin-bottom:14px;}
+  h1{font-size:19px;color:var(--c-head);margin:0 0 12px;}
 
   .panel{background:var(--c-card);border:1px solid var(--c-border);border-radius:var(--radius);box-shadow:var(--shadow-card);padding:14px 16px;margin-bottom:14px;}
   .panel h2{font-size:14.5px;color:var(--c-head);margin:0 0 10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
@@ -54,8 +53,7 @@
   .sep{width:1px;height:22px;background:var(--c-border);align-self:center;}
 
   .fld{display:inline-flex;flex-direction:column;gap:3px;}
-  .src-note{margin-top:11px;padding-top:9px;border-top:1px dashed var(--c-border-soft);font-size:11.5px;color:var(--c-muted);line-height:1.8;}
-  .src-note b{color:var(--c-head);font-weight:600;}  .fld > span.lb{font-size:11.5px;color:var(--c-muted);}
+  .fld > span.lb{font-size:11.5px;color:var(--c-muted);}
   .ctl{height:32px;border:1px solid var(--c-border);border-radius:8px;padding:0 9px;font-family:inherit;font-size:13px;
     color:var(--c-text);background:#fff;outline:none;}
   .ctl:focus{border-color:var(--c-accent);box-shadow:0 0 0 2px rgba(54,88,211,.12);}
@@ -116,7 +114,8 @@
   /* 合计行底部固定（纵向滚动时始终可见）：需不透明底色 + 高于表体首列(z4) */
   table.xl tfoot td{position:sticky;bottom:0;z-index:6;}
   table.xl tfoot td.c-store{position:sticky;left:0;bottom:0;z-index:8;}
-  table.xl tfoot tr.r-sum td{box-shadow:inset 0 2px 0 #d8b24a;}
+  /* 合计行加高：数字与上下框线留出呼吸空间（原 5px 内边距 → 行高 27px 偏挤） */
+  table.xl tfoot tr.r-sum td{box-shadow:inset 0 2px 0 #d8b24a;padding-top:9px;padding-bottom:9px;font-size:12.5px;}
   /* 单元格内容 */
   td.num{text-align:right;font-variant-numeric:tabular-nums;}
   td .adot{display:inline-block;width:5px;height:5px;border-radius:50%;background:#1f8a4a;margin-right:4px;vertical-align:2px;}
@@ -125,12 +124,26 @@
   td.fb{color:#8a6a2a;font-style:italic;}
   td.editable{cursor:cell;}
   td.editable:hover{outline:2px solid var(--c-accent);outline-offset:-2px;}
-  td.manual{box-shadow:inset 3px 0 0 var(--c-accent);}
-  #edit-hint{margin-left:0;}
+  /* 手工覆盖过的格子：曾用 inset 3px 蓝条标记，用户要求去掉，故不再画任何标记（类名保留，便于以后换样式） */
+  td.manual{}
+
+  /* ===== 编辑模式（点「编辑」按钮开启） ===== */
+  /* 可编辑范围以浅蓝蒙版标出，不改变原有行/列底色（用 background-image 叠加，不动 background-color） */
+  body.edit-mode table.xl tbody td[data-edit],
+  body.edit-mode table.xl tfoot td[data-edit]{
+    background-image:linear-gradient(rgba(54,88,211,.07),rgba(54,88,211,.07));
+    cursor:text;
+  }
+  body.edit-mode table.xl td[data-edit]:hover{
+    outline:2px solid var(--c-accent);outline-offset:-2px;
+    background-image:linear-gradient(rgba(54,88,211,.16),rgba(54,88,211,.16));
+  }
+  /* 店铺名被改过的标记（默认藏蓝，改过后变强调蓝） */
+  td.c-store.name-edited{color:var(--c-accent);}
+  .btn.on{background:var(--c-accent);border-color:var(--c-accent);color:#fff;}
+  .btn.on:hover{background:#2a47b8;border-color:#2a47b8;color:#fff;}
   td.c-period{font-weight:700;color:var(--c-head);background:#eef2fa !important;}
 
-  .note{margin-top:12px;font-size:11.5px;color:var(--c-muted);line-height:1.8;}
-  .note b{color:var(--c-head);}
   .legend{display:flex;flex-wrap:wrap;gap:6px 16px;margin-top:10px;font-size:11.5px;color:var(--c-muted);}
   .legend i{display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:5px;vertical-align:-1px;border:1px solid rgba(0,0,0,.08);}
 
@@ -159,11 +172,10 @@
 <body>
 <div class="wrap">
   <h1>美大店铺日数据</h1>
-  <div class="sub">七大店铺 × 美团 / 大众点评 日经营数据 · 业绩与客量由订单数据自动计算（口径同「日业绩报表 › 电商组二级渠道业绩（初诊）」）</div>
 
   <!-- ① 数据导入 -->
   <div class="panel">
-    <h2>① 数据导入 <span class="tag">订单表 → 业绩/客量；七大店铺总表 → 评分、榜单、投产比、好评；平台三表 → 曝光/访问/下单/核销/回复时长</span></h2>
+    <h2>① 数据导入 <span class="tag">订单表 → 业绩/客量；七大店铺总表 → 评分、榜单、投产比、好评；平台三表 → 曝光/访问/下单/核销/回复时长；门店报表 → 各门店推广费</span></h2>
     <div class="toolbar">
       <input type="file" id="file-orders" accept=".xlsx,.xls" hidden />
       <button class="btn" id="btn-orders">📁 上传订单表</button>
@@ -174,18 +186,14 @@
       <span id="stores-meta" class="file-meta">未导入</span>
       <span class="sep"></span>
       <input type="file" id="file-platform" accept=".xlsx,.xls,.csv" multiple hidden />
-      <button class="btn btn-primary" id="btn-platform">📥 上传平台数据（可多选）</button>
+      <button class="btn btn-primary" id="btn-platform" title="可一次多选：客流 / 在线咨询 / 门店交易 / 门店报表（推广费），按表头自动识别类型">📥 上传平台数据（可多选）</button>
       <span id="platform-meta" class="file-meta">未导入</span>
       <span class="sep"></span>
       <input type="file" id="file-promo" accept=".xlsx,.xls" hidden />
-      <button class="btn" id="btn-promo">📊 上传门店报表（推广费）</button>
+      <button class="btn" id="btn-promo" title="只传推广费时用这个；也可以直接在「上传平台数据」里一起选中，会自动识别">📊 上传门店报表（推广费）</button>
       <span id="promo-meta" class="file-meta">未导入</span>
       <span class="sep"></span>
       <button class="btn btn-ghost" id="btn-clear">清除本页数据</button>
-    </div>
-    <div class="src-note">
-      <b>平台数据</b>支持一次选中多个文件，按表头自动识别类型：<b>客流数据</b> → 曝光人数 / 访问人数；<b>在线咨询数据</b> → 昨日咨客平均回复时长 / 30s内回复率；<b>门店交易数据</b> → 下单人数、下单券数、下单金、核销人数、核销券数、总核销金额。
-      当日取该日行原值；月累计按当月 1 日至所选日逐日累加，其中回复时长与回复率按当日「在线咨询人数」加权平均。
     </div>
   </div>
 
@@ -212,7 +220,6 @@
           <button data-s="sheet">仅总表</button>
         </span>
       </label>
-      <span class="file-meta" id="date-hint" style="margin-left:auto;"></span>
     </div>
   </div>
 
@@ -227,9 +234,8 @@
       <button class="btn" id="btn-export-xlsx" title="导出带样式的 Excel（列宽、底色、框线、合并单元格、冻结窗格均与页面一致）">⬇ 导出 Excel</button>
       <button class="btn" id="btn-export-png" title="导出整表图片（2 倍高清，颜色与页面完全一致）">🖼 导出图片</button>
       <span class="sep"></span>
-      <button class="btn btn-ghost" id="btn-clear-edit" title="清除本页所有手动修改（双击单元格改过的值）">↺ 清除修改</button>
-      <span class="file-meta" id="edit-hint">双击任意单元格可修改，改动自动保存</span>
-      <span class="file-meta" id="export-meta">导出内容 = 当前屏幕上这份报表（同日期 / 同口径 / 同列）</span>
+      <button class="btn" id="btn-edit" title="开启编辑模式：单击表格内任意单元格（含店铺名）即可修改">✏️ 编辑</button>
+      <button class="btn btn-ghost" id="btn-clear-edit" title="清除本页所有手动修改（双击或编辑模式下改过的值，含店铺名）">↺ 清除修改</button>
     </div>
     <div class="tbl-wrap" id="tbl-wrap">
       <div class="empty" id="tbl-empty">
@@ -259,23 +265,12 @@
     <span><i style="background:#1f8a4a;border-radius:50%"></i>订单自动计算</span>
     <span><i style="background:#3658d3;border-radius:50%"></i>平台三表汇总</span>
   </div>
-
-  <p class="note">
-    <b>业绩 / 客量口径：</b>「初诊业绩（T30）」「初诊成交客量（T30）」「有效客资人数」「新增VAB客量」「客单价」由订单表自动计算，
-    初诊门槛与「日业绩报表」逐日口径完全一致。<br />
-    <b>平台指标口径：</b>曝光 / 访问取自客流数据，回复时长 / 30s回复率取自在线咨询数据，下单与核销 6 项取自门店交易数据；
-    当日取该日行，月累计按当月逐日累加（回复时长与回复率按在线咨询人数加权）。导入平台三表后，这些列优先于七大店铺总表的同名值。<br />
-    格内 <b>绿色圆点</b> = 订单自动计算，<b>蓝色圆点</b> = 平台三表汇总，<b>浅棕斜体</b> = 回落到七大店铺总表原值；
-    任意格子可双击手工覆盖（覆盖值随本页保存，优先级最高）。<br />
-    <b>导出：</b>④ 报表可导出 <b>Excel</b> 或 <b>图片</b>，两者都按当前屏幕这一份渲染 —— 同日期、同行显示、同取数方式、同 34 列；
-    Excel 保留列宽、底色、框线与合并单元格并冻结左侧首列与三层表头，数值为数字型可直接再计算。
-  </p>
 </div>
 
 <div class="toast" id="toast"></div>
 
 <script src="/shared/rbac.js?v=20261028a"></script>
-<script src="/shared/auth-gate.js?v=20261020c"></script>
+<script src="/shared/auth-gate.js?v=20261029a"></script>
 <script>document.write('<script src="assets/app.js?v=' + Date.now() + '"><\/script>');</script>
 <script>document.write('<script src="assets/export.js?v=' + Date.now() + '"><\/script>');</script>
 </body>
