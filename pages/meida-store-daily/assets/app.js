@@ -1005,15 +1005,19 @@ function rowHTML(store, which) {
   const rec = (state.rows[state.date] || {})[store.key] || {};
   const cells = COLS.map((c) => {
     if (c.k === 'store') return `<td class="c-store">${esc(store.name)}</td>`;
-    if (c.k === 'pm') return `<td class="txt">${esc(rec.pm || store.pm || '—')}</td>`;
-    if (c.k === 'op') return `<td class="txt">${esc(rec.op || store.op || '—')}</td>`;
+    if (c.k === 'pm' || c.k === 'op') {
+      const { v: mv, kind: mk } = cellValue(store.key, c.k, which);
+      const def = c.k === 'pm' ? store.pm : store.op;
+      const txt = (mv === null || mv === undefined || mv === '') ? (def || '—') : mv;
+      return `<td class="txt editable${mk === 'manual' ? ' manual' : ''}" data-edit="1" data-store="${store.key}" data-field="${c.k}" data-which="${which}">${esc(txt)}</td>`;
+    }
     if (c.k === 'period') return `<td class="c-period">${isToday ? '当日数据' : '本月累计'}</td>`;
     if (c.auto) {
       const { v, kind } = cellValue(store.key, c.k, which);
       const inner = (kind === 'auto' && typeof v === 'number')
         ? '<span class="adot" title="由订单自动计算"></span>' + display(kind, v, c)
         : display(kind, v, c);
-      const klass = 'num' + (kind === 'manual' ? ' editable' : '') + (kind === 'sheet' ? ' fb' : '') + (c.zone ? ' z-' + c.zone : '');
+      const klass = 'num' + (kind === 'manual' ? ' editable manual' : '') + (kind === 'sheet' ? ' fb' : '') + (c.zone ? ' z-' + c.zone : '');
       return `<td class="${klass}" data-edit="1" data-store="${store.key}" data-field="${c.k}" data-which="${which}">${inner}</td>`;
     }
     const { v, kind } = cellValue(store.key, c.k, which);
@@ -1220,8 +1224,12 @@ function bindEdit() {
         const mk = manualKey(state.date, storeKey, field);
         if (v === '') delete state.manual[mk];
         else {
-          const n = Number(v.replace(/,/g, ''));
-          state.manual[mk] = isNaN(n) ? v : n;
+          const textCol = col.type === 'text' || field === 'pm' || field === 'op';
+          if (textCol) state.manual[mk] = v;
+          else {
+            const n = Number(v.replace(/,/g, ''));
+            state.manual[mk] = isNaN(n) ? v : n;
+          }
         }
         saveLocal();
       }
@@ -1329,6 +1337,16 @@ function bindUI() {
     _aggCache.key = ''; _platCache.key = '';
     syncDateRange(); autoPickDate(); render();
     toast('本页数据已清除', 'ok');
+  });
+  $('btn-clear-edit').addEventListener('click', () => {
+    const keys = Object.keys(state.manual);
+    if (!keys.length) { toast('当前没有手动修改', 'warn'); return; }
+    if (!confirm('将清除本页所有「双击改过」的单元格值（不影响已导入的订单/总表/平台数据）。继续？')) return;
+    state.manual = {};
+    lsSet(LS.manual, '{}');
+    _aggCache.key = ''; _platCache.key = '';
+    render();
+    toast('已清除 ' + keys.length + ' 处手动修改', 'ok');
   });
 }
 

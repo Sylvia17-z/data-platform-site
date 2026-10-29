@@ -124,7 +124,9 @@
   td.dash{color:#9aa9c0;}
   td.fb{color:#8a6a2a;font-style:italic;}
   td.editable{cursor:cell;}
-  td.editable:hover{box-shadow:inset 0 0 0 1px var(--c-accent);}
+  td.editable:hover{outline:2px solid var(--c-accent);outline-offset:-2px;}
+  td.manual{box-shadow:inset 3px 0 0 var(--c-accent);}
+  #edit-hint{margin-left:0;}
   td.c-period{font-weight:700;color:var(--c-head);background:#eef2fa !important;}
 
   .note{margin-top:12px;font-size:11.5px;color:var(--c-muted);line-height:1.8;}
@@ -220,6 +222,9 @@
       <span class="sep"></span>
       <button class="btn" id="btn-export-xlsx" title="导出带样式的 Excel（列宽、底色、框线、合并单元格、冻结窗格均与页面一致）">⬇ 导出 Excel</button>
       <button class="btn" id="btn-export-png" title="导出整表图片（2 倍高清，颜色与页面完全一致）">🖼 导出图片</button>
+      <span class="sep"></span>
+      <button class="btn btn-ghost" id="btn-clear-edit" title="清除本页所有手动修改（双击单元格改过的值）">↺ 清除修改</button>
+      <span class="file-meta" id="edit-hint">双击任意单元格可修改，改动自动保存</span>
       <span class="file-meta" id="export-meta">导出内容 = 当前屏幕上这份报表（同日期 / 同口径 / 同列）</span>
     </div>
     <div class="tbl-wrap" id="tbl-wrap">
