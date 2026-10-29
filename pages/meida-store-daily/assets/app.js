@@ -111,8 +111,8 @@ const COLS = [
   { k: 'vcC', label: '代金券张数（非新客）', g: 7, w: 88, sch: 'W', type: 'int', zone: 'b' },
   { k: 'vcAmt', label: '代金券金额（非新客）', g: 7, w: 94, sch: 'X', type: 'money', zone: 'b' },
   { k: 'realWo', label: '实际核销（元）', g: 7, w: 94, sch: 'Y', type: 'money', zone: 'b' },
-  // Z（推广费）属于 O2:Z2「美团数据」分组，不能并入投产比 —— 否则表头分组与 Excel 不一致
-  { k: 'promoFee', label: '推广费（元）', g: 7, w: 86, sch: 'Z', type: 'money', zone: 'b' },
+  // Z（推广费）归入「投产比」分组（推广费 / 目标 / 实际 三列同属投产比，与原始模板表头一致）
+  { k: 'promoFee', label: '推广费（元）', g: 8, w: 86, sch: 'Z', type: 'money', zone: 'b' },
   { k: 'roiTgt', label: '目标', g: 8, w: 64, sch: 'AA', type: 'text', zone: 'c' },
   { k: 'roiAct', label: '实际', g: 8, w: 84, sch: 'AB', type: 'text', zone: 'c' },
   { k: 'revTgt', label: '好评目标', g: 9, w: 70, sch: 'AC', type: 'int', zone: 'c' },
@@ -130,7 +130,7 @@ const GROUPS = [
   { id: 4, label: '统计口径', cls: 'g3', rowspan: 2 },
   { id: 5, label: '业绩', cls: 'g4' },
   { id: 6, label: '客量', cls: 'g2' },
-  { id: 7, label: '美团数据（曝光 / 下单 / 核销 / 推广）填前一天数据', cls: 'g5' },
+  { id: 7, label: '美团数据（曝光 / 下单 / 核销）填前一天数据', cls: 'g5' },
   { id: 8, label: '投产比（按T30初诊业绩核算）', cls: 'g6' },
   { id: 9, label: '美团榜单维护及客资转化（填前一天数据）', cls: 'g7' },
 ];
@@ -138,6 +138,8 @@ const GROUPS = [
 // 合计行参与求和的列（非派生/非比率列）
 const SUM_KEYS = ['tgtAmt', 'actAmt', 'lead', 'tgtVis', 'firstVis', 'newVab',
   'expo', 'visit', 'orderU', 'orderC', 'orderAmt', 'woU', 'woC', 'woAmt', 'vcC', 'vcAmt', 'realWo', 'promoFee', 'revTgt', 'revCnt'];
+// 店级共享字段：当日数据与本月累计两行取值相同，渲染时纵向合并（rowspan=2），与原始模板表一致
+const MERGED_FIELDS = ['store', 'pm', 'op', 'mt', 'dp', 'rank'];
 const AUTO_KEYS = COLS.filter((c) => c.auto).map((c) => c.k);
 
 /* ---------------- 持久化键 ---------------- */
@@ -147,6 +149,7 @@ const LS = {
   vab: 'dailyPerformance_vab',         // 与日业绩报表共用
   rows: 'meidaStore_rows',             // 七大店铺总表解析结果
   daily: 'meidaStore_daily',           // 平台三表（客流/咨询/交易）逐日明细
+  promo: 'meidaStore_promo',          // 门店报表（推广费，按 日期×门店）
   manual: 'meidaStore_manual',         // 本页手工覆盖
   meta: 'meidaStore_meta',             // 导入时间/年份等
 };
@@ -160,6 +163,7 @@ const state = {
   vabSet: new Set(),   // VAB 会员规范化集合
   rows: {},            // { 'YYYY-MM-DD': { storeKey: { pm,op,mt,dp,rank, today:{…}, cum:{…} } } }
   daily: {},           // { 'YYYY-MM-DD': { storeKey: { expo,visit,orderU,orderC,orderAmt,woU,woC,woAmt,replySec,reply30,chatCnt } } }
+  promo: {},           // { 'YYYY-MM-DD': { storeKey: 推广费（元） } }
   manual: {},          // { 'date|storeKey|field': value }
   date: '',            // 当前报表日期 'YYYY-MM-DD'
   period: 'both',      // both | today | cum
@@ -750,6 +754,72 @@ async function onFilesPlatform(fileList) {
 }
 
 /* =====================================================================
+ * 四之二·乙、门店报表（推广费）解析
+ * ---------------------------------------------------------------------
+ * 门店报表_*.xlsx：A=日期(M-D) / B=推广门店 / E=花费（元）= 推广费。
+ * 按 日期×门店 写入 state.promo；年分从文件名 / 订单最大日期 / 当前年 推断。
+ * ===================================================================== */
+function parsePromoDate(v, year) {
+  if (v == null || v === '') return '';
+  if (v instanceof Date) return fmtDate(v);
+  const s = String(v).trim();
+  let m = s.match(/^(\d{1,2})-(\d{1,2})$/);
+  if (m) return `${year}-${pad2(+m[1])}-${pad2(+m[2])}`;
+  const d = parseDateLoose(v);
+  return d ? fmtDate(d) : '';
+}
+
+async function onFilePromo(file) {
+  if (!file) return;
+  try {
+    await ensureXlsx();
+    const buf = await file.arrayBuffer();
+    const wb = XLSX.read(buf, { type: 'array', cellDates: true });
+    let year = new Date().getFullYear();
+    const ym = String(file.name).match(/(20\d{2})/);
+    if (ym) year = +ym[1];
+    else if (state.orders.length) {
+      const max = state.orders.reduce((a, r) => (r.payTime && fmtDate(r.payTime) > a ? fmtDate(r.payTime) : a), '');
+      if (max) year = +max.slice(0, 4);
+    }
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    const grid = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null, blankrows: false, raw: true });
+    const hi = findHeaderRow(grid);
+    if (hi < 0) { toast('未识别到表头（需含「日期」「推广门店」「花费（元）」），请确认上传的是门店报表', 'err', 7000); return; }
+    const hdr = (grid[hi] || []).map((v) => String(v == null ? '' : v).trim());
+    const iDate = colIdx(hdr, ['日期']);
+    const iStore = colIdx(hdr, ['推广门店', '门店']);
+    const iFee = colIdx(hdr, ['花费（元）', '花费', '推广费']);
+    if (iDate < 0 || iStore < 0 || iFee < 0) { toast('门店报表列不完整（需含 日期 / 推广门店 / 花费（元））', 'err', 7000); return; }
+    let rows = 0, storeHit = 0;
+    for (let r = hi + 1; r < grid.length; r++) {
+      const row = grid[r] || [];
+      const ds = parsePromoDate(row[iDate], year);
+      if (!ds) continue;
+      const st = resolveStoreByName(row[iStore]);
+      if (!st) continue;
+      const raw = row[iFee];
+      if (raw == null || raw === '') continue;
+      const fee = platNum(raw);
+      const day = state.promo[ds] || (state.promo[ds] = {});
+      day[st.key] = fee;
+      rows++; storeHit++;
+    }
+    if (!rows) { toast('未从门店报表解析到任何推广费记录', 'err', 6000); return; }
+    state.meta.promo = { ts: Date.now(), rows, stores: new Set(Object.values(state.promo).flatMap((o) => Object.keys(o))).size, dates: Object.keys(state.promo).length };
+    saveLocal();
+    _promoCache.key = '';
+    syncDateRange();
+    autoPickDate();
+    render();
+    toast(`门店报表解析完成：${rows} 条推广费，覆盖 ${state.meta.promo.dates} 天 × ${state.meta.promo.stores} 店`, 'ok', 6000);
+  } catch (e) {
+    console.error(e);
+    toast('门店报表解析失败：' + e.message, 'err', 6000);
+  }
+}
+
+/* =====================================================================
  * 四之三、平台三表的 当日 / 月累计 聚合
  * ---------------------------------------------------------------------
  * 当日 = 该日期行的原值；月累计 = 当月 1 日 ~ 所选日逐日累加。
@@ -796,6 +866,40 @@ function platAgg() {
   });
   const data = { today, cum };
   _platCache = { key, data };
+  return data;
+}
+
+/* =====================================================================
+ * 四之四、门店报表（推广费）聚合
+ * ---------------------------------------------------------------------
+ * 数据源：门店报表_*.xlsx（A=日期 M-D / B=推广门店 / E=花费（元）= 推广费）。
+ * 当日取该日值；月累计 = 当月 1 日 ~ 所选日逐日累加（与平台三表口径一致）。
+ * 优先级：手工覆盖 > 门店报表文件 > 七大店铺总表（cellValue 内裁决）。
+ * ===================================================================== */
+let _promoCache = { key: '', data: null };
+
+function promoAgg() {
+  const date = state.date;
+  if (!date) return null;
+  const key = date + '|' + (state.meta.promo ? state.meta.promo.ts : 0) + '|' + Object.keys(state.promo).length;
+  if (_promoCache.key === key) return _promoCache.data;
+  const day = iso2date(date);
+  const start = fmtDate(new Date(day.getFullYear(), day.getMonth(), 1));
+  const today = {}, cum = {};
+  STORE_KEYS.forEach((k) => { today[k] = null; cum[k] = null; });
+  STORE_KEYS.forEach((k) => {
+    const r = (state.promo[date] || {})[k];
+    if (r != null) today[k] = r;
+  });
+  Object.keys(state.promo)
+    .filter((d) => d >= start && d <= date)
+    .sort()
+    .forEach((d) => {
+      const rec = state.promo[d] || {};
+      STORE_KEYS.forEach((k) => { const v = rec[k]; if (isNum(v)) cum[k] = (isNum(cum[k]) ? cum[k] : 0) + v; });
+    });
+  const data = { today, cum };
+  _promoCache = { key, data };
   return data;
 }
 
@@ -940,6 +1044,12 @@ function cellValue(storeKey, field, which) {
     if (sheetVal !== undefined) return normSheet(sheetVal);
     return { v: autoVal, kind: 'auto' };
   }
+  // 推广费（元）：用户指定数据源 = 门店报表文件，优先于七大店铺总表的同名 Z 列
+  if (col && col.k === 'promoFee' && state.source === 'auto') {
+    const pa = promoAgg();
+    const pv = pa && pa[which] ? pa[which][storeKey] : null;
+    if (isNum(pv)) return { v: pv, kind: 'promo' };
+  }
   if (sheetVal !== undefined) return normSheet(sheetVal);
   return { v: null, kind: null };
 }
@@ -999,37 +1109,45 @@ function renderThead() {
     <tr>${row3}</tr>`;
 }
 
-function rowHTML(store, which) {
+function cellHTML(c, store, which, merge) {
   const isToday = which === 'today';
-  const cls = isToday ? 'r-today' : 'r-cum';
-  const rec = (state.rows[state.date] || {})[store.key] || {};
-  const cells = COLS.map((c) => {
-    if (c.k === 'store') return `<td class="c-store">${esc(store.name)}</td>`;
-    if (c.k === 'pm' || c.k === 'op') {
-      const { v: mv, kind: mk } = cellValue(store.key, c.k, which);
-      const def = c.k === 'pm' ? store.pm : store.op;
-      const txt = (mv === null || mv === undefined || mv === '') ? (def || '—') : mv;
-      return `<td class="txt editable${mk === 'manual' ? ' manual' : ''}" data-edit="1" data-store="${store.key}" data-field="${c.k}" data-which="${which}">${esc(txt)}</td>`;
-    }
-    if (c.k === 'period') return `<td class="c-period">${isToday ? '当日数据' : '本月累计'}</td>`;
-    if (c.auto) {
-      const { v, kind } = cellValue(store.key, c.k, which);
-      const inner = (kind === 'auto' && typeof v === 'number')
-        ? '<span class="adot" title="由订单自动计算"></span>' + display(kind, v, c)
-        : display(kind, v, c);
-      const klass = 'num' + (kind === 'manual' ? ' editable manual' : '') + (kind === 'sheet' ? ' fb' : '') + (c.zone ? ' z-' + c.zone : '');
-      return `<td class="${klass}" data-edit="1" data-store="${store.key}" data-field="${c.k}" data-which="${which}">${inner}</td>`;
-    }
+  const shared = MERGED_FIELDS.indexOf(c.k) >= 0;
+  if (merge && shared && !isToday) return '';   // 第 2 行：共享列已由第 1 行 rowspan 覆盖
+  const rs = (merge && shared) ? ' rowspan="2"' : '';
+  if (c.k === 'store') return `<td class="c-store"${rs}>${esc(store.name)}</td>`;
+  if (c.k === 'pm' || c.k === 'op') {
+    const { v: mv, kind: mk } = cellValue(store.key, c.k, which);
+    const def = c.k === 'pm' ? store.pm : store.op;
+    const txt = (mv === null || mv === undefined || mv === '') ? (def || '—') : mv;
+    return `<td class="txt editable${mk === 'manual' ? ' manual' : ''}" data-edit="1" data-store="${store.key}" data-field="${c.k}" data-which="${which}"${rs}>${esc(txt)}</td>`;
+  }
+  if (c.k === 'period') return `<td class="c-period"${rs}>${isToday ? '当日数据' : '本月累计'}</td>`;
+  if (c.auto) {
     const { v, kind } = cellValue(store.key, c.k, which);
-    const klass = (c.type === 'text' || c.type === 'scoreText' ? 'txt' : 'num')
-      + ' editable' + (c.zone ? ' z-' + c.zone : '');
-    // 平台三表算出的格子加蓝点（区别于订单自动计算的绿点）
-    const inner = (kind === 'plat' && typeof v === 'number')
-      ? '<span class="pdot" title="由平台日报数据汇总（客流 / 在线咨询 / 门店交易）"></span>' + display(kind, v, c)
+    const inner = (kind === 'auto' && typeof v === 'number')
+      ? '<span class="adot" title="由订单自动计算"></span>' + display(kind, v, c)
       : display(kind, v, c);
-    return `<td class="${klass}" data-edit="1" data-store="${store.key}" data-field="${c.k}" data-which="${which}">${inner}</td>`;
-  }).join('');
-  return `<tr class="${cls}">${cells}</tr>`;
+    const klass = 'num' + (kind === 'manual' ? ' editable manual' : '') + (kind === 'sheet' ? ' fb' : '') + (c.zone ? ' z-' + c.zone : '');
+    return `<td class="${klass}" data-edit="1" data-store="${store.key}" data-field="${c.k}" data-which="${which}"${rs}>${inner}</td>`;
+  }
+  const { v, kind } = cellValue(store.key, c.k, which);
+  const klass = (c.type === 'text' || c.type === 'scoreText' ? 'txt' : 'num')
+    + ' editable' + (c.zone ? ' z-' + c.zone : '');
+  // 平台三表算出的格子加蓝点（区别于订单自动计算的绿点）
+  const inner = (kind === 'plat' && typeof v === 'number')
+    ? '<span class="pdot" title="由平台日报数据汇总（客流 / 在线咨询 / 门店交易）"></span>' + display(kind, v, c)
+    : display(kind, v, c);
+  return `<td class="${klass}" data-edit="1" data-store="${store.key}" data-field="${c.k}" data-which="${which}"${rs}>${inner}</td>`;
+}
+function rowHTML(store, which) {
+  const cls = which === 'today' ? 'r-today' : 'r-cum';
+  return `<tr class="${cls}">${COLS.map((c) => cellHTML(c, store, which, false)).join('')}</tr>`;
+}
+// 「当日 + 月累计」同行展示：店级共享列纵向合并（rowspan=2），与原始模板表一致
+function storeBlockHTML(store) {
+  const row1 = COLS.map((c) => cellHTML(c, store, 'today', true)).join('');
+  const row2 = COLS.map((c) => cellHTML(c, store, 'cum', true)).join('');
+  return `<tr class="r-today">${row1}</tr><tr class="r-cum">${row2}</tr>`;
 }
 
 function sumRowHTML(label, which) {
@@ -1064,8 +1182,8 @@ function renderTable() {
   renderThead();
   let body = '';
   STORES.forEach((s) => {
-    if (state.period !== 'cum') body += rowHTML(s, 'today');
-    if (state.period !== 'today') body += rowHTML(s, 'cum');
+    if (state.period === 'both') body += storeBlockHTML(s);
+    else body += rowHTML(s, state.period);
   });
   $('tbl-body').innerHTML = body;
   const label = state.period === 'cum' ? '合计（本月累计）' : '合计（当日数据）';
@@ -1138,6 +1256,17 @@ function renderStatus() {
       pm.className = 'file-meta';
     }
   }
+  const prm = $('promo-meta');
+  if (prm) {
+    const p = state.meta.promo;
+    if (p && p.dates) {
+      prm.textContent = `✔ 门店报表（推广费）· ${p.stores} 店 × ${p.dates} 天`;
+      prm.className = 'file-meta ok';
+    } else {
+      prm.textContent = '未导入';
+      prm.className = 'file-meta';
+    }
+  }
   const hint = $('date-hint');
   const hasAuto = state.orders.length > 0;
   const hasSheet = ds.length > 0;
@@ -1169,6 +1298,7 @@ function allDates() {
   state.orders.forEach((r) => { if (r.payTime) set.add(fmtDate(r.payTime)); });
   Object.keys(state.rows).forEach((d) => set.add(d));
   Object.keys(state.daily).forEach((d) => { if (Object.keys(state.daily[d] || {}).length) set.add(d); });
+  Object.keys(state.promo).forEach((d) => set.add(d));
   return [...set].sort();
 }
 function syncDateRange() {
@@ -1253,6 +1383,7 @@ function saveLocal() {
   _saveTimer = setTimeout(() => {
     lsSet(LS.rows, JSON.stringify(state.rows));
     lsSet(LS.daily, JSON.stringify(state.daily));
+    lsSet(LS.promo, JSON.stringify(state.promo));
     lsSet(LS.manual, JSON.stringify(state.manual));
     lsSet(LS.meta, JSON.stringify(state.meta));
   }, 120);
@@ -1260,6 +1391,7 @@ function saveLocal() {
 function restoreLocal() {
   try { const r = lsGet(LS.rows); if (r) state.rows = JSON.parse(r) || {}; } catch (e) {}
   try { const d = lsGet(LS.daily); if (d) state.daily = JSON.parse(d) || {}; } catch (e) {}
+  try { const p = lsGet(LS.promo); if (p) state.promo = JSON.parse(p) || {}; } catch (e) {}
   try { const m = lsGet(LS.manual); if (m) state.manual = JSON.parse(m) || {}; } catch (e) {}
   try { const t = lsGet(LS.meta); if (t) state.meta = Object.assign(state.meta, JSON.parse(t) || {}); } catch (e) {}
 }
@@ -1293,6 +1425,7 @@ function bindUI() {
   $('btn-orders').addEventListener('click', () => $('file-orders').click());
   $('btn-stores').addEventListener('click', () => $('file-stores').click());
   $('btn-platform').addEventListener('click', () => $('file-platform').click());
+  $('btn-promo').addEventListener('click', () => $('file-promo').click());
   $('file-orders').addEventListener('change', (e) => { onFileOrders(e.target.files && e.target.files[0]); e.target.value = ''; });
   $('file-stores').addEventListener('change', (e) => { onFileStores(e.target.files && e.target.files[0]); e.target.value = ''; });
   // 平台三表：一次可选多个文件（客流 / 在线咨询 / 门店交易任意组合）
@@ -1301,6 +1434,7 @@ function bindUI() {
     e.target.value = '';
     if (files.length) onFilesPlatform(files);
   });
+  $('file-promo').addEventListener('change', (e) => { onFilePromo(e.target.files && e.target.files[0]); e.target.value = ''; });
   $('btn-latest').addEventListener('click', gotoLatest);
 
   $('report-date').addEventListener('change', (e) => {
@@ -1332,8 +1466,8 @@ function bindUI() {
 
   $('btn-clear').addEventListener('click', () => {
     if (!confirm('将清除本页的「七大店铺总表」解析结果、平台三表数据与手工覆盖值（不会删除订单数据）。继续？')) return;
-    state.rows = {}; state.daily = {}; state.manual = {}; state.meta = {};
-    lsSet(LS.rows, '{}'); lsSet(LS.daily, '{}'); lsSet(LS.manual, '{}'); lsSet(LS.meta, '{}');
+    state.rows = {}; state.daily = {}; state.promo = {}; state.manual = {}; state.meta = {};
+    lsSet(LS.rows, '{}'); lsSet(LS.daily, '{}'); lsSet(LS.promo, '{}'); lsSet(LS.manual, '{}'); lsSet(LS.meta, '{}');
     _aggCache.key = ''; _platCache.key = '';
     syncDateRange(); autoPickDate(); render();
     toast('本页数据已清除', 'ok');

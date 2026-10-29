@@ -177,6 +177,10 @@
       <button class="btn btn-primary" id="btn-platform">📥 上传平台数据（可多选）</button>
       <span id="platform-meta" class="file-meta">未导入</span>
       <span class="sep"></span>
+      <input type="file" id="file-promo" accept=".xlsx,.xls" hidden />
+      <button class="btn" id="btn-promo">📊 上传门店报表（推广费）</button>
+      <span id="promo-meta" class="file-meta">未导入</span>
+      <span class="sep"></span>
       <button class="btn btn-ghost" id="btn-clear">清除本页数据</button>
     </div>
     <div class="src-note">
@@ -257,8 +261,7 @@
   </div>
 
   <p class="note">
-    <b>业绩 / 客量口径：</b>「初诊业绩（T30）」「初诊成交客量（T30）」「有效客资人数」「新增VAB客量」「客单价」由订单表自动计算 ——
-    渠道范围 = 7 个美大二级渠道（美大-高端体检 / 国际门诊 / 口腔保健 / 新妇科·抗衰 / 新妇科·私密 / 北郊保健 / 北郊医疗）∩「电商组」，
+    <b>业绩 / 客量口径：</b>「初诊业绩（T30）」「初诊成交客量（T30）」「有效客资人数」「新增VAB客量」「客单价」由订单表自动计算，
     初诊门槛与「日业绩报表」逐日口径完全一致。<br />
     <b>平台指标口径：</b>曝光 / 访问取自客流数据，回复时长 / 30s回复率取自在线咨询数据，下单与核销 6 项取自门店交易数据；
     当日取该日行，月累计按当月逐日累加（回复时长与回复率按在线咨询人数加权）。导入平台三表后，这些列优先于七大店铺总表的同名值。<br />

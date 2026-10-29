@@ -156,16 +156,13 @@
     });
     rows.push(r2); heights.push(H.head[2]);
 
-    /* —— 数据行：7 店 × 当日 / 本月累计 —— */
-    const list = [];
-    STORES.forEach((s) => {
-      if (period !== 'cum') list.push({ store: s, which: 'today' });
-      if (period !== 'today') list.push({ store: s, which: 'cum' });
-    });
-    list.forEach(({ store, which }) => {
+    /* —— 数据行：7 店 × 当日 / 本月累计（both 模式共享列纵向合并，与页面同源） —— */
+    const MERGED = ['store', 'pm', 'op', 'mt', 'dp', 'rank'];
+    function buildDataRow(store, which, merge) {
       const isToday = which === 'today';
       const rec = (state.rows[state.date] || {})[store.key] || {};
-      const row = COLS.map((c) => {
+      return COLS.map((c) => {
+        if (merge && MERGED.indexOf(c.k) >= 0 && !isToday) return null;   // 第 2 行共享列由纵向合并覆盖
         if (c.k === 'store') {
           return { v: store.name, t: 's', spec: { fill: FILL.rowA, color: TEXT.navy, bold: true, size: 9, align: 'left', wrap: true } };
         }
@@ -183,8 +180,25 @@
         }
         return valueCell(c, store.key, which, Object.assign(spec, { align: isTextCol(c) ? 'center' : 'right' }));
       });
-      rows.push(row); heights.push(H.body);
+    }
+    const dataRows = [];
+    const dataMerges = [];
+    let dr = rows.length;   // 数据区起始行（0-indexed）
+    STORES.forEach((s) => {
+      if (period === 'both') {
+        const r1 = buildDataRow(s, 'today', true);
+        const r2 = buildDataRow(s, 'cum', true);
+        dataRows.push(r1, r2);
+        COLS.forEach((c, ci) => { if (MERGED.indexOf(c.k) >= 0) dataMerges.push({ r: dr, c: ci, r2: dr + 1, c2: ci }); });
+        dr += 2;
+      } else {
+        const w = period === 'cum' ? 'cum' : 'today';
+        dataRows.push(buildDataRow(s, w, false));
+        dr += 1;
+      }
     });
+    dataRows.forEach((r) => { rows.push(r); heights.push(H.body); });
+    dataMerges.forEach((m) => merges.push(m));
 
     /* —— 合计行 —— */
     const sumWhich = period === 'cum' ? 'cum' : 'today';
