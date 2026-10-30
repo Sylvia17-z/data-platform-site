@@ -22,19 +22,56 @@
 (function () {
 
   /* ---------------- 依赖懒加载 ---------------- */
-  const SRC = { jszip: 'assets/vendor/jszip.min.js', h2c: 'assets/vendor/html2canvas.min.js' };
+  /* 2026-10-30：线上偶发「导出图片失败：依赖加载失败：assets/vendor/html2canvas.min.js」。
+   * 根因是相对路径 + 一次性加载：外壳 iframe 的 base 异常、网关瞬时抖动（首页曾出现 3.3s 才返回）、
+   * Service Worker 把网络失败包装成 503，都会让 <script> 触发 onerror；而失败结果又被 _lib 缓存，
+   * 于是首次失败后整个会话都失败，必须刷新页面才能恢复。
+   * 处理：
+   *   ① 路径改为以「本脚本自身 URL」为基准解析，不再依赖文档 base 与相对路径；
+   *   ② 本地失败自动换 CDN（与 vendor 同版本）兜底；
+   *   ③ 每个候选地址重试一次并加时间戳，绕开被污染的缓存；
+   *   ④ 只缓存成功结果，失败不落缓存，用户再点一次即可重新加载。 */
+  const SELF = (document.currentScript && document.currentScript.src) || '';
+  const ASSET_BASE = SELF ? SELF.replace(/[?#].*$/, '').replace(/[^/]*$/, '') : 'assets/';
+  const SRC = {
+    jszip: [
+      ASSET_BASE + 'vendor/jszip.min.js',
+      'assets/vendor/jszip.min.js',
+      'https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js',
+    ],
+    h2c: [
+      ASSET_BASE + 'vendor/html2canvas.min.js',
+      'assets/vendor/html2canvas.min.js',
+      'https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js',
+    ],
+  };
+  const LIB_NAME = { jszip: 'JSZip', h2c: 'html2canvas' };
   const _lib = {};
-  function loadScript(src) {
-    if (_lib[src]) return _lib[src];
-    _lib[src] = new Promise((resolve, reject) => {
+  function inject(url) {
+    return new Promise((resolve, reject) => {
       const s = document.createElement('script');
-      s.src = src;
+      s.src = url;
       s.async = true;
       s.onload = () => resolve(true);
-      s.onerror = () => reject(new Error('依赖加载失败：' + src));
+      s.onerror = () => reject(new Error(url));
       document.head.appendChild(s);
     });
-    return _lib[src];
+  }
+  function loadScript(key) {
+    if (_lib[key]) return _lib[key];
+    const urls = SRC[key] || [key];
+    const p = (async () => {
+      for (const u of urls) {
+        for (let i = 0; i < 2; i++) {
+          const url = i === 0 ? u : u + (u.indexOf('?') >= 0 ? '&' : '?') + 'retry=' + Date.now();
+          try { await inject(url); return true; } catch (_) { /* 换下一个候选 / 重试 */ }
+        }
+      }
+      throw new Error('依赖加载失败：' + (LIB_NAME[key] || key) + '（已重试并尝试 CDN，请检查网络后重试）');
+    })();
+    p.catch(() => { delete _lib[key]; }); // 失败不缓存
+    _lib[key] = p;
+    return p;
   }
 
   /* ---------------- 色板（与 index.html :root 严格一致） ---------------- */
@@ -395,7 +432,7 @@
   }
 
   async function buildXlsxBlob(g) {
-    await loadScript(SRC.jszip);
+    await loadScript('jszip');
     const JSZip = window.JSZip;
     if (!JSZip) throw new Error('JSZip 未加载');
     const sb = makeStyleBook();
@@ -440,8 +477,8 @@
     return COLS.reduce((a, c) => a + c.w, 0);
   }
   async function buildPngCanvas() {
-    await loadScript(SRC.h2c);
-    if (typeof html2canvas !== 'function') throw new Error('html2canvas 未加载');
+    await loadScript('h2c');
+    if (typeof window.html2canvas !== 'function') throw new Error('html2canvas 未加载');
     const table = document.getElementById('tbl');
     if (!table || table.style.display === 'none') throw new Error('暂无可导出的表格');
 
@@ -469,7 +506,7 @@
         }
         el.removeAttribute('data-edit');   // 导出图不带交互属性
       });
-      const canvas = await html2canvas(clone, {
+      const canvas = await window.html2canvas(clone, {
         backgroundColor: '#ffffff',
         scale: 2,
         useCORS: true,

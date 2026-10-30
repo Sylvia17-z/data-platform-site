@@ -4894,6 +4894,14 @@ function ecSubHiddenSet(rep){
   return new Set(list.filter(d => ecSubHidden.has(d)));
 }
 
+// ⑤ 当前屏幕上「可见」的日期列（与 renderEcSubReport 用同一套隐藏规则）：
+// 导出（Excel / 图片）只输出这些日期，页面收起的日期不进文件。
+function visibleEcSubDates(rep){
+  const r = rep || computeEcSubReport();
+  const hidden = ecSubHiddenSet(r);
+  return (r.dateList || []).filter(d => !hidden.has(d));
+}
+
 function renderEcSubReport(){
   const table = $('ec-sub-table');
   if(!table) return;
@@ -5400,12 +5408,14 @@ function copyEcSubColumn(colKey){
 }
 
 // ⑤ 导出网格：平台名称 | 二级渠道 | 渠道分类 | 一级渠道 | 业绩类型 | 每日期(客量+金额)；每渠道 2 行（当日数据/月累计），末尾合计 2 行
-// 每日期 2 子列：客量=当日/累计去重客户数、金额=当日/累计收款；导出始终含「全部」日期列（不跟随屏幕收起），便于后续分析
+// 每日期 2 子列：客量=当日/累计去重客户数、金额=当日/累计收款；
+// 2026-10-30：导出改为与屏幕一致 —— 只导出当前可见的日期列（收起/批量隐藏的日期不进 Excel），
+// 屏幕与文件永远同源，避免「页面上只看到最新一天、导出却摊开全月」的困惑。
 function buildEcSubGrid(){
   const rep = computeEcSubReport();
   const cutoff = state.cutoffDate ? new Date(state.cutoffDate) : new Date();
   const monthStr = (cutoff.getMonth()+1) + '月' + cutoff.getDate() + '日';
-  const dateList = rep.dateList || [];
+  const dateList = visibleEcSubDates(rep);
   const nCols = 5 + 4 * dateList.length;
   const rows = [];
   const merges = [];
@@ -5489,10 +5499,12 @@ function buildEcSubGrid(){
 
 async function exportEcSubXlsx(){
   await ensureXlsxStyled();
+  const visDates = visibleEcSubDates();
+  if(!visDates.length){ showToast('当前没有可见的日期列，请先展开日期列', 'warn', 2200); return; }
   const { rows, merges, colWidths } = buildEcSubGrid();
   buildStyledXlsx({ sheetName:'电商组二级渠道', rows, merges, colWidths }).then(blob=>{
     downloadBlob(blob, `电商组二级渠道业绩-${state.cutoffDate||todayIso()}.xlsx`);
-    showToast('Excel已导出（含全部日期列）', 'ok');
+    showToast(`Excel已导出（${visDates.length} 个日期列）`, 'ok');
   }).catch(e=>{
     console.error(e);
     showToast('导出失败：'+e.message, 'err');

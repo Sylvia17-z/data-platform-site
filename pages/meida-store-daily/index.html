@@ -175,7 +175,7 @@
 
   <!-- ① 数据导入 -->
   <div class="panel">
-    <h2>① 数据导入 <span class="tag">订单表 → 业绩/客量；七大店铺总表 → 评分、榜单、投产比、好评；平台三表 → 曝光/访问/下单/核销/回复时长；门店报表 → 各门店推广费</span></h2>
+    <h2>① 数据导入 <span class="tag">订单表 → 业绩/客量；七大店铺总表 → 评分、榜单、投产比、好评；店铺日报表 → 评分、推广费、曝光/下单/核销/回复时长；平台三表 → 单表补数；门店报表 → 仅推广费</span></h2>
     <div class="toolbar">
       <input type="file" id="file-orders" accept=".xlsx,.xls" hidden />
       <button class="btn" id="btn-orders">📁 上传订单表</button>
@@ -186,7 +186,7 @@
       <span id="stores-meta" class="file-meta">未导入</span>
       <span class="sep"></span>
       <input type="file" id="file-platform" accept=".xlsx,.xls,.csv" multiple hidden />
-      <button class="btn btn-primary" id="btn-platform" title="可一次多选：客流 / 在线咨询 / 门店交易 / 门店报表（推广费），按表头自动识别类型">📥 上传平台数据（可多选）</button>
+      <button class="btn btn-primary" id="btn-platform" title="可一次多选：店铺日报表 / 客流 / 在线咨询 / 门店交易 / 门店报表（推广费），按表头自动识别类型">📥 上传平台数据（可多选）</button>
       <span id="platform-meta" class="file-meta">未导入</span>
       <span class="sep"></span>
       <input type="file" id="file-promo" accept=".xlsx,.xls" hidden />

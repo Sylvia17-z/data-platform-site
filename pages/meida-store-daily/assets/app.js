@@ -585,8 +585,8 @@ async function onFileStores(file) {
  * 「平均响应时长」不能误取「平均响应时长均值 / 优秀值」。
  * ===================================================================== */
 const PLAT_FIELDS = ['expo', 'visit', 'orderU', 'orderC', 'orderAmt', 'woU', 'woC', 'woAmt', 'replySec', 'reply30'];
-const PLAT_TYPE_LABEL = { flow: '客流', chat: '在线咨询', trade: '门店交易' };
-const PLAT_TYPE_SHORT = { flow: '客流', chat: '咨询', trade: '交易' };
+const PLAT_TYPE_LABEL = { flow: '客流', chat: '在线咨询', trade: '门店交易', daily: '店铺日报' };
+const PLAT_TYPE_SHORT = { flow: '客流', chat: '咨询', trade: '交易', daily: '日报' };
 
 function platNum(v) {
   if (v == null || v === '') return 0;
@@ -640,6 +640,57 @@ function isPromoHeader(hdr) {
   return has('花费') || has('推广费') || has('消耗');
 }
 
+/* =====================================================================
+ * 四之二·甲、店铺日报表（美团/点评后台导出）
+ * ---------------------------------------------------------------------
+ * 结构：两层表头（第 1 行分组「客流分析 / 交易分析 / 咨询分析…」，第 2 行字段名），
+ *       第 3 行起每行 = 一个门店一天的日报；A–E 列纵向合并，底层只有第 1 行有值。
+ * 一份文件同时覆盖页面里三组平台指标 + 推广费 + 评分，所以判定必须在
+ * 「门店报表（推广费）」与「平台三表」之前 —— 否则会被误判成推广费（表头含「消耗」）
+ * 或误判成「门店交易」（表头含 下单券数 / 核销券数）。
+ * 列一律按表头文字匹配，不按列序号硬编码（来源表后续增列不受影响）。
+ * ===================================================================== */
+const DAILY_COLS = {
+  date: ['日期'],
+  store: ['门店名称', '门店'],
+  mt: ['美团星级'],
+  dp: ['点评星级'],
+  promo: ['推广通消耗金额', '推广消耗金额'],
+  expo: ['曝光人数'],
+  visit: ['访问人数'],
+  orderU: ['下单人数'],
+  orderC: ['下单券数'],
+  // 用户确认口径：「核销售价金额(元)」→ 页面「下单金（元）」；「下单售价金额(元)」是另一列，作回退
+  orderAmt: ['核销售价金额', '下单售价金额', '下单金额'],
+  woU: ['核销人次', '核销人数', '核销订单量'],
+  woC: ['核销券数'],
+  // 用户确认口径：「商家优惠后核销额(元)」→ 页面「总核销金额（元）」
+  woAmt: ['商家优惠后核销额', '核销金额'],
+  replySec: ['平均响应时长'],
+  reply30: ['30秒内回复率'],
+  chatCnt: ['在线咨询人数'],
+};
+// 三组指标同时出现才认定为店铺日报表（单组表仍走原来的 flow / chat / trade 分支）
+function isDailyReportHeader(hdr) {
+  const has = (t) => hdr.some((h) => h.includes(t));
+  if (!has('日期') || !has('门店')) return false;
+  return has('曝光人数') && has('访问人数')
+    && (has('核销券数') || has('下单券数'))
+    && (has('平均响应时长') || has('30秒内回复率'));
+}
+/* 两层表头的合并：字段名取下一行，下一行为空（纵向合并区）时回退上一行的分组名 */
+function findDailyHeader(grid) {
+  for (let i = 0; i < Math.min(grid.length, 8); i++) {
+    const a = (grid[i] || []).map((v) => String(v == null ? '' : v).trim());
+    const b = grid[i + 1] ? (grid[i + 1] || []).map((v) => String(v == null ? '' : v).trim()) : [];
+    const hdr = [];
+    const n = Math.max(a.length, b.length);
+    for (let j = 0; j < n; j++) hdr.push(b[j] || a[j] || '');
+    if (isDailyReportHeader(hdr)) return { hi: i, hdr, dataStart: b.length ? i + 2 : i + 1 };
+  }
+  return null;
+}
+
 async function parsePlatFile(file) {
   await ensureXlsx();
   const buf = await file.arrayBuffer();
@@ -662,6 +713,48 @@ async function parsePlatFile(file) {
     const hi = findHeaderRow(grid);
     if (hi < 0) continue;
     const hdr = (grid[hi] || []).map((v) => String(v == null ? '' : v).trim());
+    // —— 店铺日报表：一份文件含 客流 + 交易 + 咨询（+ 评分 / 推广消耗）——
+    const dh = findDailyHeader(grid);
+    if (dh) {
+      const ix = {};
+      Object.keys(DAILY_COLS).forEach((k) => { ix[k] = colIdx(dh.hdr, DAILY_COLS[k]); });
+      if (ix.date >= 0 && ix.store >= 0) {
+        const rows = [];
+        const promo = [];
+        const unmatched = new Set();
+        for (let r = dh.dataStart; r < grid.length; r++) {
+          const row = grid[r] || [];
+          const date = parseDateCell(row[ix.date]);
+          if (!date) continue;
+          const rawName = row[ix.store] == null ? '' : String(row[ix.store]).trim();
+          const st = resolveStoreByName(rawName);
+          if (!st) { if (rawName) unmatched.add(rawName); continue; }
+          const pick = (k) => (ix[k] >= 0 ? row[ix[k]] : null);
+          const vals = {};
+          ['expo', 'visit', 'orderU', 'orderC', 'orderAmt', 'woU', 'woC', 'woAmt', 'chatCnt']
+            .forEach((k) => { if (ix[k] >= 0) vals[k] = platNum(pick(k)); });
+          const sec = cleanCell(pick('replySec'), 'sec');
+          if (isNum(sec)) vals.replySec = sec;
+          const p30 = cleanCell(pick('reply30'), 'pct');
+          if (isNum(p30)) vals.reply30 = p30;
+          // 星级 0 视为「暂无评分」，不覆盖七大店铺总表里的值
+          const mt = platNum(pick('mt'));
+          if (mt > 0) vals.mt = mt;
+          const dp = platNum(pick('dp'));
+          if (dp > 0) vals.dp = dp;
+          rows.push({ date, store: st.key, vals });
+          const fee = pick('promo');
+          if (fee != null && fee !== '') promo.push({ date, name: rawName, store: st.key, fee: platNum(fee) });
+        }
+        if (rows.length) {
+          out.type = 'daily';
+          out.rows = rows;
+          out.promo = promo;
+          out.unmatched = [...unmatched];
+          break;
+        }
+      }
+    }
     // —— 门店报表（推广费）：日期 × 门店 → 花费 ——
     if (isPromoHeader(hdr)) {
       const iPDate = colIdx(hdr, ['日期']);
@@ -697,10 +790,11 @@ async function parsePlatFile(file) {
     } else {
       idx.orderU = colIdx(hdr, ['下单人数']);
       idx.orderC = colIdx(hdr, ['下单券数']);
-      idx.orderAmt = colIdx(hdr, ['下单金额'], '原价');
+      // 下单金 / 总核销金额：与店铺日报表同一口径（核销售价金额 / 商家优惠后核销额 优先），再回落到通用列名
+      idx.orderAmt = colIdx(hdr, ['核销售价金额', '下单金额'], '原价');
       idx.woU = colIdx(hdr, ['核销人数']);
       idx.woC = colIdx(hdr, ['核销券数']);
-      idx.woAmt = colIdx(hdr, ['核销金额'], '原价');
+      idx.woAmt = colIdx(hdr, ['商家优惠后核销额', '核销金额'], '原价');
     }
     const rows = [];
     for (let r = hi + 1; r < grid.length; r++) {
@@ -737,12 +831,14 @@ async function parsePlatFile(file) {
 async function onFilesPlatform(fileList) {
   const list = Array.from(fileList || []);
   if (!list.length) return;
-  const fileCnt = { flow: 0, chat: 0, trade: 0 };
-  const rowCnt = { flow: 0, chat: 0, trade: 0 };
+  const fileCnt = { flow: 0, chat: 0, trade: 0, daily: 0 };
+  const rowCnt = { flow: 0, chat: 0, trade: 0, daily: 0 };
   const skipped = [];
   // 门店报表（推广费）也可能被一起选进来：按表头自动分流，不用单独点「上传门店报表」
   let promoFiles = 0, promoRows = 0;
   const promoUnmatched = new Set();
+  // 店铺日报表未匹配上的门店名（导入完成后在提示里列出）
+  const dailyUnmatched = new Set();
   // 导入前的最大日期：只有本次导入真的把可用日期往后延伸时，才自动跳到最新一天
   const prevDates = allDates();
   const prevMax = prevDates.length ? prevDates[prevDates.length - 1] : '';
@@ -756,6 +852,24 @@ async function onFilesPlatform(fileList) {
         unmatched.forEach((n) => promoUnmatched.add(n));
         continue;
       }
+      // 店铺日报表：一份文件同时写 平台指标 + 评分 + 推广费
+      if (res.type === 'daily') {
+        fileCnt.daily++;
+        res.rows.forEach((r) => {
+          const day = state.daily[r.date] || (state.daily[r.date] = {});
+          const rec = day[r.store] || (day[r.store] = {});
+          Object.assign(rec, r.vals);
+          rowCnt.daily++;
+        });
+        (res.unmatched || []).forEach((n) => dailyUnmatched.add(n));
+        if (res.promo && res.promo.length) {
+          const { rows, unmatched } = applyPromoRows(res.promo);
+          if (rows) promoFiles++;
+          promoRows += rows;
+          unmatched.forEach((n) => promoUnmatched.add(n));
+        }
+        continue;
+      }
       if (!res.type || !res.rows.length) { skipped.push(f.name); continue; }
       fileCnt[res.type]++;
       res.rows.forEach((r) => {
@@ -765,9 +879,9 @@ async function onFilesPlatform(fileList) {
         rowCnt[res.type]++;
       });
     }
-    const got = fileCnt.flow + fileCnt.chat + fileCnt.trade;
+    const got = fileCnt.flow + fileCnt.chat + fileCnt.trade + fileCnt.daily;
     if (!got && !promoFiles) {
-      toast('未识别到可导入的数据表。支持：客流 / 在线咨询 / 门店交易（平台导出）与门店报表（推广费），表头需含 日期 + 门店名称', 'err', 8000);
+      toast('未识别到可导入的数据表。支持：店铺日报表 / 客流 / 在线咨询 / 门店交易 / 门店报表（推广费），表头需含 日期 + 门店名称', 'err', 8000);
       return;
     }
     const dates = Object.keys(state.daily)
@@ -805,8 +919,10 @@ async function onFilesPlatform(fileList) {
     let msg = `数据导入完成：${parts.join(' · ')}`;
     if (got) msg += `；平台数据覆盖 ${storeSet.size} 店 × ${dates.length} 天`;
     if (promoFiles) msg += promoUnmatchedTip(promoUnmatched);
+    if (dailyUnmatched.size) msg += '；店铺日报未匹配门店：' + [...dailyUnmatched].join('、');
     if (skipped.length) msg += `；未识别 ${skipped.length} 个文件`;
-    toast(msg, promoUnmatched.size ? 'warn' : 'ok', promoUnmatched.size ? 9000 : 6500);
+    const warn = promoUnmatched.size || dailyUnmatched.size;
+    toast(msg, warn ? 'warn' : 'ok', warn ? 9000 : 6500);
   } catch (e) {
     console.error(e);
     toast('平台数据解析失败：' + e.message, 'err', 7000);
@@ -933,9 +1049,10 @@ function platAgg() {
     const r = (state.daily[pdate] || {})[k];
     if (r) today[k] = r;
   });
-  Object.keys(state.daily)
+  const inRange = Object.keys(state.daily)
     .filter((d) => d >= start && d <= pdate)
-    .sort()
+    .sort();
+  inRange
     .forEach((d) => {
       const dayRec = state.daily[d] || {};
       STORE_KEYS.forEach((k) => {
@@ -948,6 +1065,18 @@ function platAgg() {
         if (isNum(r.reply30)) { c._p30W = (c._p30W || 0) + r.reply30 * w; c._p30N = (c._p30N || 0) + w; }
       });
     });
+  // 评分（美团 / 点评星级）不是累加量：月累计取 ≤ pdate 的最近一次评分
+  STORE_KEYS.forEach((k) => {
+    for (let i = inRange.length - 1; i >= 0; i--) {
+      const r = (state.daily[inRange[i]] || {})[k];
+      if (r && (isNum(r.mt) || isNum(r.dp))) {
+        const c = cum[k] || (cum[k] = {});
+        if (isNum(r.mt)) c.mt = r.mt;
+        if (isNum(r.dp)) c.dp = r.dp;
+        break;
+      }
+    }
+  });
   STORE_KEYS.forEach((k) => {
     const c = cum[k];
     if (!c) return;
@@ -964,26 +1093,42 @@ function platAgg() {
  * 四之四、门店报表（推广费）聚合
  * ---------------------------------------------------------------------
  * 数据源：门店报表_*.xlsx（A=日期 M-D / B=推广门店 / E=花费（元）= 推广费）。
- * 当日取该日值；月累计 = 当月 1 日 ~ 所选日逐日累加（与平台三表口径一致）。
+ * 口径与平台三表一致：当日取【前一天】数据（D-1，缺失则回退 ≤ D-1 最近一天）；
+ * 月累计 = 当月 1 日 ~ D-1 逐日累加。
  * 优先级：手工覆盖 > 门店报表文件 > 七大店铺总表（cellValue 内裁决）。
  * ===================================================================== */
 let _promoCache = { key: '', data: null };
 
+// 推广费取的「前一天」：与 platDate() 同规则，但作用在门店报表的日期集合上
+function promoDate() {
+  const date = state.date;
+  if (!date) return '';
+  const prev = addDays(date, -1);
+  if (!prev) return '';
+  const ds = Object.keys(state.promo).filter((d) => d && Object.keys(state.promo[d] || {}).length);
+  if (!ds.length) return prev;                                  // 还没有推广费数据：仍按前一天（显示 —）
+  if (ds.indexOf(prev) >= 0) return prev;
+  const earlier = ds.filter((d) => d < prev).sort();
+  if (earlier.length) return earlier[earlier.length - 1];       // 用 ≤ D-1 的最近一天
+  return ds.indexOf(date) >= 0 ? date : prev;
+}
+
 function promoAgg() {
   const date = state.date;
   if (!date) return null;
-  const key = date + '|' + (state.meta.promo ? state.meta.promo.ts : 0) + '|' + Object.keys(state.promo).length;
+  const pdate = promoDate() || date;
+  const key = pdate + '|' + (state.meta.promo ? state.meta.promo.ts : 0) + '|' + Object.keys(state.promo).length;
   if (_promoCache.key === key) return _promoCache.data;
-  const day = iso2date(date);
+  const day = iso2date(date);                       // 月份边界按报表日期算（「本月累计」= 报表日期所在月）
   const start = fmtDate(new Date(day.getFullYear(), day.getMonth(), 1));
   const today = {}, cum = {};
   STORE_KEYS.forEach((k) => { today[k] = null; cum[k] = null; });
   STORE_KEYS.forEach((k) => {
-    const r = (state.promo[date] || {})[k];
+    const r = (state.promo[pdate] || {})[k];
     if (r != null) today[k] = r;
   });
   Object.keys(state.promo)
-    .filter((d) => d >= start && d <= date)
+    .filter((d) => d >= start && d <= pdate)
     .sort()
     .forEach((d) => {
       const rec = state.promo[d] || {};
@@ -1123,6 +1268,12 @@ function cellValue(storeKey, field, which) {
     const p = platAgg();
     const pr = p && p[which] ? p[which][storeKey] : null;
     if (pr && isNum(pr[field])) return { v: pr[field], kind: 'plat' };
+  }
+  // 评分（美团 / 点评星级）：店铺日报表带来的值优先于七大店铺总表
+  if (state.source === 'auto' && (field === 'mt' || field === 'dp')) {
+    const p = platAgg();
+    const pr = p && p[which] ? p[which][storeKey] : null;
+    if (pr && isNum(pr[field]) && pr[field] > 0) return { v: pr[field], kind: 'plat' };
   }
 
   // 自动列
@@ -1377,7 +1528,7 @@ function renderStatus() {
     if (p && p.dates) {
       const t = p.types || {};
       const label = Object.keys(PLAT_TYPE_SHORT).filter((k) => t[k]).map((k) => PLAT_TYPE_SHORT[k]).join('+');
-      pm.textContent = `✔ 平台三表 ${label || '已导入'} · ${p.stores} 店 × ${p.dates} 天`;
+      pm.textContent = `✔ 平台数据 ${label || '已导入'} · ${p.stores} 店 × ${p.dates} 天`;
       pm.className = 'file-meta ok';
     } else {
       pm.textContent = '未导入';
@@ -1631,6 +1782,97 @@ async function init() {
   _aggCache.key = '';
   _platCache.key = '';
   render();
+  _sharedSig = sharedSig();   // 记下基线签名，供 refreshShared 比对
+  bindSharedSync();
+}
+
+/* ---------------- 共享数据自动同步（2026-10-30） ----------------
+ * 订单 / VAB / 历史明细与「日业绩报表」共用同一份 localStorage。
+ * 原先只在页面初始化时读一次：外壳用 iframe 保活标签页，用户在日业绩页重新导入订单后
+ * 本页不会重读 —— 表现就是「最新一天没同步、往日数据还是导入前的旧值」，必须手动刷新。
+ * 现在：① 监听 storage 事件（其它标签页写入共享键）；② 页面重新可见 / 获得焦点时比对签名。
+ * 数据确实变了才重算重渲染；原本停在「旧的最后一天」时自动跟随到新的最后一天。 */
+let _sharedSig = '';
+let _sharedAt = 0;
+function sharedSig() {
+  return [state.orders.length, state.ordersTs || 0, state.vabSet.size,
+    (state.histOrders || []).length, state.meta.histTs || 0].join('|');
+}
+async function refreshShared(force) {
+  const now = Date.now();
+  if (!force && now - _sharedAt < 1200) return false;   // 焦点/可见性事件密集触发时去抖
+  _sharedAt = now;
+  const prevMax = allDates().slice(-1)[0] || '';
+  const prevDate = state.date;
+  const before = _sharedSig || sharedSig();
+  await loadSharedOrders();
+  await loadSharedVab();
+  await loadSharedHist();
+  const after = sharedSig();
+  _sharedSig = after;
+  if (after === before) return false;
+  _aggCache.key = '';
+  _platCache.key = '';
+  _histCache = { sig: '', date: '', set: new Set() };
+  syncDateRange();
+  const ds = allDates();
+  const nextMax = ds.length ? ds[ds.length - 1] : '';
+  // 用户原本停在旧的最后一天（或还没选日期）→ 跟随到新的最后一天；否则保留其选择
+  if (nextMax && (!prevDate || prevDate === prevMax)) state.date = nextMax;
+  autoPickDate();
+  render();
+  return true;
+}
+function bindSharedSync() {
+  window.addEventListener('storage', (e) => {
+    const k = e && e.key;
+    if (k === LS.orders || k === LS.vab || k === LS.hist) refreshShared(true);
+  });
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) { askShellPayload(); refreshShared(false); } });
+  window.addEventListener('focus', () => { askShellPayload(); refreshShared(false); });
+  // 外壳桥接：部署环境下 iframe 可能是隔离/一次性 origin，本页 localStorage 与外壳不通，
+  // 订单由外壳保管（日业绩页 dp:persist → 壳 localStorage）。因此主动索取一次，并接收推送。
+  window.addEventListener('message', (e) => {
+    const m = (e && e.data) || null;
+    if (!m || typeof m !== 'object' || m.type !== 'dp:payload') return;
+    if (m.key !== LS.orders || typeof m.payload !== 'string') return;
+    applyOrdersPayload(m.payload);
+  });
+  askShellPayload();
+}
+
+/** 向外壳索取共享订单（壳收到 dp:request 后回发 dp:payload） */
+function askShellPayload() {
+  try {
+    if (window.parent && window.parent !== window) {
+      window.parent.postMessage({ type: 'dp:request', key: LS.orders }, '*');
+    }
+  } catch (e) { /* 跨域/无父窗口：忽略 */ }
+}
+
+/** 应用外壳推来的订单快照：比本页现有数据新才覆盖，避免用旧快照回退 */
+function applyOrdersPayload(raw) {
+  let o = null;
+  try { o = JSON.parse(raw); } catch (e) { return false; }
+  if (!o || !Array.isArray(o.orders) || !o.orders.length) return false;
+  const ts = Number(o.ts) || 0;
+  if (o.orders.length === state.orders.length && ts === (state.ordersTs || 0)) return false;
+  if (ts && ts < (state.ordersTs || 0) && o.orders.length <= state.orders.length) return false;
+  const prevMax = allDates().slice(-1)[0] || '';
+  const prevDate = state.date;
+  state.orders = reviveOrders(o.orders);
+  state.ordersTs = ts;
+  _aggCache.key = '';
+  _platCache.key = '';
+  _histCache = { sig: '', date: '', set: new Set() };
+  syncDateRange();
+  const ds = allDates();
+  const nextMax = ds.length ? ds[ds.length - 1] : '';
+  if (nextMax && (!prevDate || prevDate === prevMax)) state.date = nextMax;
+  autoPickDate();
+  _sharedSig = sharedSig();
+  render();
+  return true;
 }
 
 function bindUI() {
