@@ -456,6 +456,24 @@ body{
   function $(id){ return document.getElementById(id); }
   function msg(t, isErr){ var el = $('sa-msg'); if(el){ el.textContent = t || ''; el.style.color = isErr ? '#C0392B' : '#2E7D5B'; } }
   function smsg(t, isErr){ var el = $('s-msg'); if(el){ el.textContent = t || ''; el.style.color = isErr ? '#C0392B' : '#2E7D5B'; } }
+  /* 把后端原始错误（常是 gRPC 包装：rpc error: code = X desc = …，含内部项目 ID）转成
+     面向用户的友好文案，避免把 res_stopped / pg database url / wb_xxx 项目号等内部细节泄露给终端用户。
+     —— 2026-10-31 针对登录报「ResourceExhausted / res_stopped」做的脱敏处理 */
+  function friendErr(raw){
+    var s = (raw == null ? '' : String(raw));
+    if(!s) return '未知错误，请稍后重试';
+    if(/ResourceExhausted|res_stopped|get auth config error|get pg database url|exhausted|pgrst/i.test(s)){
+      return '后端服务暂时不可用（数据库已暂停或资源耗尽），请稍后重试或联系管理员';
+    }
+    // 剥掉 rpc error: code = X desc = 噪声前缀，取最后一段可读原因
+    var parts = s.split(/desc\s*=\s*/);
+    var clean = (parts[parts.length - 1] || s).trim();
+    // 仍含内部细节则退回通用提示，不泄露
+    if(/rpc error|resourceexhausted|pg database|wb_[a-z0-9]{6,}|pgrst|exhausted/i.test(clean)){
+      return '后端服务暂时不可用，请稍后重试';
+    }
+    return clean.slice(0, 100);
+  }
   function show(el, on){ if(el) el.style.display = on ? '' : 'none'; }
 
   /* ---------- 页签切换 ---------- */
@@ -530,7 +548,7 @@ body{
     var b = $('sa-send'); b.disabled = true; var old = b.textContent; b.textContent = '发送中…';
     var sent = await c.auth.sendOtp({ email: email });
     b.disabled = false; b.textContent = old;
-    if(sent.error){ msg('验证码发送失败：' + (sent.error.message || ''), true); return; }
+    if(sent.error){ msg('验证码发送失败：' + friendErr(sent.error.message), true); return; }
     pendingOtp = { email: email, verificationId: sent.data && sent.data.verificationId, isExistingUser: sent.data && sent.data.isExistingUser };
     msg('验证码已发送至 ' + email, false);
     renderMode();
@@ -544,7 +562,7 @@ body{
     var params = { email: pendingOtp.email, verificationId: pendingOtp.verificationId, isExistingUser: pendingOtp.isExistingUser, token: code.trim() };
     if(!pendingOtp.isExistingUser) params.password = pwd;   // 新账号注册需同时填密码
     var done = await c.auth.verifyOtp(params);
-    if(done.error){ msg('登录失败：' + (done.error.message || ''), true); return; }
+    if(done.error){ msg('登录失败：' + friendErr(done.error.message), true); return; }
     msg('登录成功，正在跳转…', false);
     goNext();
   }
@@ -563,7 +581,7 @@ body{
     var b = $('sa-pwdlogin'); b.disabled = true;
     var r = await c.auth.signInWithPassword({ email: email, password: pwd });
     b.disabled = false;
-    if(r.error){ msg('登录失败：' + (r.error.message || ''), true); return; }
+    if(r.error){ msg('登录失败：' + friendErr(r.error.message), true); return; }
     msg('登录成功，正在跳转…', false);
     goNext();
   }
@@ -574,7 +592,7 @@ body{
     var b = $('sa-forgot'); b.disabled = true; var old = b.textContent; b.textContent = '发送中…';
     var r = await c.auth.resetPasswordForEmail(email);
     b.disabled = false; b.textContent = old;
-    if(r.error){ msg('重置验证码发送失败：' + (r.error.message || ''), true); return; }
+    if(r.error){ msg('重置验证码发送失败：' + friendErr(r.error.message), true); return; }
     if(r.data && typeof r.data.updateUser === 'function'){
       pwdReset = { email: email, updateUser: r.data.updateUser };
       msg('重置验证码已发送至 ' + email, false); renderMode();
@@ -589,7 +607,7 @@ body{
     var b = $('sa-reset'); b.disabled = true;
     var r = await pwdReset.updateUser({ nonce: code.trim(), password: pwd });
     b.disabled = false;
-    if(r.error){ msg('密码重置失败：' + (r.error.message || '请检查验证码'), true); return; }
+    if(r.error){ msg('密码重置失败：' + friendErr(r.error.message || '请检查验证码'), true); return; }
     pwdReset = null;
     ['sa-reset-code','sa-reset-pwd'].forEach(function(id){ var el = $(id); if(el) el.value = ''; });
     msg('密码重置成功，正在跳转…', false);
@@ -604,7 +622,7 @@ body{
     var b = $('s-send'); b.disabled = true; var old = b.textContent; b.textContent = '发送中…';
     var sent = await c.auth.sendOtp({ email: email });
     b.disabled = false; b.textContent = old;
-    if(sent.error){ smsg('验证码发送失败：' + (sent.error.message || ''), true); return; }
+    if(sent.error){ smsg('验证码发送失败：' + friendErr(sent.error.message), true); return; }
     var isExisting = !!(sent.data && sent.data.isExistingUser);
     pendingSignup = { email: email, verificationId: sent.data && sent.data.verificationId, isExistingUser: isExisting };
     smsg(isExisting
@@ -629,7 +647,7 @@ body{
       isExistingUser: false, token: code.trim(), password: p1
     });
     b.disabled = false; b.textContent = old;
-    if(done.error){ smsg('注册失败：' + (done.error.message || '请检查验证码'), true); return; }
+    if(done.error){ smsg('注册失败：' + friendErr(done.error.message || '请检查验证码'), true); return; }
     pendingSignup = null;
     smsg('注册成功，正在跳转…', false);
     goNext();   // 注册即自动登录
