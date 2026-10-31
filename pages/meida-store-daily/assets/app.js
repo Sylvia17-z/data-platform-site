@@ -137,7 +137,7 @@ const GROUPS = [
 
 // 合计行参与求和的列（非派生/非比率列）
 const SUM_KEYS = ['tgtAmt', 'actAmt', 'lead', 'tgtVis', 'firstVis', 'newVab',
-  'expo', 'visit', 'orderU', 'orderC', 'orderAmt', 'woU', 'woC', 'woAmt', 'vcC', 'vcAmt', 'realWo', 'promoFee', 'revTgt', 'revCnt'];
+  'expo', 'visit', 'orderU', 'orderC', 'orderAmt', 'woU', 'woC', 'woAmt', 'vcC', 'vcAmt', 'realWo', 'promoFee', 'revTgt', 'revCnt', 'qrScan'];
 // 店级共享字段：当日数据与本月累计两行取值相同，渲染时纵向合并（rowspan=2），与原始模板表一致
 const MERGED_FIELDS = ['store', 'pm', 'op', 'mt', 'dp', 'rank'];
 /* 「投产比」+「好评」两组里的 5 列：原始模板表里同店两行是纵向合并的（目标 1:4 / 实际 1:0.47 …），
@@ -605,13 +605,12 @@ async function onFileStores(file) {
  * 列一律**精确名优先**：如「下单金额」不能误取「下单金额（原价）」，
  * 「平均响应时长」不能误取「平均响应时长均值 / 优秀值」。
  * ===================================================================== */
-const PLAT_FIELDS = ['expo', 'visit', 'orderU', 'orderC', 'orderAmt', 'woU', 'woC', 'woAmt', 'replySec', 'reply30', 'revCnt'];
+const PLAT_FIELDS = ['expo', 'visit', 'orderU', 'orderC', 'orderAmt', 'woU', 'woC', 'woAmt', 'realWo', 'replySec', 'reply30', 'revCnt', 'qrScan', 'mt', 'dp'];
 /* 「美团数据」组里平台三表不覆盖的列（代金券 / 实际核销）同样取【前一天】的七大店铺总表；
-   「美团榜单维护及客资转化」组（好评 / 优惠码 / 回复时长）同理。
-   业绩 / 客量 / 评分 / 投产比仍取报表当日。 */
-const D1_SHEET_FIELDS = ['vcC', 'vcAmt', 'realWo', 'revTgt', 'revCnt', 'revRate', 'qrScan', 'replySec', 'reply30'];
-/* 评分（美团 / 点评）是时点值，永远取报表当日，不跟随 D-1 */
-const SCORE_FIELDS = ['mt', 'dp'];
+   「美团榜单维护及客资转化」组（好评 / 优惠码 / 回复时长）同理；
+   店铺评分（美团 / 点评星级）也是「填前一天数据」（2026-10-31 用户确认）→ 一并跟随 D-1。
+   业绩 / 客量 / 投产比仍取报表当日。 */
+const D1_SHEET_FIELDS = ['vcC', 'vcAmt', 'realWo', 'revTgt', 'revCnt', 'revRate', 'qrScan', 'replySec', 'reply30', 'mt', 'dp'];
 const PLAT_TYPE_LABEL = { flow: '客流', chat: '在线咨询', trade: '门店交易', daily: '店铺日报' };
 const PLAT_TYPE_SHORT = { flow: '客流', chat: '咨询', trade: '交易', daily: '日报' };
 
@@ -687,17 +686,26 @@ const DAILY_COLS = {
   visit: ['访问人数'],
   orderU: ['下单人数'],
   orderC: ['下单券数'],
-  // 用户确认口径：「核销售价金额(元)」→ 页面「下单金（元）」；「下单售价金额(元)」是另一列，作回退
-  orderAmt: ['核销售价金额', '下单售价金额', '下单金额'],
+  // 金额口径（2026-10-31 用户确认，三列各对应日报表里的一列，不再重复取同一个字段）：
+  //   下单金（元）      ← 下单售价金额(元)
+  //   总核销金额（元）  ← 核销售价金额(元)
+  //   实际核销（元）    ← 商家优惠后核销额(元)
+  // 旧表缺列时按原顺序回退（下单金退核销售价金额，总核销金额退商家优惠后核销额）。
+  orderAmt: ['下单售价金额', '核销售价金额', '下单金额'],
   woU: ['核销人次', '核销人数', '核销订单量'],
   woC: ['核销券数'],
-  // 用户确认口径：「商家优惠后核销额(元)」→ 页面「总核销金额（元）」
-  woAmt: ['商家优惠后核销额', '核销金额'],
+  woAmt: ['核销售价金额', '商家优惠后核销额', '核销金额'],
+  realWo: ['商家优惠后核销额'],
   replySec: ['平均响应时长'],
   reply30: ['30秒内回复率'],
   chatCnt: ['在线咨询人数'],
   // 好评：日报表给「新增好评数(条)」（当日新增），页面「新增好评数（条）」列直接用它
   revCnt: ['新增好评数'],
+  // 门店优惠码（2026-10-31 新增格式）：同一门店同一天按「码类型」拆成多行
+  //（全部码 / 门店码 / 商品码 / 职人码 / 品牌码），只取「全部码」= 合计口径。
+  // 页面「优惠码扫码量（近7日）」←「支付订单(个)」。
+  codeType: ['码类型'],
+  qrScan: ['支付订单'],
 };
 // 三组指标同时出现才认定为店铺日报表（单组表仍走原来的 flow / chat / trade 分支）
 function isDailyReportHeader(hdr) {
@@ -753,6 +761,13 @@ async function parsePlatFile(file) {
         const unmatched = new Set();
         for (let r = dh.dataStart; r < grid.length; r++) {
           const row = grid[r] || [];
+          // 门店优惠码：同店同天有「全部码 / 门店码 / 商品码 / 职人码 / 品牌码」多行，
+          // 只有「全部码」是合计口径（其余为子集，支付订单多为空）。不筛会让后一行覆盖掉全部码。
+          // 旧版报表没有「码类型」列（ix.codeType < 0）→ 不做筛选，行为不变。
+          if (ix.codeType >= 0) {
+            const ct = String(row[ix.codeType] == null ? '' : row[ix.codeType]).trim();
+            if (ct && ct !== '全部码') continue;
+          }
           const date = parseDateCell(row[ix.date]);
           if (!date) continue;
           const rawName = row[ix.store] == null ? '' : String(row[ix.store]).trim();
@@ -760,7 +775,7 @@ async function parsePlatFile(file) {
           if (!st) { if (rawName) unmatched.add(rawName); continue; }
           const pick = (k) => (ix[k] >= 0 ? row[ix[k]] : null);
           const vals = {};
-          ['expo', 'visit', 'orderU', 'orderC', 'orderAmt', 'woU', 'woC', 'woAmt', 'chatCnt', 'revCnt']
+          ['expo', 'visit', 'orderU', 'orderC', 'orderAmt', 'woU', 'woC', 'woAmt', 'realWo', 'chatCnt', 'revCnt', 'qrScan']
             .forEach((k) => { if (ix[k] >= 0) vals[k] = platNum(pick(k)); });
           const sec = cleanCell(pick('replySec'), 'sec');
           if (isNum(sec)) vals.replySec = sec;
@@ -819,11 +834,13 @@ async function parsePlatFile(file) {
     } else {
       idx.orderU = colIdx(hdr, ['下单人数']);
       idx.orderC = colIdx(hdr, ['下单券数']);
-      // 下单金 / 总核销金额：与店铺日报表同一口径（核销售价金额 / 商家优惠后核销额 优先），再回落到通用列名
-      idx.orderAmt = colIdx(hdr, ['核销售价金额', '下单金额'], '原价');
+      // 下单金 / 总核销金额 / 实际核销：与店铺日报表同一口径
+      // （下单售价金额 / 核销售价金额 / 商家优惠后核销额），缺列时按原顺序回退
+      idx.orderAmt = colIdx(hdr, ['下单售价金额', '核销售价金额', '下单金额'], '原价');
       idx.woU = colIdx(hdr, ['核销人数']);
       idx.woC = colIdx(hdr, ['核销券数']);
-      idx.woAmt = colIdx(hdr, ['商家优惠后核销额', '核销金额'], '原价');
+      idx.woAmt = colIdx(hdr, ['核销售价金额', '商家优惠后核销额', '核销金额'], '原价');
+      idx.realWo = colIdx(hdr, ['商家优惠后核销额']);
     }
     const rows = [];
     for (let r = hi + 1; r < grid.length; r++) {
@@ -843,6 +860,7 @@ async function parsePlatFile(file) {
         vals.woU = platNum(row[idx.woU]);
         vals.woC = platNum(row[idx.woC]);
         vals.woAmt = platNum(row[idx.woAmt]);
+        if (idx.realWo >= 0) vals.realWo = platNum(row[idx.realWo]);
       } else {
         const sec = cleanCell(row[idx.replySec], 'sec');
         const p30 = cleanCell(row[idx.reply30], 'pct');
@@ -1038,7 +1056,7 @@ async function onFilePromo(file) {
  * （无该列时权重取 1，退化为简单平均）。
  * ===================================================================== */
 let _platCache = { key: '', data: null };
-const PLAT_SUM_KEYS = ['expo', 'visit', 'orderU', 'orderC', 'orderAmt', 'woU', 'woC', 'woAmt', 'revCnt'];
+const PLAT_SUM_KEYS = ['expo', 'visit', 'orderU', 'orderC', 'orderAmt', 'woU', 'woC', 'woAmt', 'realWo', 'revCnt', 'qrScan'];
 
 /* 「美团数据（曝光/下单/核销）」「美团榜单维护及客资转化」两组，表头写的就是「填前一天数据」：
    美团/点评后台当天出不了当天数，报表日期 D 的这一行填的是 D-1 的数。
@@ -1106,6 +1124,8 @@ function platAgg() {
       }
     }
   });
+  // 优惠码扫码量（近7日）：口径与其他美团数据列一致 —— 当日 = D-1，月累计 = 当月 1 日 ~ D-1 累加
+  //（数据源已从七大店铺总表改为店铺日报表的「支付订单(个)」，见 PLAT_SUM_KEYS）
   STORE_KEYS.forEach((k) => {
     const c = cum[k];
     if (!c) return;
@@ -1325,7 +1345,8 @@ function cellValue(storeKey, field, which) {
   if (Object.prototype.hasOwnProperty.call(state.manual, mk)) {
     return { v: state.manual[mk], kind: 'manual' };
   }
-  // 「美团数据」的剩余列与「好评维护」组取【前一天】的七大店铺总表；评分 / 榜单 / 业绩 / 客量取报表当日
+  // 「美团数据」的剩余列、好评维护组、店铺评分（美团/点评星级）取【前一天】的七大店铺总表；
+  // 榜单 / 业绩 / 客量取报表当日
   const isD1 = state.source === 'auto' && D1_SHEET_FIELDS.indexOf(field) >= 0;
   const recDate = isD1 ? (sheetDate() || date) : date;
   const rec = (state.rows[recDate] || {})[storeKey] || {};
@@ -1341,15 +1362,13 @@ function cellValue(storeKey, field, which) {
 
   // 平台三表（客流 / 在线咨询 / 门店交易）优先于七大店铺总表的同名列；
   // 「仅总表」模式（source === 'sheet'）下跳过，用于和原表核对。
+  // 店铺评分（mt / dp）也走这条：platAgg 的 today 取 platDate()=D-1，cum 取 ≤D-1 的最近一次评分。
   if (state.source === 'auto' && PLAT_FIELDS.indexOf(field) >= 0) {
     const p = platAgg();
     const pr = p && p[which] ? p[which][storeKey] : null;
-    if (pr && isNum(pr[field])) return { v: pr[field], kind: 'plat' };
-  }
-  // 评分（美团 / 点评星级）：时点值，取报表当日（D）；店铺日报表优先于七大店铺总表
-  if (state.source === 'auto' && SCORE_FIELDS.indexOf(field) >= 0) {
-    const r = (state.daily[date] || {})[storeKey];
-    if (r && isNum(r[field]) && r[field] > 0) return { v: r[field], kind: 'plat' };
+    const isScore = field === 'mt' || field === 'dp';
+    // 星级 0 视为「暂无评分」→ 不覆盖，继续回落到七大店铺总表
+    if (pr && isNum(pr[field]) && (!isScore || pr[field] > 0)) return { v: pr[field], kind: 'plat' };
   }
 
   // 自动列
@@ -1862,6 +1881,7 @@ async function init() {
   syncDateRange();
   autoPickDate();
   render();
+  warnStalePlat();
 
   // 共用数据（订单 / VAB / 历史明细）异步补入，最多等 4s；超时也不影响页面可用。
   // 【2026-10-31 修复】超时后不再「就这样了」：历史明细动辄数万行，IndexedDB 读库 + JSON 解析
@@ -1881,9 +1901,25 @@ async function init() {
   }
 }
 
+/* 旧版本导入的店铺日报数据没有 realWo（实际核销）字段 → 页面「实际核销（元）」会空着。
+   这里一次性提示重新导入，避免被当成功能故障（口径变更后必须重导一次才补齐新字段）。 */
+function warnStalePlat() {
+  const meta = state.meta.plat;
+  if (!meta || !meta.dates) return;
+  let hasWo = false, hasReal = false;
+  Object.keys(state.daily).forEach((d) => {
+    const day = state.daily[d] || {};
+    Object.keys(day).forEach((k) => {
+      const r = day[k] || {};
+      if (isNum(r.woAmt)) hasWo = true;
+      if (isNum(r.realWo)) hasReal = true;
+    });
+  });
+  if (hasWo && !hasReal) toast('平台数据为旧版本，缺「实际核销」字段，请重新导入店铺日报表', 'warn', 9000);
+}
+
 /** 读入共享数据后的统一收尾：签名有变化才重算重绘；返回是否发生了重绘 */
-function applySharedNow() {
-  const before = _sharedSig;
+function applySharedNow() {  const before = _sharedSig;
   const after = sharedSig();
   if (before && before === after) return false;
   _sharedSig = after;
