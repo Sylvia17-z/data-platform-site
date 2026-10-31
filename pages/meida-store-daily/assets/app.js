@@ -116,7 +116,7 @@ const COLS = [
   { k: 'roiTgt', label: '目标', g: 8, w: 64, sch: 'AA', type: 'text', zone: 'c' },
   { k: 'roiAct', label: '实际', g: 8, w: 84, sch: 'AB', type: 'text', zone: 'c' },
   { k: 'revTgt', label: '好评目标', g: 9, w: 70, sch: 'AC', type: 'int', zone: 'c' },
-  { k: 'revCnt', label: '月累计好评数量', g: 9, w: 88, sch: 'AD', type: 'int', zone: 'c' },
+  { k: 'revCnt', label: '新增好评数（条）', g: 9, w: 96, sch: 'AD', type: 'int', zone: 'c' },
   { k: 'revRate', label: '好评完成率', g: 9, w: 78, sch: 'AE', type: 'pct', zone: 'c' },
   { k: 'qrScan', label: '优惠码扫码量（近7日）', g: 9, w: 116, sch: 'AF', type: 'int', zone: 'c' },
   { k: 'replySec', label: '昨日咨客平均回复时长（秒）', g: 9, w: 150, sch: 'AG', type: 'sec', zone: 'c' },
@@ -315,46 +315,67 @@ function reviveOrders(arr) {
   }).filter((r) => r && r.payTime);
 }
 
-// 读取订单：先 localStorage（快），再 IndexedDB（大容量兜底），取行数更多者
+// 读取订单：localStorage 与 IndexedDB 各存一份，按时间戳取【更新】的那份
+// （旧实现「取行数更多者」会选到历史大快照，导致本页与「日业绩报表」用不同订单集，
+//  表现为当日一致、月累计不一致）
 async function loadSharedOrders() {
-  let best = [];
-  const raw = lsGet(LS.orders);
-  if (raw) {
-    try { const o = JSON.parse(raw); if (Array.isArray(o.orders)) best = reviveOrders(o.orders); state.ordersTs = Number(o.ts) || 0; } catch (e) {}
-  }
-  const idbRaw = await idbGet(LS.orders);
-  if (typeof idbRaw === 'string') {
+  const parse = (raw) => {
+    if (!raw || typeof raw !== 'string') return null;
     try {
-      const o = JSON.parse(idbRaw);
-      if (Array.isArray(o.orders) && o.orders.length > best.length) { best = reviveOrders(o.orders); state.ordersTs = Number(o.ts) || 0; }
+      const o = JSON.parse(raw);
+      if (Array.isArray(o.orders)) return { orders: reviveOrders(o.orders), ts: Number(o.ts) || 0 };
     } catch (e) {}
-  }
-  state.orders = best;
-  return best;
+    return null;
+  };
+  const a = parse(lsGet(LS.orders));
+  const b = parse(await idbGet(LS.orders));
+  let chosen = a;
+  if (!chosen) chosen = b;
+  else if (b && (b.ts > chosen.ts || (b.ts === chosen.ts && b.orders.length > chosen.orders.length))) chosen = b;
+  state.orders = chosen ? chosen.orders : [];
+  state.ordersTs = chosen ? chosen.ts : 0;
+  return state.orders;
 }
 async function loadSharedVab() {
-  let raw = lsGet(LS.vab);
-  if (!raw) raw = await idbGet(LS.vab);
-  if (typeof raw !== 'string') return;
-  try {
-    const o = JSON.parse(raw);
-    if (Array.isArray(o.set)) state.vabSet = new Set(o.set.map((x) => String(x)));
-  } catch (e) {}
+  const parse = (raw) => {
+    if (!raw || typeof raw !== 'string') return null;
+    try {
+      const o = JSON.parse(raw);
+      if (Array.isArray(o.set)) return { set: o.set.map((x) => String(x)), ts: Number(o.ts) || 0 };
+    } catch (e) {}
+    return null;
+  };
+  const a = parse(lsGet(LS.vab));
+  const b = parse(await idbGet(LS.vab));
+  let chosen = a;
+  if (!chosen) chosen = b;
+  else if (b && (b.ts > chosen.ts || (b.ts === chosen.ts && b.set.length > chosen.set.length))) chosen = b;
+  if (chosen) state.vabSet = new Set(chosen.set);
 }
 async function loadSharedHist() {
-  let raw = lsGet(LS.hist);
-  if (!raw) raw = await idbGet(LS.hist);
-  if (typeof raw !== 'string') return;
-  try {
-    const o = JSON.parse(raw);
-    if (Array.isArray(o.histOrders)) {
-      state.histOrders = o.histOrders.map((r) => {
-        if (r && typeof r.payTime === 'string') r.payTime = new Date(r.payTime);
-        return r;
-      }).filter((r) => r && r.payTime);
-      state.meta.histTs = Number(o.ts) || 0;
-    }
-  } catch (e) {}
+  const parse = (raw) => {
+    if (!raw || typeof raw !== 'string') return null;
+    try {
+      const o = JSON.parse(raw);
+      if (Array.isArray(o.histOrders)) {
+        const list = o.histOrders.map((r) => {
+          if (r && typeof r.payTime === 'string') r.payTime = new Date(r.payTime);
+          return r;
+        }).filter((r) => r && r.payTime);
+        return { list, ts: Number(o.ts) || 0 };
+      }
+    } catch (e) {}
+    return null;
+  };
+  const a = parse(lsGet(LS.hist));
+  const b = parse(await idbGet(LS.hist));
+  let chosen = a;
+  if (!chosen) chosen = b;
+  else if (b && (b.ts > chosen.ts || (b.ts === chosen.ts && b.list.length > chosen.list.length))) chosen = b;
+  if (chosen) {
+    state.histOrders = chosen.list;
+    state.meta.histTs = chosen.ts;
+  }
 }
 
 // 写入订单（与日业绩报表同格式同键，写后需回到该页刷新才会重算 ③④⑤）
@@ -584,7 +605,13 @@ async function onFileStores(file) {
  * 列一律**精确名优先**：如「下单金额」不能误取「下单金额（原价）」，
  * 「平均响应时长」不能误取「平均响应时长均值 / 优秀值」。
  * ===================================================================== */
-const PLAT_FIELDS = ['expo', 'visit', 'orderU', 'orderC', 'orderAmt', 'woU', 'woC', 'woAmt', 'replySec', 'reply30'];
+const PLAT_FIELDS = ['expo', 'visit', 'orderU', 'orderC', 'orderAmt', 'woU', 'woC', 'woAmt', 'replySec', 'reply30', 'revCnt'];
+/* 「美团数据」组里平台三表不覆盖的列（代金券 / 实际核销）同样取【前一天】的七大店铺总表；
+   「美团榜单维护及客资转化」组（好评 / 优惠码 / 回复时长）同理。
+   业绩 / 客量 / 评分 / 投产比仍取报表当日。 */
+const D1_SHEET_FIELDS = ['vcC', 'vcAmt', 'realWo', 'revTgt', 'revCnt', 'revRate', 'qrScan', 'replySec', 'reply30'];
+/* 评分（美团 / 点评）是时点值，永远取报表当日，不跟随 D-1 */
+const SCORE_FIELDS = ['mt', 'dp'];
 const PLAT_TYPE_LABEL = { flow: '客流', chat: '在线咨询', trade: '门店交易', daily: '店铺日报' };
 const PLAT_TYPE_SHORT = { flow: '客流', chat: '咨询', trade: '交易', daily: '日报' };
 
@@ -669,6 +696,8 @@ const DAILY_COLS = {
   replySec: ['平均响应时长'],
   reply30: ['30秒内回复率'],
   chatCnt: ['在线咨询人数'],
+  // 好评：日报表给「新增好评数(条)」（当日新增），页面「新增好评数（条）」列直接用它
+  revCnt: ['新增好评数'],
 };
 // 三组指标同时出现才认定为店铺日报表（单组表仍走原来的 flow / chat / trade 分支）
 function isDailyReportHeader(hdr) {
@@ -731,7 +760,7 @@ async function parsePlatFile(file) {
           if (!st) { if (rawName) unmatched.add(rawName); continue; }
           const pick = (k) => (ix[k] >= 0 ? row[ix[k]] : null);
           const vals = {};
-          ['expo', 'visit', 'orderU', 'orderC', 'orderAmt', 'woU', 'woC', 'woAmt', 'chatCnt']
+          ['expo', 'visit', 'orderU', 'orderC', 'orderAmt', 'woU', 'woC', 'woAmt', 'chatCnt', 'revCnt']
             .forEach((k) => { if (ix[k] >= 0) vals[k] = platNum(pick(k)); });
           const sec = cleanCell(pick('replySec'), 'sec');
           if (isNum(sec)) vals.replySec = sec;
@@ -1009,7 +1038,7 @@ async function onFilePromo(file) {
  * （无该列时权重取 1，退化为简单平均）。
  * ===================================================================== */
 let _platCache = { key: '', data: null };
-const PLAT_SUM_KEYS = ['expo', 'visit', 'orderU', 'orderC', 'orderAmt', 'woU', 'woC', 'woAmt'];
+const PLAT_SUM_KEYS = ['expo', 'visit', 'orderU', 'orderC', 'orderAmt', 'woU', 'woC', 'woAmt', 'revCnt'];
 
 /* 「美团数据（曝光/下单/核销）」「美团榜单维护及客资转化」两组，表头写的就是「填前一天数据」：
    美团/点评后台当天出不了当天数，报表日期 D 的这一行填的是 D-1 的数。
@@ -1107,6 +1136,20 @@ function promoDate() {
   if (!prev) return '';
   const ds = Object.keys(state.promo).filter((d) => d && Object.keys(state.promo[d] || {}).length);
   if (!ds.length) return prev;                                  // 还没有推广费数据：仍按前一天（显示 —）
+  if (ds.indexOf(prev) >= 0) return prev;
+  const earlier = ds.filter((d) => d < prev).sort();
+  if (earlier.length) return earlier[earlier.length - 1];       // 用 ≤ D-1 的最近一天
+  return ds.indexOf(date) >= 0 ? date : prev;
+}
+
+/* 「美团数据」剩余列 + 「好评维护」组取的「前一天」：与 platDate() 同规则，作用在七大店铺总表的日期集合上 */
+function sheetDate() {
+  const date = state.date;
+  if (!date) return '';
+  const prev = addDays(date, -1);
+  if (!prev) return '';
+  const ds = Object.keys(state.rows).filter((d) => d && Object.keys(state.rows[d] || {}).length);
+  if (!ds.length) return prev;                                  // 还没有总表数据：仍按前一天（显示 —）
   if (ds.indexOf(prev) >= 0) return prev;
   const earlier = ds.filter((d) => d < prev).sort();
   if (earlier.length) return earlier[earlier.length - 1];       // 用 ≤ D-1 的最近一天
@@ -1236,6 +1279,32 @@ function computeAgg() {
  * ===================================================================== */
 function manualKey(date, storeKey, field) { return date + '|' + storeKey + '|' + field; }
 function storeByKey(key) { return STORES.find((s) => s.key === key) || null; }
+
+/* 月度目标类字段：初诊目标 / 客量目标 / 投产比目标 / 好评目标。
+   只需在每月月初第一天填一次，之后各日沿用 —— 取「≤ 报表日的最近一次填写值」（限制在报表日所在月内）。 */
+const TARGET_FIELDS = ['tgtAmt', 'tgtVis', 'roiTgt', 'revTgt'];
+function monthTarget(storeKey, field, which, upto) {
+  const date = upto || state.date;
+  if (!date) return undefined;
+  const day = iso2date(date);
+  const start = fmtDate(new Date(day.getFullYear(), day.getMonth(), 1));
+  const ds = Object.keys(state.rows)
+    .filter((d) => d && d >= start && d <= date && Object.keys(state.rows[d] || {}).length)
+    .sort()
+    .reverse();
+  const pick = (v) => (v !== undefined && v !== null && v !== '');
+  for (const d of ds) {
+    const mk = manualKey(d, storeKey, field);          // 手工填写优先（含月中改目标）
+    if (Object.prototype.hasOwnProperty.call(state.manual, mk) && pick(state.manual[mk])) return state.manual[mk];
+    const rec = (state.rows[d] || {})[storeKey];
+    if (!rec) continue;
+    const a = (rec[which] || {})[field];
+    if (pick(a)) return a;
+    const b = (rec[which === 'today' ? 'cum' : 'today'] || {})[field];
+    if (pick(b)) return b;
+  }
+  return undefined;
+}
 /** 店铺展示名：手工改名优先（不随日期变化，导入时的名称匹配仍用 STORES 原名） */
 function storeName(store) {
   if (!store) return '';
@@ -1256,11 +1325,19 @@ function cellValue(storeKey, field, which) {
   if (Object.prototype.hasOwnProperty.call(state.manual, mk)) {
     return { v: state.manual[mk], kind: 'manual' };
   }
-  const rec = (state.rows[date] || {})[storeKey] || {};
+  // 「美团数据」的剩余列与「好评维护」组取【前一天】的七大店铺总表；评分 / 榜单 / 业绩 / 客量取报表当日
+  const isD1 = state.source === 'auto' && D1_SHEET_FIELDS.indexOf(field) >= 0;
+  const recDate = isD1 ? (sheetDate() || date) : date;
+  const rec = (state.rows[recDate] || {})[storeKey] || {};
   const shared = ['pm', 'op', 'mt', 'dp', 'rank'];
   let sheetVal;
   if (shared.includes(field)) sheetVal = rec[field];
   else sheetVal = (rec[which] || {})[field];
+  // 月度目标只需月初填一次：当天没有值时，沿用本月最近一次填写值
+  if (TARGET_FIELDS.indexOf(field) >= 0 && (sheetVal === undefined || sheetVal === null || sheetVal === '')) {
+    const t = monthTarget(storeKey, field, which, recDate);
+    if (t !== undefined) sheetVal = t;
+  }
 
   // 平台三表（客流 / 在线咨询 / 门店交易）优先于七大店铺总表的同名列；
   // 「仅总表」模式（source === 'sheet'）下跳过，用于和原表核对。
@@ -1269,11 +1346,10 @@ function cellValue(storeKey, field, which) {
     const pr = p && p[which] ? p[which][storeKey] : null;
     if (pr && isNum(pr[field])) return { v: pr[field], kind: 'plat' };
   }
-  // 评分（美团 / 点评星级）：店铺日报表带来的值优先于七大店铺总表
-  if (state.source === 'auto' && (field === 'mt' || field === 'dp')) {
-    const p = platAgg();
-    const pr = p && p[which] ? p[which][storeKey] : null;
-    if (pr && isNum(pr[field]) && pr[field] > 0) return { v: pr[field], kind: 'plat' };
+  // 评分（美团 / 点评星级）：时点值，取报表当日（D）；店铺日报表优先于七大店铺总表
+  if (state.source === 'auto' && SCORE_FIELDS.indexOf(field) >= 0) {
+    const r = (state.daily[date] || {})[storeKey];
+    if (r && isNum(r[field]) && r[field] > 0) return { v: r[field], kind: 'plat' };
   }
 
   // 自动列
@@ -1298,6 +1374,21 @@ function cellValue(storeKey, field, which) {
     const pa = promoAgg();
     const pv = pa && pa[which] ? pa[which][storeKey] : null;
     if (isNum(pv)) return { v: pv, kind: 'promo' };
+  }
+  // 投产比「实际」= 1 :（初诊业绩月累计 / 推广费月累计），固定两位小数
+  if (col && col.k === 'roiAct' && state.source === 'auto') {
+    const agg = computeAgg();
+    const amt = agg && agg.cum ? (agg.cum[storeKey] || {}).actAmt : null;
+    const pa = promoAgg();
+    const fee = pa && pa.cum ? pa.cum[storeKey] : null;
+    if (isNum(amt) && isNum(fee) && fee > 0) return { v: '1:' + (amt / fee).toFixed(2), kind: 'auto' };
+  }
+  // 好评完成率 = 月累计新增好评 / 好评目标（有日报表时才算，否则回落总表原值）
+  if (col && col.k === 'revRate' && state.source === 'auto') {
+    const p = platAgg();
+    const cum = p && p.cum ? (p.cum[storeKey] || {}).revCnt : null;
+    const tgt = cellValue(storeKey, 'revTgt', which).v;
+    if (isNum(cum) && isNum(tgt) && tgt > 0) return { v: cum / tgt, kind: 'auto' };
   }
   if (sheetVal !== undefined) return normSheet(sheetVal);
   return { v: null, kind: null };
@@ -1772,18 +1863,37 @@ async function init() {
   autoPickDate();
   render();
 
-  // 共用数据（订单 / VAB / 历史明细）异步补入，最多等 4s；超时也不影响页面可用
-  await Promise.race([
-    (async () => { await loadSharedOrders(); await loadSharedVab(); await loadSharedHist(); })(),
-    new Promise((r) => setTimeout(r, 4000)),
-  ]);
-  syncDateRange();
-  autoPickDate();
+  // 共用数据（订单 / VAB / 历史明细）异步补入，最多等 4s；超时也不影响页面可用。
+  // 【2026-10-31 修复】超时后不再「就这样了」：历史明细动辄数万行，IndexedDB 读库 + JSON 解析
+  // 可能超过 4s，此前超时即弃 → 页面停在「无历史明细」的口径上（规则B停用），
+  // 表现为月累计比日业绩报表偏小、而当日数值与明细条数却完全一致。现在读完后必定补一次重绘。
+  let settled = false;
+  // 三份数据互不依赖，并行读：串行 await 会让三次 IndexedDB 读库耗时叠加
+  //（订单 3s + VAB 1s + 历史明细 5s = 9s，直接冲垮 4s 首屏窗口）
+  const loadShared = Promise.all([loadSharedOrders(), loadSharedVab(), loadSharedHist()])
+    .then(() => { settled = true; }, () => { settled = true; });
+  await Promise.race([loadShared, new Promise((r) => setTimeout(r, 4000))]);
+  applySharedNow();
+  bindSharedSync();
+  if (!settled) {
+    // 迟到的共享数据：读完后补一次重绘（大体积历史明细读库 >4s 时的关键修复）
+    loadShared.then(() => { applySharedNow(); });
+  }
+}
+
+/** 读入共享数据后的统一收尾：签名有变化才重算重绘；返回是否发生了重绘 */
+function applySharedNow() {
+  const before = _sharedSig;
+  const after = sharedSig();
+  if (before && before === after) return false;
+  _sharedSig = after;
   _aggCache.key = '';
   _platCache.key = '';
+  _histCache = { sig: '', date: '', set: new Set() };
+  syncDateRange();
+  autoPickDate();
   render();
-  _sharedSig = sharedSig();   // 记下基线签名，供 refreshShared 比对
-  bindSharedSync();
+  return true;
 }
 
 /* ---------------- 共享数据自动同步（2026-10-30） ----------------
@@ -1805,9 +1915,8 @@ async function refreshShared(force) {
   const prevMax = allDates().slice(-1)[0] || '';
   const prevDate = state.date;
   const before = _sharedSig || sharedSig();
-  await loadSharedOrders();
-  await loadSharedVab();
-  await loadSharedHist();
+  // 并行读：串行 await 会让三次 IndexedDB 读库耗时叠加（大体积历史明细时可达数秒）
+  await Promise.all([loadSharedOrders(), loadSharedVab(), loadSharedHist()]);
   const after = sharedSig();
   _sharedSig = after;
   if (after === before) return false;
@@ -1831,23 +1940,62 @@ function bindSharedSync() {
   document.addEventListener('visibilitychange', () => { if (!document.hidden) { askShellPayload(); refreshShared(false); } });
   window.addEventListener('focus', () => { askShellPayload(); refreshShared(false); });
   // 外壳桥接：部署环境下 iframe 可能是隔离/一次性 origin，本页 localStorage 与外壳不通，
-  // 订单由外壳保管（日业绩页 dp:persist → 壳 localStorage）。因此主动索取一次，并接收推送。
+  // 订单 / 历史明细 / VAB 名单由外壳保管（日业绩页 dp:persist → 壳 localStorage）。
+  // 因此主动索取一次，并接收推送。
+  // 【2026-10-31 修复】此前只认订单：历史明细拿不到 → 规则B（营销部顾客一年内无消费记录视为初诊）
+  // 停用 → 月累计比日业绩报表偏小，而明细条数与当日数值却一致。
   window.addEventListener('message', (e) => {
     const m = (e && e.data) || null;
     if (!m || typeof m !== 'object' || m.type !== 'dp:payload') return;
-    if (m.key !== LS.orders || typeof m.payload !== 'string') return;
-    applyOrdersPayload(m.payload);
+    if (typeof m.payload !== 'string') return;
+    if (m.key === LS.orders) { applyOrdersPayload(m.payload); return; }
+    if (m.key === LS.hist) { applyHistPayload(m.payload); return; }
+    if (m.key === LS.vab) { applyVabPayload(m.payload); return; }
   });
   askShellPayload();
 }
 
-/** 向外壳索取共享订单（壳收到 dp:request 后回发 dp:payload） */
+/** 向外壳索取共享数据（订单 / 历史明细 / VAB） */
 function askShellPayload() {
   try {
     if (window.parent && window.parent !== window) {
-      window.parent.postMessage({ type: 'dp:request', key: LS.orders }, '*');
+      [LS.orders, LS.hist, LS.vab].forEach((k) => window.parent.postMessage({ type: 'dp:request', key: k }, '*'));
     }
   } catch (e) { /* 跨域/无父窗口：忽略 */ }
+}
+
+/** 应用外壳推来的历史明细快照：比本页现有数据新才覆盖，避免用旧快照回退 */
+function applyHistPayload(raw) {
+  let o = null;
+  try { o = JSON.parse(raw); } catch (e) { return false; }
+  if (!o || !Array.isArray(o.histOrders)) return false;
+  const ts = Number(o.ts) || 0;
+  const n = o.histOrders.length;
+  if (n === (state.histOrders || []).length && ts === (state.meta.histTs || 0)) return false;
+  if (ts && ts < (state.meta.histTs || 0) && n <= (state.histOrders || []).length) return false;
+  state.histOrders = o.histOrders
+    .map((r) => { if (r && typeof r.payTime === 'string') r.payTime = new Date(r.payTime); return r; })
+    .filter((r) => r && r.payTime);
+  state.meta.histTs = ts;
+  _aggCache.key = '';
+  _histCache = { sig: '', date: '', set: new Set() };
+  _sharedSig = sharedSig();
+  render();
+  return true;
+}
+
+/** 应用外壳推来的 VAB 名单：集合有变化才覆盖 */
+function applyVabPayload(raw) {
+  let o = null;
+  try { o = JSON.parse(raw); } catch (e) { return false; }
+  if (!o || !Array.isArray(o.set)) return false;
+  const next = new Set(o.set.map((x) => String(x)));
+  if (next.size === state.vabSet.size && [...next].every((x) => state.vabSet.has(x))) return false;
+  state.vabSet = next;
+  _aggCache.key = '';
+  _sharedSig = sharedSig();
+  render();
+  return true;
 }
 
 /** 应用外壳推来的订单快照：比本页现有数据新才覆盖，避免用旧快照回退 */

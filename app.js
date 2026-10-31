@@ -12,7 +12,7 @@ const state = { modules: [], tabs: [], current: null };
 // 发布版本号：由 index.html 顶部的 <script>window.SITE_VER=... 注入，作为唯一权威来源，避免双文件版本漂移。
 // 此处保留兜底常量，仅在脱离 Shell 独立打开时生效。用于 iframe 缓存穿透，确保线上改动即时可见。
 // file:// 双击打开时不加查询串（带查询串的 iframe 在 file:// 下可能无法加载）。
-const SITE_VER = (typeof window !== 'undefined' && window.SITE_VER) || '20261028b';
+const SITE_VER = (typeof window !== 'undefined' && window.SITE_VER) || '20261031a';
 // 每次页面加载的唯一戳：拼到所有子页 iframe URL 之后，确保浏览器每次都重新拉取最新脚本，
 // 彻底规避「服务器无 Cache-Control 时浏览器启发式缓存旧脚本导致刷新丢数据」的问题。
 // file:// 双击打开时不加查询串。
@@ -103,24 +103,65 @@ const $ = (sel) => document.querySelector(sel);
 // 子页面（iframe）持久化桥接：把 iframe 内部的订单数据交由稳定的顶层壳窗口保管，
 // 避免部署环境下 iframe 处于一次性 / 跨域 origin 导致其内部 localStorage / IndexedDB 刷新后丢失。
 // 协议：iframe → 壳：dp:persist（写入）/ dp:request（索取）；壳 → iframe：dp:payload（推送 / 应答）。
+// 共享数据（订单 / 历史消费明细 / VAB 名单）在壳这一侧的双层保管：
+// localStorage 只有 ~5MB，历史明细整包（数万行）往往远超配额、写入静默失败 → 子页读不到 →
+// 「美大店铺日数据」的初诊规则B停用、月累计比日业绩报表偏小。故再落一份到壳窗口的 IndexedDB
+//（容量大），postMessage 传输不受体积限制，读取时以 IndexedDB 为准、localStorage 兜底。
+const DP_DB = 'dpBridge';
+const DP_KEYS = ['dailyPerformance_orders', 'dailyPerformance_hist', 'dailyPerformance_vab'];
+const dpMem = new Map();
+function dpOpen(){
+  return new Promise((res, rej) => {
+    try{
+      const r = indexedDB.open(DP_DB, 1);
+      r.onupgradeneeded = () => { try{ if(!r.result.objectStoreNames.contains('kv')) r.result.createObjectStore('kv'); }catch(_){} };
+      r.onsuccess = () => res(r.result);
+      r.onerror = () => rej(r.error);
+    }catch(e){ rej(e); }
+  });
+}
+function dpPut(key, payload){
+  dpMem.set(key, payload);
+  dpOpen().then(db => new Promise(res => {
+    try{
+      const tx = db.transaction('kv', 'readwrite');
+      tx.objectStore('kv').put(payload, key);
+      tx.oncomplete = () => res(true);
+      tx.onerror = () => res(false);
+    }catch(e){ res(false); }
+  })).catch(() => {});
+}
+function dpGet(key){
+  if(dpMem.has(key)) return Promise.resolve(dpMem.get(key));
+  let ls = null;
+  try{ ls = localStorage.getItem(key); }catch(_){}
+  return dpOpen().then(db => new Promise(res => {
+    try{
+      const r = db.transaction('kv', 'readonly').objectStore('kv').get(key);
+      r.onsuccess = () => res(r.result || ls);
+      r.onerror = () => res(ls);
+    }catch(e){ res(ls); }
+  })).catch(() => ls);
+}
 function pushEmbeddedState(frame){
-  try {
-    ['dailyPerformance_orders'].forEach(k => {
-      const saved = localStorage.getItem(k);
-      if(saved && frame.contentWindow) frame.contentWindow.postMessage({ type:'dp:payload', key:k, payload:saved }, '*');
-    });
-  } catch(_){}
+  if(!frame.contentWindow) return;
+  // 三份共享数据都要推：少推历史明细会让「美大店铺日数据」页的初诊判定规则B停用。
+  DP_KEYS.forEach(k => {
+    dpGet(k).then(payload => {
+      if(payload && frame.contentWindow) frame.contentWindow.postMessage({ type:'dp:payload', key:k, payload }, '*');
+    }).catch(() => {});
+  });
 }
 window.addEventListener('message', (e) => {
   const m = (e && e.data) || null;
   if(!m || typeof m !== 'object') return;
   if(m.type === 'dp:persist' && typeof m.key === 'string' && typeof m.payload === 'string'){
+    dpPut(m.key, m.payload);
     try { localStorage.setItem(m.key, m.payload); } catch(_){}
   } else if(m.type === 'dp:request' && typeof m.key === 'string'){
-    try {
-      const payload = localStorage.getItem(m.key);
-      if(e.source && e.source.postMessage) e.source.postMessage({ type:'dp:payload', key:m.key, payload: payload }, '*');
-    } catch(_){}
+    dpGet(m.key).then(payload => {
+      try { if(e.source && e.source.postMessage) e.source.postMessage({ type:'dp:payload', key:m.key, payload: payload || null }, '*'); } catch(_){}
+    });
   } else if(m.type === 'rbac:request'){
     // 子页（iframe）请求当前权限快照：回发 rbac:state 供其守卫禁用无权限操作
     try { if (e.source && e.source.postMessage) e.source.postMessage({ type:'rbac:state', payload: RBAC.snapshotForChild() }, '*'); } catch(_){}

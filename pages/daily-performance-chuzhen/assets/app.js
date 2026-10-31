@@ -256,14 +256,25 @@ function restoreOrders(){
   let raw = null;
   try{ raw = localStorage.getItem(ORDERS_STORAGE_KEY); }catch(e){ raw = null; }
   if(raw) applyOrdersRaw(raw);
-  // 异步回退：IndexedDB（localStorage 为空或不可用时兜底恢复）
+  // 异步兜底：IndexedDB。选片规则（2026-10-31 与「美大店铺日数据」页对齐）：ts 更新者优先；
+  // ts 相同取条数更多者。两页若各用一套规则，会选中不同订单快照 → 月累计口径不一致。
+  const lsMeta = safeParseOrdersMeta(raw);
   idbGet(ORDERS_STORAGE_KEY).then(saved => {
-    if(saved && typeof saved === 'string' && !raw){
-      if(applyOrdersRaw(saved) && typeof _postRestore === 'function') _postRestore();
-    }
+    const idbMeta = safeParseOrdersMeta(saved && typeof saved === 'string' ? saved : null);
+    if(!idbMeta || !idbMeta.n) return;
+    const newer = !lsMeta || !lsMeta.n
+      || idbMeta.ts > lsMeta.ts
+      || (idbMeta.ts === lsMeta.ts && idbMeta.n > lsMeta.n);
+    if(newer && applyOrdersRaw(saved) && typeof _postRestore === 'function') _postRestore();
   }).catch(()=>{});
   // 桥接父窗口：向壳请求持久化数据（与壳在 iframe load 时主动推送互补，覆盖壳监听尚未就绪等时序）
   try{ if(window.parent && window.parent !== window) window.parent.postMessage({ type:'dp:request', key:ORDERS_STORAGE_KEY }, '*'); }catch(e){}
+}
+// 订单快照元信息（只解析不落地）：{ ts, n }
+function safeParseOrdersMeta(raw){
+  if(!raw || typeof raw !== 'string') return null;
+  try{ const o = JSON.parse(raw); if(o && Array.isArray(o.orders)) return { ts: Number(o.ts) || 0, n: o.orders.length }; }catch(e){}
+  return null;
 }
 // IDB 异步恢复成功后由 initApp 注入的回调：重新渲染并触发重算
 let _postRestore = null;
@@ -436,6 +447,21 @@ function safeParseHist(raw){
   try{ const o = JSON.parse(raw); if(o && Array.isArray(o.histOrders)) return { orders: o.histOrders, ts: Number(o.ts) || 0 }; }catch(e){}
   return null;
 }
+/* 把当前内存里的历史明细落到本机（localStorage + IndexedDB + 壳窗口），但不改 ts、不触发上云。
+ * 【2026-10-31】云端恢复的 hist 原先只进内存（applyCloudObj 期间刻意不调 persistHist，防 ping-pong），
+ * 结果同源的「美大店铺日数据」页读不到历史明细 → 规则B停用 → 其月累计比本页偏小。
+ * 这里在「已从云端拿到 hist」之后补一次纯本地落盘，让两页口径一致。 */
+function writeHistLocal(){
+  if(!(state.histOrders||[]).length) return;
+  const payload = JSON.stringify({
+    histOrders: state.histOrders,
+    ts: state.histTs || Date.now(),
+    gz: (state.histGz && state.histGz.gz) || undefined
+  });
+  try{ localStorage.setItem(HIST_STORAGE_KEY, payload); }catch(e){ /* 配额超限：IndexedDB 兜底 */ }
+  idbSet(HIST_STORAGE_KEY, payload).catch(()=>{});
+  try{ if(window.parent && window.parent !== window) window.parent.postMessage({ type:'dp:persist', key:HIST_STORAGE_KEY, payload }, '*'); }catch(e){}
+}
 function restoreHist(){
   let raw = null;
   histClouded = false; // 本地恢复默认未上云（云端恢复会在 syncFromCloud 兜底里置真）
@@ -443,13 +469,17 @@ function restoreHist(){
   const lsParsed = safeParseHist(raw);
   // 合并恢复（2026-10-20 修复「陈旧 localStorage 遮蔽新 IDB 数据」）：
   // 同源两路——localStorage（快、但共享 5MB 配额易因其他页面数据超限而写入失败）与 IndexedDB（大容量可靠）。
-  // 两路都拿到后选「行数更多」者；IDB 优先于同等数量的 localStorage（localStorage 失败时残留的旧小快照会
-  // 遮蔽新写入的 IDB 大体积数据，表现为「导入后刷新数据被回退/清除」）。绝不直接用 localStorage 同步覆盖。
+  // 选片规则（2026-10-31 与「美大店铺日数据」页对齐）：ts 更新者优先；ts 相同取行数更多者；再相同取 IndexedDB。
+  // 两页必须用同一规则，否则会各自选中不同快照 → 初诊判定集合不同 → 月累计不一致。
   idbGet(HIST_STORAGE_KEY).then(saved => {
     const idbParsed = safeParseHist(saved && typeof saved === 'string' ? saved : null);
     let chosen = null, chosenRaw = null;
-    if(idbParsed && idbParsed.orders.length){ chosen = idbParsed; chosenRaw = saved; }
-    if(lsParsed && lsParsed.orders.length && (!chosen || lsParsed.orders.length > chosen.orders.length)){ chosen = lsParsed; chosenRaw = raw; }
+    [{ p: idbParsed, raw: saved }, { p: lsParsed, raw: raw }].forEach(c => {
+      if(!c.p || !c.p.orders.length) return;
+      if(!chosen){ chosen = c.p; chosenRaw = c.raw; return; }
+      const newer = c.p.ts > chosen.ts || (c.p.ts === chosen.ts && c.p.orders.length > chosen.orders.length);
+      if(newer){ chosen = c.p; chosenRaw = c.raw; }
+    });
     if(chosen && chosen.orders.length){
       if(applyHistRaw(chosenRaw)){
         invalidateMktKeyCaches();
@@ -652,6 +682,7 @@ async function applyCloudObj(obj){
           if(applyHistRaw(JSON.stringify({ histOrders: obj2.histOrders, ts: h.histTs || Number(obj.ts) || Date.now() }))){
             invalidateMktKeyCaches();
             if(typeof refreshHistMeta === 'function') refreshHistMeta();
+            writeHistLocal(); // 落本机，供「美大店铺日数据」页读取同一份明细（口径一致）
             if(typeof recompute === 'function') recompute(); // 异步解压完成后再重算一次（⑤清单判定）
           }
         }
@@ -662,6 +693,7 @@ async function applyCloudObj(obj){
       if(applyHistRaw(JSON.stringify({ histOrders: h.histOrders, ts: h.histTs || Number(obj.ts) || Date.now() }))){
         invalidateMktKeyCaches();
         if(typeof refreshHistMeta === 'function') refreshHistMeta();
+        writeHistLocal(); // 落本机，供「美大店铺日数据」页读取同一份明细（口径一致）
         if(state.orders.length > 0 && typeof runRestoredRecompute === 'function') runRestoredRecompute({ silent:true }); // 与 gz 分支对齐：恢复后重算
         touched = true;
       }
