@@ -1697,11 +1697,11 @@ function allDates() {
   return [...set].sort();
 }
 function syncDateRange() {
-  const ds = allDates();
+  // 不限制 date 输入的可选范围：报表日期允许选到今天乃至未来（平台数据按 D-1 取数，
+  // 当日订单仍可展示），若按数据范围设 max 会把「今天」挡在可选范围之外，导致无法切到今天。
   const el = $('report-date');
-  if (!ds.length) { el.removeAttribute('min'); el.removeAttribute('max'); return; }
-  el.min = ds[0];
-  el.max = ds[ds.length - 1];
+  el.removeAttribute('min');
+  el.removeAttribute('max');
 }
 function autoPickDate() {
   const ds = allDates();
@@ -1716,6 +1716,19 @@ function gotoLatest() {
   state.date = ds[ds.length - 1];
   render();
   toast('已跳到最新日期 ' + state.date, 'ok', 1600);
+}
+function gotoToday() {
+  const today = fmtDate(new Date());   // 真实本地日期（如 2026-11-02）
+  state.date = today;
+  _aggCache.key = '';
+  _platCache.key = '';
+  render();
+  const ds = allDates();
+  if (!ds.includes(today)) {
+    toast('已切到今天 ' + today + '（当日暂无导入数据，表格为空属正常）', 'ok', 2200);
+  } else {
+    toast('已切到今天 ' + today, 'ok', 1600);
+  }
 }
 
 /* =====================================================================
@@ -2074,6 +2087,7 @@ function bindUI() {
   });
   $('file-promo').addEventListener('change', (e) => { onFilePromo(e.target.files && e.target.files[0]); e.target.value = ''; });
   $('btn-latest').addEventListener('click', gotoLatest);
+  $('btn-today').addEventListener('click', gotoToday);
 
   $('report-date').addEventListener('change', (e) => {
     const v = e.target.value;

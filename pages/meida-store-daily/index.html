@@ -204,6 +204,7 @@
       <label class="fld"><span class="lb">报表日期</span>
         <span style="display:inline-flex;align-items:center;gap:6px;">
           <input type="date" id="report-date" class="ctl" />
+          <button class="btn" id="btn-today" title="报表日期切到今天（真实日期）" style="padding:0 11px;">今天</button>
           <button class="btn" id="btn-latest" title="跳到最新有数据的一天" style="padding:0 11px;">最新</button>
         </span>
       </label>
@@ -269,6 +270,7 @@
 
 <div class="toast" id="toast"></div>
 
+<script src="/shared/cloudbase-bridge.js?v=20261031b"></script>
 <script src="/shared/rbac.js?v=20261028a"></script>
 <script src="/shared/auth-gate.js?v=20261029a"></script>
 <script>document.write('<script src="assets/app.js?v=' + Date.now() + '"><\/script>');</script>
