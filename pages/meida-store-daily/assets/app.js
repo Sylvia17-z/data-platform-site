@@ -1142,22 +1142,17 @@ function platAgg() {
  * 四之四、门店报表（推广费）聚合
  * ---------------------------------------------------------------------
  * 数据源：门店报表_*.xlsx（A=日期 M-D / B=推广门店 / E=花费（元）= 推广费）。
- * 口径：当日取【报表当日】数据（D，缺失则回退 ≤ D 最近一天），与业绩 / 客量同一天口径；
- * 月累计 = 当月 1 日 ~ D 逐日累加。
+ * 口径：当日取【报表当日】数据（D），与业绩 / 客量同一天口径；当日无数据则显示空（—），不向前借用。
+ * 月累计 = 当月 1 日 ~ D 之间【有数据】的各日逐日累加。
  * 优先级：手工覆盖 > 门店报表文件 > 七大店铺总表（cellValue 内裁决）。
  * ===================================================================== */
 let _promoCache = { key: '', data: null };
 
-// 推广费按「报表当日」取数（与业绩 / 客量同一天口径），不再取前一天
+// 推广费按「报表当日」取数：只取报表日期自己当天的花费；当日无数据则显示空（—），不向前借用其他日期
 function promoDate() {
   const date = state.date;
   if (!date) return '';
-  const ds = Object.keys(state.promo).filter((d) => d && Object.keys(state.promo[d] || {}).length);
-  if (!ds.length) return date;                                  // 还没有推广费数据：用当天（显示 —）
-  if (ds.indexOf(date) >= 0) return date;                       // 优先报表当日
-  const earlier = ds.filter((d) => d < date).sort();
-  if (earlier.length) return earlier[earlier.length - 1];       // 回退 ≤ 当天最近一天
-  return ds.sort()[ds.sort().length - 1];                       // 只有更晚日期则取最近
+  return date;
 }
 
 /* 「美团数据」剩余列 + 「好评维护」组取的「前一天」：与 platDate() 同规则，作用在七大店铺总表的日期集合上 */
