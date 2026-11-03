@@ -1313,10 +1313,20 @@ function monthTarget(storeKey, field, which, upto) {
   if (!date) return undefined;
   const day = iso2date(date);
   const start = fmtDate(new Date(day.getFullYear(), day.getMonth(), 1));
-  const ds = Object.keys(state.rows)
-    .filter((d) => d && d >= start && d <= date && Object.keys(state.rows[d] || {}).length)
-    .sort()
-    .reverse();
+  // 候选日期 = 本月 ≤ 报表日中「有总表数据」的日期 ∪ 「手工填过该字段」的日期。
+  // 手工填目标的那天可能没有导入总表（state.rows 里没有该日），只看 state.rows 会漏掉，
+  // 导致次日起沿用时取不到月初填的目标值（11-01 填、11-03 变空）。
+  const dateSet = new Set();
+  Object.keys(state.rows).forEach((d) => {
+    if (d && d >= start && d <= date && Object.keys(state.rows[d] || {}).length) dateSet.add(d);
+  });
+  const suffix = '|' + storeKey + '|' + field;
+  Object.keys(state.manual).forEach((k) => {
+    if (!k || !k.endsWith(suffix)) return;
+    const d = k.slice(0, 10);                       // 手工键格式 'YYYY-MM-DD|门店|字段'
+    if (d >= start && d <= date) dateSet.add(d);
+  });
+  const ds = [...dateSet].sort().reverse();
   const pick = (v) => (v !== undefined && v !== null && v !== '');
   for (const d of ds) {
     const mk = manualKey(d, storeKey, field);          // 手工填写优先（含月中改目标）
