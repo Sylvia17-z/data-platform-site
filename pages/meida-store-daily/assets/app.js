@@ -32,6 +32,14 @@
 const $ = (id) => document.getElementById(id);
 const esc = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const pad2 = (n) => String(n).padStart(2, '0');
+// Excel 列字母 → 0 基索引（A→0 / AA→26）：解析七大店铺总表时按 sch 定位，COLS 中插入派生列也不会错位
+const colLetterToIdx = (letters) => {
+  const s = String(letters || '').trim().toUpperCase();
+  if (!s) return -1;
+  let n = 0;
+  for (let i = 0; i < s.length; i++) n = n * 26 + (s.charCodeAt(i) - 64);
+  return n - 1;
+};
 const fmtDate = (d) => (d ? `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}` : '');
 const iso2date = (s) => { const m = String(s || '').match(/^(\d{4})-(\d{2})-(\d{2})$/); return m ? new Date(+m[1], +m[2] - 1, +m[3]) : null; };
 const dayLabel = (s) => { const d = iso2date(s); return d ? `${d.getMonth() + 1}月${d.getDate()}日` : s; };
@@ -96,6 +104,8 @@ const COLS = [
   { k: 'tgtAmt', label: '初诊目标（T30）', g: 5, w: 92, sch: 'H', type: 'int' },
   { k: 'actAmt', label: '初诊业绩（T30）', g: 5, w: 94, sch: 'I', type: 'money', auto: 1 },
   { k: 'aov', label: '客单价', g: 5, w: 76, sch: 'J', type: 'money0', auto: 1 },
+  // 派生列：本月累计初诊业绩 / 月初初诊目标，百分比两位小数（无源表列，sch 留空）
+  { k: 'perfRate', label: '业绩完成率', g: 5, w: 88, sch: '', type: 'pct' },
   { k: 'lead', label: '有效客资人数', g: 6, w: 94, sch: 'K', type: 'int', auto: 1 },
   { k: 'tgtVis', label: '客量目标（T30）', g: 6, w: 88, sch: 'L', type: 'int' },
   { k: 'firstVis', label: '初诊成交客量（T30）', g: 6, w: 96, sch: 'M', type: 'int', auto: 1 },
@@ -143,7 +153,7 @@ const MERGED_FIELDS = ['store', 'pm', 'op', 'mt', 'dp', 'rank'];
 /* 「投产比」+「好评」两组里的 5 列：原始模板表里同店两行是纵向合并的（目标 1:4 / 实际 1:0.47 …），
    只有当两行取值确实不同时才保留两行（如好评目标 20 / 40）。故按「值相同 或 其中一行为空」动态合并。
    推广费（元）在模板里逐行独立，不参与。 */
-const COND_MERGE_FIELDS = ['roiTgt', 'roiAct', 'revTgt', 'revCnt', 'revRate'];
+const COND_MERGE_FIELDS = ['roiTgt', 'roiAct', 'revTgt', 'revCnt', 'revRate', 'perfRate'];
 const AUTO_KEYS = COLS.filter((c) => c.auto).map((c) => c.k);
 
 /* ---------------- 持久化键 ---------------- */
@@ -569,8 +579,9 @@ async function onFileStores(file) {
           const val = cleanCell(row[1 + idx], col.type);
           if (val !== null) rec[k] = val;
         });
-        COLS.forEach((col, ci) => {
-          if (ci <= 6) return;                      // A–G 已处理
+        COLS.forEach((col) => {
+          const ci = colLetterToIdx(col.sch);       // 按源表列字母定位（派生列 sch 为空 → 跳过）
+          if (ci < 0 || ci <= 6) return;            // 无源列，或 A–G 已单独处理
           const val = cleanCell(row[ci], col.type);
           if (val !== null) rec[bucket][col.k] = val;
         });
@@ -1394,6 +1405,14 @@ function cellValue(storeKey, field, which) {
     const pa = promoAgg();
     const fee = pa && pa.cum ? pa.cum[storeKey] : null;
     if (isNum(amt) && isNum(fee) && fee > 0) return { v: '1:' + (amt / fee).toFixed(2), kind: 'auto' };
+  }
+  // 业绩完成率 = 本月累计初诊业绩 / 初诊目标（目标为月度值：月初设定、当月沿用）
+  // 分母直接取「本月累计」行显示的目标值，保证与表内「初诊目标」列严格一致
+  if (col && col.k === 'perfRate' && state.source === 'auto') {
+    const agg = computeAgg();
+    const amt = agg && agg.cum ? (agg.cum[storeKey] || {}).actAmt : null;
+    const tgt = cellValue(storeKey, 'tgtAmt', 'cum').v;
+    if (isNum(amt) && isNum(tgt) && tgt > 0) return { v: amt / tgt, kind: 'auto' };
   }
   // 好评完成率 = 月累计新增好评 / 好评目标（有日报表时才算，否则回落总表原值）
   if (col && col.k === 'revRate' && state.source === 'auto') {
