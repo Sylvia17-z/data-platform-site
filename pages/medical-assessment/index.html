@@ -3284,12 +3284,12 @@ const PROJ_EXCLUDE = {
         + '\n\n清除后到店率 / 累计消费 / 重点项目统计将一并清空，需重新导入才能出报表，且不可恢复。继续？')) return;
     if(!confirm('再次确认：真的要清除以上全部数据吗？此操作不可恢复！')) return;
 
-    // 1) VAB 会员清单（内存 + 索引 + 本地持久化）
+    // 1) VAB 会员清单（内存 + 索引 + 本地持久化：直接移除键，不留空数组残留）
     App.vab = [];
     vabSelSet.clear();
     rebuildVabIndex();
     App.vabRev++;
-    persistVab();
+    try{ localStorage.removeItem(VAB_LS_KEY); }catch(e){}
 
     // 2) 领健 / ABC 明细（内存 + localStorage + IndexedDB）
     clearBiz('order');
