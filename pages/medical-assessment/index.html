@@ -38,8 +38,13 @@
   }
   .topbar h1{font-size:20px;margin:0;color:#fff;letter-spacing:.5px;}
   .topbar .sub{color:rgba(255,255,255,.78);font-size:12.5px;}
-  .topbar .home-link{margin-left:auto;color:#fff;opacity:.92;text-decoration:none;font-size:13px;border:1px solid rgba(255,255,255,.45);border-radius:8px;padding:5px 12px;white-space:nowrap;}
+  .topbar-actions{display:flex;align-items:center;gap:8px;margin-left:auto;}
+  .topbar .home-link{color:#fff;opacity:.92;text-decoration:none;font-size:13px;border:1px solid rgba(255,255,255,.45);border-radius:8px;padding:5px 12px;white-space:nowrap;}
   .topbar .home-link:hover{background:rgba(255,255,255,.14);opacity:1;}
+  .topbar .btn-clean{color:#fff;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.45);border-radius:8px;padding:5px 12px;font:inherit;font-size:13px;cursor:pointer;white-space:nowrap;transition:background .15s,border-color .15s;}
+  .topbar .btn-clean:hover{background:#b3261e;border-color:#b3261e;}
+  .topbar .btn-clean:disabled{opacity:.45;cursor:not-allowed;background:rgba(255,255,255,.08);border-color:rgba(255,255,255,.3);}
+  .topbar .btn-clean:disabled:hover{background:rgba(255,255,255,.08);border-color:rgba(255,255,255,.3);}
 
   /* 二级子功能面板：同一页面内按 mod 切换（由父框架 postMessage 控制） */
   .mod-panel{display:none;}
@@ -230,7 +235,10 @@
     <div class="topbar">
       <h1>🏥 医管考核数据统计</h1>
       <span class="sub" id="crumbSub">VAB 会员清单 · 收退款明细 · 收费明细三类报表</span>
-      <a class="home-link" href="/" target="_top" title="返回平台首页，查看全部模块">🏠 全部模块</a>
+      <div class="topbar-actions">
+        <button type="button" class="btn-clean" id="clear-all" title="清除本页已导入的 VAB 会员清单 / 领健收退款明细 / ABC 收费明细 / 项目分类映射，并重置全部筛选条件（仅清本机缓存，不影响已导出的文件）">🧹 清除页面数据</button>
+        <a class="home-link" href="/" target="_top" title="返回平台首页，查看全部模块">🏠 全部模块</a>
+      </div>
     </div>
 
     <!-- ============ 面板 1：VAB 会员清单 ============ -->
@@ -3254,6 +3262,83 @@ const PROJ_EXCLUDE = {
     if(App.lastOrder) scheduleRender('order');
     if(App.lastCharge) scheduleRender('charge');
   }
+  /* 清除页面数据：一键清空本页全部业务数据（VAB 会员清单 / 领健收退款明细 / ABC 收费明细 / 项目分类映射），
+     并把筛选、排序、分页、统计维度与月份一并复位，页面回到「未导入」初始态。
+     只清本机浏览器缓存（localStorage + IndexedDB），不影响已导出的文件，也不影响其他模块。 */
+  function clearPageAll(){
+    const nVab    = App.vab ? App.vab.length : 0;
+    const nOrder  = (App.lastOrder  || []).length;
+    const nCharge = (App.lastCharge || []).length;
+    const nMap    = projMap ? projMap.size : 0;
+    if(!nVab && !nOrder && !nCharge && !nMap){
+      alert('当前页面没有可清除的数据。');
+      return;
+    }
+    const lines = [];
+    if(nVab)    lines.push('· VAB 会员清单：' + nVab + ' 条');
+    if(nOrder)  lines.push('· 领健收退款明细：' + nOrder + ' 条');
+    if(nCharge) lines.push('· ABC 收费明细：' + nCharge + ' 条');
+    if(nMap)    lines.push('· 项目分类映射：' + nMap + ' 项');
+    if(!confirm('将清除本页以下数据（仅本机缓存，不影响已导出的文件）：\n\n'
+        + lines.join('\n')
+        + '\n\n清除后到店率 / 累计消费 / 重点项目统计将一并清空，需重新导入才能出报表，且不可恢复。继续？')) return;
+    if(!confirm('再次确认：真的要清除以上全部数据吗？此操作不可恢复！')) return;
+
+    // 1) VAB 会员清单（内存 + 索引 + 本地持久化）
+    App.vab = [];
+    vabSelSet.clear();
+    rebuildVabIndex();
+    App.vabRev++;
+    persistVab();
+
+    // 2) 领健 / ABC 明细（内存 + localStorage + IndexedDB）
+    clearBiz('order');
+    clearBiz('charge');
+
+    // 3) 项目分类映射（内存 + 本地持久化）
+    projMap = new Map();
+    try{ localStorage.removeItem(PROJ_MAP_KEY); }catch(e){}
+
+    // 4) 视图状态复位：筛选 / 排序 / 分页 / 统计维度与月份
+    ['vab','order','charge'].forEach((m)=>{
+      const st = viewState[m]; if(!st) return;
+      st.page = 1; st.sortKey = null; st.sortDir = 1;
+      if(m === 'vab'){ st.search=''; st.kaohe='all'; st.dispute='all'; }
+      else { st.search=''; st.filter='all'; st.month=[]; st.projFilter=[]; st.dispute='all'; }
+    });
+    statsDim='manager'; statsMonth=''; statsDispute='all';
+    consDim='manager';  consMonth='';  consDispute='all';
+    projDim='manager';  projMonth='';  projDispute='all';
+    projFManager=''; projFDoctor=''; projFProject='';
+
+    // 5) 控件复位（下拉 / 搜索框 / 多选筛选标签）
+    const setV = (id, v)=>{ const el = document.getElementById(id); if(el) el.value = v; };
+    setV('vabSearch',''); setV('vabKaohe','all'); setV('vabDispute','all');
+    ['order','charge'].forEach((m)=>{
+      setV(m+'Search',''); setV(m+'Filter','all'); setV(m+'Dispute','all');
+      const monthBtn = document.getElementById(m+'MonthBtn'); if(monthBtn) monthBtn.textContent = '全部月份';
+      const projBtn  = document.getElementById(m+'ProjBtn');  if(projBtn)  projBtn.textContent  = '全部';
+      const monthBox = document.getElementById(m+'MonthCats');
+      if(monthBox) monthBox.innerHTML = '<div style="padding:6px 8px;color:var(--ink-soft);font-size:12.5px;">（无月份数据）</div>';
+      const projCats = document.getElementById(m+'ProjCats');
+      if(projCats) projCats.querySelectorAll('.pf-cb').forEach((cb)=>{ cb.checked = cb.getAttribute('data-v') === '__all__'; });
+    });
+    setV('statsDim','manager'); setV('statsDispute','all');
+    setV('consDim','manager');  setV('consDispute','all');
+    setV('projDim','manager');  setV('projDispute','all');
+    setV('projFManager',''); setV('projFDoctor',''); setV('projFProject','');
+    const onlyHit = document.getElementById('projOnlyHit'); if(onlyHit) onlyHit.checked = true;
+
+    // 6) 重绘：清单、两张明细表（clearBiz 已清空）、三个统计面板
+    renderVab();
+    render('order');
+    render('charge');
+    refreshStats();
+    syncVabSelUI();
+
+    alert('已清除本页数据：VAB ' + nVab + ' 条、领健 ' + nOrder + ' 条、ABC ' + nCharge + ' 条、项目映射 ' + nMap + ' 项。请重新导入。');
+  }
+
   function downloadVabTemplate(){
     const aoa = [COLS.vab.map(c=>c.t)];
     const ws = XLSX.utils.aoa_to_sheet(aoa);
@@ -3548,6 +3633,7 @@ const PROJ_EXCLUDE = {
   document.getElementById('vabAdd').addEventListener('click', ()=>openVabModal(null,'edit'));
   document.getElementById('vabBatchDel').addEventListener('click', batchDeleteVab);
   document.getElementById('vabClearAll').addEventListener('click', clearAllVab);
+  document.getElementById('clear-all').addEventListener('click', clearPageAll);   // 顶栏：一键清除本页全部数据
 
   /* 统计表：命中客户明细弹窗 关闭 */
   document.getElementById('statsDetailClose').addEventListener('click', closeStatsDetail);
@@ -3568,6 +3654,7 @@ const PROJ_EXCLUDE = {
     refreshStats();               // 基于已恢复的数据生成统计表
   })();
   </script>
+<script src="/shared/cloudbase-bridge.js?v=20261031b"></script>
 <script src="/shared/rbac.js?v=20261028a"></script>
 <script>
 /* 敏感操作 → 权限点映射：集中维护，rbac.js 守卫据此禁用无权限按钮（导入/导出/清除/编辑/重算）。
