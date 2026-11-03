@@ -656,7 +656,8 @@
   // 统计表状态（维度 + 统计月份 + 导出缓存）
   let statsDim = 'manager';                // 'manager'（管家维度）| 'doctor'（医生维度）
   let statsMonth = '';                     // 统计月份（随数据动态填充，默认取最新月）
-  let _statsCache = { cols:[], rows:[] };  // 渲染结果缓存，供导出复用
+  // 渲染结果缓存，供导出复用：cols/rows = 统计表；detail = 下钻明细（维度 → 户主 → 逐笔记录）
+  let _statsCache = { cols:[], rows:[], detail:[], meta:{ dimLabel:'', month:'', dispute:'all', overallRate:'—' } };
   let _statsRows = [];                     // 当前统计表行（含 _house/_visit 集合），供点击查看明细
 
   // 「是否争议VAB」筛选：'all'（全部）| '是'（仅争议）| '否'（仅非争议）
@@ -1615,6 +1616,52 @@ function exportXlsx(mod){
     rows.sort((a,b)=> b.house - a.house);        // 按会员户主数降序
     _statsRows = rows;                            // 供点击行时定位明细
 
+    /* ---- 下钻明细（导出用）：维度 → 户主 → 逐笔记录 ----
+       与点击行下钻完全同源：户主集合取自 VAB（同维度、同争议口径），
+       记录取自 row._records（聚合时逐笔累积的那一份），故明细与统计表严格自洽。
+       未到店的户主保留一行占位（来源/日期/项目为空、金额 0），
+       使「明细中的户主数」恒等于统计表的「VAB会员户主数」，可逐行核对到店率。 */
+    const dimLabelTxt = dim==='manager' ? '管家' : '主诊医生';
+    const detail = [];
+    rows.forEach(row=>{
+      const k = row.维度;
+      const houseRows = new Map();                // 户主 -> [vabRow,...]
+      vab.forEach(r=>{
+        if(r[dimField] !== k || !disputeHit(r, disputeSel)) return;
+        const h = r.户主; if(!h) return;
+        if(!houseRows.has(h)) houseRows.set(h, []);
+        houseRows.get(h).push(r);
+      });
+      const visitSet = row._visit || new Set();
+      const houseList = [...houseRows.keys()].sort((a,b)=> (visitSet.has(b)?1:0) - (visitSet.has(a)?1:0));
+      houseList.forEach(h=>{
+        const members = houseRows.get(h) || [];
+        const names = members.map(m=>m.会员姓名).filter(Boolean);
+        const codes = members.map(m=>m.会员号).filter(Boolean);
+        const base = {
+          '维度': dimLabelTxt, '维度值': k, '户主': h,
+          '会员姓名': names.join('、'), '会员号': codes.join('、'),
+          '是否到店': visitSet.has(h) ? '已到店' : '未到店',
+        };
+        const recs = (row._records || []).filter(d=> d.户主 === h).sort(dateAsc);
+        if(!recs.length){
+          detail.push(Object.assign({}, base, {'来源':'','日期':'','星期':'','项目':'','现款支付':0,'退款':0,'收费金额':0}));
+          return;
+        }
+        recs.forEach(d=>{
+          detail.push(Object.assign({}, base, {
+            '来源': d.source === '收费' ? '收费' : '收退款',
+            '日期': d.日期 || '',
+            '星期': weekdayOf(d.日期),
+            '项目': d.项目 || '',
+            '现款支付': toNum(d.现款支付),
+            '退款': toNum(d.退款),
+            '收费金额': toNum(d.金额),
+          }));
+        });
+      });
+    });
+
     const dimLabel = dim==='manager' ? '管家' : '主诊医生';
     const cols = [
       {k:'维度', t:dimLabel},
@@ -1653,7 +1700,11 @@ function exportXlsx(mod){
       ? ('共 '+rows.length+' 行（'+(dim==='manager'?'管家维度':'医生维度')+(month?' · '+month:'')+'）；整体到店率 '+overallRate)
       : '';
 
-    _statsCache = { cols, rows };   // 供导出复用
+    _statsCache = {
+      cols, rows, detail,
+      meta: { dimLabel: dimLabelTxt, month: month||'', dispute: disputeSel,
+              overallRate, totalHouse, visitCount },
+    };   // 供导出复用（统计表 + 下钻明细）
   }
 
   /* 数据变化统一入口：到店率统计 + 累计消费统计 + 重点项目达成情况统计 一并重算 */
@@ -2949,15 +3000,45 @@ const PROJ_EXCLUDE = {
     document.getElementById('statsDetailModal').style.display = 'flex';
   }
 
+  /* 到店率统计导出：两个工作表
+     ① 统计表 —— 与屏幕逐行一致 + 底部「合计（整体）」行
+     ② 到店明细 —— 下钻内容（维度 → 户主 → 逐笔收退款/收费记录，未到店户主保留占位行） */
   function exportStatsXlsx(){
-    const { cols, rows } = _statsCache;
+    const { cols, rows, detail, meta } = _statsCache;
     if(!cols.length || !rows.length) return;
-    const aoa = [cols.map(c=>c.t)];
-    rows.forEach(r=> aoa.push(cols.map(c=> r[c.k]!=null ? r[c.k] : '' )));
-    const ws = XLSX.utils.aoa_to_sheet(aoa);
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, '统计表');
-    XLSX.writeFile(wb, '医管考核_统计表_'+Date.now()+'.xlsx');
+
+    // —— 工作表 1：统计表 ——
+    const aoa = [cols.map(c=>c.t)];
+    rows.forEach(r=> aoa.push(cols.map(c=> r[c.k]!=null ? r[c.k] : '')));
+    // 合计行取「整体口径」（全部户主），不能把各行百分比相加
+    aoa.push(cols.map(c=>{
+      if(c.k==='维度') return '合计（整体）';
+      if(c.k==='house') return meta.totalHouse;
+      if(c.k==='visit') return meta.month ? meta.visitCount : '—';
+      if(c.k==='rate') return meta.overallRate;
+      return '';
+    }));
+    const ws1 = XLSX.utils.aoa_to_sheet(aoa);
+    ws1['!cols'] = cols.map(c=>({ wch: Math.max(14, String(c.t).length*2 + 6) }));
+    XLSX.utils.book_append_sheet(wb, ws1, '统计表');
+
+    // —— 工作表 2：到店明细（下钻） ——
+    const detCols = ['统计维度','维度值','户主','会员姓名','会员号','是否到店','来源','日期','星期','项目','现款支付','退款','收费金额'];
+    const detAoa = [detCols];
+    (detail||[]).forEach(d=> detAoa.push(detCols.map(k=>{
+      const v = k === '统计维度' ? d['维度'] : d[k];   // 首列对外叫「统计维度」，明细对象内部键为「维度」
+      return v!=null ? v : '';
+    })));
+    const ws2 = XLSX.utils.aoa_to_sheet(detAoa);
+    ws2['!cols'] = [
+      {wch:10},{wch:14},{wch:18},{wch:20},{wch:26},{wch:10},{wch:9},{wch:12},{wch:6},{wch:34},{wch:12},{wch:10},{wch:12}
+    ];
+    ws2['!autofilter'] = { ref: XLSX.utils.encode_range({ s:{r:0,c:0}, e:{r:detAoa.length-1, c:detCols.length-1} }) };
+    XLSX.utils.book_append_sheet(wb, ws2, '到店明细');
+
+    const scope = (meta.dimLabel||'') + '_' + (meta.month || '全部月份');
+    XLSX.writeFile(wb, '医管考核_到店率统计_'+scope+'_'+Date.now()+'.xlsx');
   }
 
   /* 订单明细按具体日期升序（无日期的排在最后，仍按月份兜底） */
