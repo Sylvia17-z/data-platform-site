@@ -167,6 +167,7 @@ const LS = {
   promo: 'meidaStore_promo',          // 门店报表（推广费，按 日期×门店）
   manual: 'meidaStore_manual',         // 本页手工覆盖
   names: 'meidaStore_names',           // 店铺名手工覆盖 { storeKey: 名称 }
+  merge: 'meidaStore_mergeGroups',     // 跨门店目标合并组
   meta: 'meidaStore_meta',             // 导入时间/年份等
 };
 const IDB_NAME = 'dailyPerformance';
@@ -182,10 +183,12 @@ const state = {
   promo: {},           // { 'YYYY-MM-DD': { storeKey: 推广费（元） } }
   manual: {},          // { 'date|storeKey|field': value }
   names: {},           // { storeKey: 店铺名 } 手工改名（不随日期变化）
+  mergeGroups: {},     // { field: [[storeKey,…], …] } 跨门店目标合并组（相邻门店同列并成一格设置）
   date: '',            // 当前报表日期 'YYYY-MM-DD'
   period: 'both',      // both | today | cum
   source: 'auto',      // auto | sheet
   editMode: false,     // 编辑模式（点「编辑」开启：单击任意格可改）
+  mergeMode: false,    // 合并目标模式（点「合并目标」开启：点选同列相邻门店 → 并成一格）
   ordersTs: 0,
   meta: {},
 };
@@ -1462,6 +1465,52 @@ function mergeSetFor(store) {
   return set;
 }
 
+/* ---------------- 跨门店目标合并（横向合并） ----------------
+ * 相邻若干家店的同一「目标」列并成一格：只在合并格里设置一次，值同步写入组内每家店。
+ * 只对四个「月初设定、当月沿用」的月度目标开放（初诊目标 / 客量目标 / 投产比目标 / 好评目标）。
+ * 结构：state.mergeGroups = { tgtAmt: [['美大-北郊保健','美大-北郊医疗'], …] }
+ * 约束：组内门店在 STORES 顺序上必须连续，否则 rowspan 会跨到别的店的行上导致错位。
+ */
+const TGT_MERGE_FIELDS = TARGET_FIELDS.slice();
+function mergeGroupsFor(field) {
+  const arr = state.mergeGroups && state.mergeGroups[field];
+  return Array.isArray(arr) ? arr.filter((g) => Array.isArray(g) && g.length > 1) : [];
+}
+/** 该门店在该字段所属的合并组（无则 null） */
+function groupOf(field, storeKey) {
+  const gs = mergeGroupsFor(field);
+  for (let i = 0; i < gs.length; i++) if (gs[i].indexOf(storeKey) >= 0) return gs[i];
+  return null;
+}
+function shortName(storeKey) {
+  const st = storeByKey(storeKey);
+  if (!st) return storeKey;
+  return storeName(st).replace(/^海蓓[^·]*·/, '');
+}
+function fieldLabel(field) {
+  const c = COLS.find((x) => x.k === field);
+  return c ? c.label : field;
+}
+/** 'storeKey|field' → { span, leader, group }：leader 输出跨店 rowspan，其余门店整格让位 */
+function crossMergeMap() {
+  const map = new Map();
+  TGT_MERGE_FIELDS.forEach((f) => {
+    mergeGroupsFor(f).forEach((grp) => {
+      const keys = grp.filter((k) => STORE_KEYS.indexOf(k) >= 0);
+      if (keys.length < 2) return;
+      keys.forEach((k, i) => map.set(k + '|' + f, { span: keys.length, leader: i === 0, group: keys }));
+    });
+  });
+  return map;
+}
+/** 合并组内所有门店的「月累计」目标值是否一致（一致才算真正合并成一格） */
+function groupValuesOf(field, keys, which) {
+  return keys.map((k) => {
+    const { v } = cellValue(k, field, which || 'today');
+    return (v === null || v === undefined || v === '') ? '' : String(v);
+  });
+}
+
 /* ---------------- 渲染格式化 ---------------- */
 function display(kind, v, col) {
   if (v === null || v === undefined || v === '') return '<span class="dash">—</span>';
@@ -1512,11 +1561,16 @@ function renderThead() {
     <tr>${row3}</tr>`;
 }
 
-function cellHTML(c, store, which, merge, mergedSet) {
+function cellHTML(c, store, which, merge, mergedSet, crossMap) {
   const isToday = which === 'today';
-  const shared = mergedSet ? mergedSet.has(c.k) : MERGED_FIELDS.indexOf(c.k) >= 0;
+  // 跨门店合并：组内首店输出跨店 rowspan（both 模式 = 店数×2），其余门店整格让位（两行都跳过）
+  const cm = crossMap ? crossMap.get(store.key + '|' + c.k) : null;
+  if (cm && !cm.leader) return '';
+  const shared = cm ? true : (mergedSet ? mergedSet.has(c.k) : MERGED_FIELDS.indexOf(c.k) >= 0);
   if (merge && shared && !isToday) return '';   // 第 2 行：共享列已由第 1 行 rowspan 覆盖
-  const rs = (merge && shared) ? ' rowspan="2"' : '';
+  let rs = '';
+  if (cm) rs = ` rowspan="${merge ? cm.span * 2 : cm.span}"`;
+  else if (merge && shared) rs = ' rowspan="2"';
   // 按值合并的列（投产比 / 好评）：当日为空、累计有值时用累计值填这一格，
   // 否则合并后第 2 行被吃掉，这个值就消失了。
   let src = which;
@@ -1543,22 +1597,22 @@ function cellHTML(c, store, which, merge, mergedSet) {
   }
   const { v, kind } = cellValue(store.key, c.k, src);
   const klass = (c.type === 'text' || c.type === 'scoreText' ? 'txt' : 'num')
-    + ' editable' + (c.zone ? ' z-' + c.zone : '');
+    + ' editable' + (c.zone ? ' z-' + c.zone : '') + (cm ? ' tgt-mg' : '');
   // 平台三表算出的格子加蓝点（区别于订单自动计算的绿点）
   const inner = (kind === 'plat' && typeof v === 'number')
     ? '<span class="pdot" title="由平台日报数据汇总（客流 / 在线咨询 / 门店交易）"></span>' + display(kind, v, c)
     : display(kind, v, c);
   return `<td class="${klass}" data-edit="1" data-store="${store.key}" data-field="${c.k}" data-which="${src}"${rs}>${inner}</td>`;
 }
-function rowHTML(store, which) {
+function rowHTML(store, which, crossMap) {
   const cls = which === 'today' ? 'r-today' : 'r-cum';
-  return `<tr class="${cls}">${COLS.map((c) => cellHTML(c, store, which, false)).join('')}</tr>`;
+  return `<tr class="${cls}">${COLS.map((c) => cellHTML(c, store, which, false, null, crossMap)).join('')}</tr>`;
 }
 // 「当日 + 月累计」同行展示：店级共享列纵向合并（rowspan=2），与原始模板表一致
-function storeBlockHTML(store) {
+function storeBlockHTML(store, crossMap) {
   const ms = mergeSetFor(store);
-  const row1 = COLS.map((c) => cellHTML(c, store, 'today', true, ms)).join('');
-  const row2 = COLS.map((c) => cellHTML(c, store, 'cum', true, ms)).join('');
+  const row1 = COLS.map((c) => cellHTML(c, store, 'today', true, ms, crossMap)).join('');
+  const row2 = COLS.map((c) => cellHTML(c, store, 'cum', true, ms, crossMap)).join('');
   return `<tr class="r-today">${row1}</tr><tr class="r-cum">${row2}</tr>`;
 }
 
@@ -1592,14 +1646,28 @@ function renderTable() {
   $('tbl').style.display = '';
   ensureColgroup();
   renderThead();
+  const crossMap = crossMergeMap();
   let body = '';
   STORES.forEach((s) => {
-    if (state.period === 'both') body += storeBlockHTML(s);
-    else body += rowHTML(s, state.period);
+    if (state.period === 'both') body += storeBlockHTML(s, crossMap);
+    else body += rowHTML(s, state.period, crossMap);
   });
   $('tbl-body').innerHTML = body;
   const label = state.period === 'cum' ? '合计（本月累计）' : '合计（当日数据）';
   $('tbl-foot').innerHTML = sumRowHTML(label, state.period === 'cum' ? 'cum' : 'today');
+  paintMergeAnchor();
+}
+
+/** 合并模式下高亮「起点格」（第一次点选的那一格），第二次点选即完成合并 */
+let _mergeAnchor = null;   // { field, store }
+function paintMergeAnchor() {
+  const tbl = $('tbl');
+  if (!tbl) return;
+  const old = tbl.querySelector('td.merge-anchor');
+  if (old) old.classList.remove('merge-anchor');
+  if (!state.mergeMode || !_mergeAnchor) return;
+  const td = tbl.querySelector(`td[data-store="${_mergeAnchor.store}"][data-field="${_mergeAnchor.field}"]`);
+  if (td) td.classList.add('merge-anchor');
 }
 
 function renderKpis() {
@@ -1796,15 +1864,20 @@ function startEdit(td) {
         if (v === '' || v === def) delete state.names[storeKey];
         else state.names[storeKey] = v;
       } else {
-        const mk = manualKey(state.date, storeKey, field);
-        if (v === '') delete state.manual[mk];
-        else {
-          const textCol = col.type === 'text' || field === 'pm' || field === 'op';
+        // 目标列若属于跨门店合并组：改一次 → 同步写入组内每家店（与合并格的语义一致）
+        const keys = groupOf(field, storeKey) || [storeKey];
+        const textCol = col.type === 'text' || field === 'pm' || field === 'op';
+        keys.forEach((k) => {
+          const mk = manualKey(state.date, k, field);
+          if (v === '') { delete state.manual[mk]; return; }
           if (textCol) state.manual[mk] = v;
           else {
             const n = Number(v.replace(/,/g, ''));
             state.manual[mk] = isNaN(n) ? v : n;
           }
+        });
+        if (keys.length > 1) {
+          toast('已同步到 ' + keys.length + ' 家门店：' + keys.map((k) => shortName(k)).join('、'), 'ok', 2400);
         }
       }
       saveLocal();
@@ -1829,7 +1902,7 @@ function bindEdit() {
   if (tbl.dataset.editBound) return;
   // 编辑模式：单击即改（pointerdown 早于 blur，先记住目标格再落库重绘，避免这次点击被重绘吞掉）
   tbl.addEventListener('pointerdown', (e) => {
-    if (!state.editMode) return;
+    if (!state.editMode || state.mergeMode) return;   // 合并目标模式下点击只用于选店，不进入编辑
     const td = e.target.closest && e.target.closest('td[data-edit]');
     if (!td) return;
     if (td.querySelector('input')) return;      // 点在正在编辑的输入框里
@@ -1847,6 +1920,7 @@ function bindEdit() {
   });
   // 常态：双击数据格（店铺名仅在编辑模式下可改）
   tbl.addEventListener('dblclick', (e) => {
+    if (state.mergeMode) return;
     const td = e.target.closest && e.target.closest('td[data-edit]');
     if (!td) return;
     if (td.dataset.field === 'name' && !state.editMode) return;
@@ -1858,6 +1932,13 @@ function bindEdit() {
 function updateEditHint() {
   const el = $('edit-hint');
   if (!el) return;
+  if (state.mergeMode) {
+    el.textContent = '合并目标中：点同列的第一家店，再点第二家店 → 合并成一格（再点合并格可拆分），Esc/再点按钮退出';
+    el.classList.add('on');
+    el.classList.toggle('merge', true);
+    return;
+  }
+  el.classList.toggle('merge', false);
   el.textContent = state.editMode
     ? '编辑中：单击任意格（含店铺名）即可改，Enter 保存 / Esc 取消'
     : '双击数据格可改；点「编辑」后单击任意格（含店铺名）即可改';
@@ -1881,6 +1962,129 @@ function toggleEditMode() {
 }
 
 /* =====================================================================
+ * 九之二、跨门店目标合并（点「合并目标」开启）
+ *   ① 点同列的第一家店 → 高亮为起点；
+ *   ② 点同列的第二家店 → 两家（含中间连续的店）并成一格，值统一；
+ *   ③ 再点已合并的格子 → 拆分（数值保留，不会被清空）。
+ * 合并格的编辑与普通格一致：改一次即同步到组内每家店。
+ * ===================================================================== */
+function toggleMergeMode() {
+  state.mergeMode = !state.mergeMode;
+  if (!state.mergeMode) _mergeAnchor = null;
+  document.body.classList.toggle('merge-mode', state.mergeMode);
+  const b = $('btn-merge-tgt');
+  if (b) {
+    b.classList.toggle('on', state.mergeMode);
+    b.textContent = state.mergeMode ? '✅ 完成合并' : '🔗 合并目标';
+  }
+  updateEditHint();
+  render();
+  toast(state.mergeMode
+    ? '合并目标：点同列的第一家店，再点第二家店即可合并（再点合并格可拆分）'
+    : '已退出合并目标', 'ok', 3000);
+}
+
+/** 合并后的目标值统一：组内数值不一致时，以首店（或第一个有值的店）为准写入全部成员 */
+function unifyGroupValue(field, keys) {
+  const vals = groupValuesOf(field, keys, 'today');
+  const nonEmpty = vals.filter((v) => v !== '');
+  if (!nonEmpty.length) return null;
+  if (nonEmpty.every((v) => v === nonEmpty[0]) && nonEmpty.length === vals.length) return null;
+  const keep = nonEmpty[0];
+  const col = COLS.find((c) => c.k === field);
+  const textCol = col && (col.type === 'text' || col.type === 'scoreText');
+  const num = Number(String(keep).replace(/,/g, ''));
+  const out = (textCol || isNaN(num)) ? keep : num;
+  keys.forEach((k) => { state.manual[manualKey(state.date, k, field)] = out; });
+  return out;
+}
+
+function addMergeGroup(field, keys) {
+  if (!Array.isArray(state.mergeGroups[field])) state.mergeGroups[field] = [];
+  state.mergeGroups[field].push(keys.slice());
+}
+function dropMergeGroup(field, storeKey) {
+  const gs = mergeGroupsFor(field);
+  const g = groupOf(field, storeKey);
+  if (!g) return null;
+  state.mergeGroups[field] = gs.filter((x) => x !== g);
+  if (!state.mergeGroups[field].length) delete state.mergeGroups[field];
+  return g;
+}
+
+/** 合并模式下点选一个目标格 */
+function onMergePick(td) {
+  const field = td.dataset.field;
+  const storeKey = td.dataset.store;
+  if (TGT_MERGE_FIELDS.indexOf(field) < 0) {
+    toast('只有四个目标列可以合并：初诊目标 / 客量目标 / 投产比目标 / 好评目标', 'warn', 3000);
+    return;
+  }
+  // 已在合并组里 → 本次点击视为拆分
+  const inGroup = groupOf(field, storeKey);
+  if (inGroup) {
+    const g = dropMergeGroup(field, storeKey);
+    _mergeAnchor = null;
+    saveLocal();
+    render();
+    toast('已拆分「' + fieldLabel(field) + '」：' + g.map((k) => shortName(k)).join('、'), 'ok', 2600);
+    return;
+  }
+  // 第一次点选：记起点
+  if (!_mergeAnchor || _mergeAnchor.field !== field) {
+    _mergeAnchor = { field: field, store: storeKey };
+    render();
+    toast('起点：' + shortName(storeKey) + ' · ' + fieldLabel(field) + '，再点同列另一家店完成合并', 'ok', 3200);
+    return;
+  }
+  if (_mergeAnchor.store === storeKey) {
+    _mergeAnchor = null;
+    render();
+    return;
+  }
+  // 第二家店：取两店之间的连续区间（rowspan 要求门店连续，否则会跨到别的店的行）
+  const ia = STORE_KEYS.indexOf(_mergeAnchor.store);
+  const ib = STORE_KEYS.indexOf(storeKey);
+  const lo = Math.min(ia, ib), hi = Math.max(ia, ib);
+  const keys = STORE_KEYS.slice(lo, hi + 1);
+  const busy = keys.filter((k) => groupOf(field, k));
+  if (busy.length) {
+    toast('区间内的「' + busy.map((k) => shortName(k)).join('、') + '」已属于其他合并组，请先拆分', 'warn', 3200);
+    _mergeAnchor = null;
+    render();
+    return;
+  }
+  addMergeGroup(field, keys);
+  const keep = unifyGroupValue(field, keys);
+  _mergeAnchor = null;
+  saveLocal();
+  render();
+  toast('已合并 ' + keys.length + ' 家店的「' + fieldLabel(field) + '」' +
+    (keep === null ? '' : '，目标值统一为 ' + keep) + '；在合并格里设置一次即可', 'ok', 3600);
+}
+
+function bindMerge() {
+  const tbl = $('tbl');
+  if (!tbl || tbl.dataset.mergeBound) return;
+  tbl.addEventListener('pointerdown', (e) => {
+    if (!state.mergeMode) return;
+    const td = e.target.closest && e.target.closest('td[data-edit]');
+    if (!td) return;
+    e.preventDefault();
+    const open = tbl.querySelector('td[data-edit] input');
+    if (open) open.blur();
+    onMergePick(td);
+  });
+  tbl.dataset.mergeBound = '1';
+  // Esc：取消当前起点（不退出合并模式）
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape' || !state.mergeMode || !_mergeAnchor) return;
+    _mergeAnchor = null;
+    render();
+  });
+}
+
+/* =====================================================================
  * 十、本地持久化（本页自己的数据）
  * ===================================================================== */
 let _saveTimer = 0;
@@ -1892,6 +2096,7 @@ function saveLocal() {
     lsSet(LS.promo, JSON.stringify(state.promo));
     lsSet(LS.manual, JSON.stringify(state.manual));
     lsSet(LS.names, JSON.stringify(state.names));
+    lsSet(LS.merge, JSON.stringify(state.mergeGroups));
     lsSet(LS.meta, JSON.stringify(state.meta));
   }, 120);
 }
@@ -1901,6 +2106,15 @@ function restoreLocal() {
   try { const p = lsGet(LS.promo); if (p) state.promo = JSON.parse(p) || {}; } catch (e) {}
   try { const m = lsGet(LS.manual); if (m) state.manual = JSON.parse(m) || {}; } catch (e) {}
   try { const n = lsGet(LS.names); if (n) state.names = JSON.parse(n) || {}; } catch (e) {}
+  try { const g = lsGet(LS.merge); if (g) state.mergeGroups = JSON.parse(g) || {}; } catch (e) {}
+  // 兜底：清掉历史数据里不合法的合并组（非数组 / 少于 2 家 / 门店已不存在）
+  const mg = {};
+  Object.keys(state.mergeGroups || {}).forEach((f) => {
+    if (TGT_MERGE_FIELDS.indexOf(f) < 0) return;
+    const gs = mergeGroupsFor(f).map((g) => g.filter((k) => STORE_KEYS.indexOf(k) >= 0)).filter((g) => g.length > 1);
+    if (gs.length) mg[f] = gs;
+  });
+  state.mergeGroups = mg;
   try { const t = lsGet(LS.meta); if (t) state.meta = Object.assign(state.meta, JSON.parse(t) || {}); } catch (e) {}
 }
 
@@ -1913,6 +2127,7 @@ async function init() {
   // 若把绑定排在 await 之后，一旦读库卡住整页就完全无响应（2026-10-28 实测复现）。
   bindUI();
   bindEdit();
+  bindMerge();
   updateEditHint();
   syncDateRange();
   autoPickDate();
@@ -2148,16 +2363,19 @@ function bindUI() {
     toast('本页数据已清除', 'ok');
   });
   $('btn-edit').addEventListener('click', toggleEditMode);
+  $('btn-merge-tgt').addEventListener('click', toggleMergeMode);
   $('btn-clear-edit').addEventListener('click', () => {
     const nManual = Object.keys(state.manual).length;
     const nNames = Object.keys(state.names).length;
-    if (!nManual && !nNames) { toast('当前没有手动修改', 'warn'); return; }
-    if (!confirm('将清除本页所有手工修改（双击或编辑模式下改过的单元格值，含店铺名）。继续？')) return;
-    state.manual = {}; state.names = {};
-    lsSet(LS.manual, '{}'); lsSet(LS.names, '{}');
+    const nGroups = Object.keys(state.mergeGroups).reduce((a, k) => a + mergeGroupsFor(k).length, 0);
+    if (!nManual && !nNames && !nGroups) { toast('当前没有手动修改', 'warn'); return; }
+    if (!confirm('将清除本页所有手工修改（双击或编辑模式下改过的单元格值，含店铺名）与跨门店目标合并设置。继续？')) return;
+    state.manual = {}; state.names = {}; state.mergeGroups = {}; _mergeAnchor = null;
+    lsSet(LS.manual, '{}'); lsSet(LS.names, '{}'); lsSet(LS.merge, '{}');
     _aggCache.key = ''; _platCache.key = '';
     render();
-    toast('已清除 ' + nManual + ' 处单元格修改' + (nNames ? '、' + nNames + ' 处店铺名' : ''), 'ok');
+    toast('已清除 ' + nManual + ' 处单元格修改' + (nNames ? '、' + nNames + ' 处店铺名' : '') +
+      (nGroups ? '、' + nGroups + ' 处目标合并' : ''), 'ok');
   });
 }
 

@@ -194,13 +194,16 @@
     rows.push(r2); heights.push(H.head[2]);
 
     /* —— 数据行：7 店 × 当日 / 本月累计（合并列与页面同源：共享列 + 投产比/好评 5 列按值判定） —— */
-    function buildDataRow(store, which, merge, ms) {
+    function buildDataRow(store, which, merge, ms, cm) {
       const isToday = which === 'today';
       return COLS.map((c) => {
-        if (merge && ms.has(c.k) && !isToday) return null;   // 第 2 行合并列由纵向合并覆盖
+        const cmg = cm ? cm.get(store.key + '|' + c.k) : null;
+        if (cmg && !cmg.leader) return null;                 // 跨门店合并：后续门店整格让位
+        const merged = cmg ? true : ms.has(c.k);
+        if (merge && merged && !isToday) return null;         // 第 2 行合并列由纵向合并覆盖
         // 合并列：当日为空而累计有值时取累计值（与页面同源，否则合并后这个值会消失）
         let src = which;
-        if (merge && ms.has(c.k) && MERGED_FIELDS.indexOf(c.k) < 0
+        if (merge && merged && MERGED_FIELDS.indexOf(c.k) < 0
             && !rawTextOf(store.key, c.k, 'today') && rawTextOf(store.key, c.k, 'cum')) src = 'cum';
         if (c.k === 'store') {
           return { v: storeName(store), t: 's', spec: { fill: FILL.rowA, color: TEXT.navy, bold: true, size: 9, align: 'left', wrap: true } };
@@ -224,18 +227,30 @@
     }
     const dataRows = [];
     const dataMerges = [];
+    const cm = crossMergeMap();   // 跨门店目标合并组（与页面渲染同一份）
     let dr = rows.length;   // 数据区起始行（0-indexed）
     STORES.forEach((s) => {
       if (period === 'both') {
         const ms = mergeSetFor(s);
-        const r1 = buildDataRow(s, 'today', true, ms);
-        const r2 = buildDataRow(s, 'cum', true, ms);
+        const r1 = buildDataRow(s, 'today', true, ms, cm);
+        const r2 = buildDataRow(s, 'cum', true, ms, cm);
         dataRows.push(r1, r2);
-        COLS.forEach((c, ci) => { if (ms.has(c.k)) dataMerges.push({ r: dr, c: ci, r2: dr + 1, c2: ci }); });
+        COLS.forEach((c, ci) => {
+          const g = cm.get(s.key + '|' + c.k);
+          if (g && !g.leader) return;                                   // 已让位给组内首店
+          if (g) dataMerges.push({ r: dr, c: ci, r2: dr + g.span * 2 - 1, c2: ci });
+          else if (ms.has(c.k)) dataMerges.push({ r: dr, c: ci, r2: dr + 1, c2: ci });
+        });
         dr += 2;
       } else {
         const w = period === 'cum' ? 'cum' : 'today';
-        dataRows.push(buildDataRow(s, w, false, mergeSetFor(s)));
+        const ms = mergeSetFor(s);
+        dataRows.push(buildDataRow(s, w, false, ms, cm));
+        COLS.forEach((c, ci) => {
+          const g = cm.get(s.key + '|' + c.k);
+          if (!g || !g.leader) return;
+          dataMerges.push({ r: dr, c: ci, r2: dr + g.span - 1, c2: ci });
+        });
         dr += 1;
       }
     });

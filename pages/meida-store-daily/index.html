@@ -144,6 +144,31 @@
   .btn.on:hover{background:#2a47b8;border-color:#2a47b8;color:#fff;}
   td.c-period{font-weight:700;color:var(--c-head);background:#eef2fa !important;}
 
+  /* ===== 合并目标模式（点「合并目标」开启） ===== */
+  /* 只有四个月度目标列可点选：合并模式下给它们加紫色蒙版（叠加 background-image，不改底色） */
+  body.merge-mode table.xl tbody td[data-field="tgtAmt"],
+  body.merge-mode table.xl tbody td[data-field="tgtVis"],
+  body.merge-mode table.xl tbody td[data-field="roiTgt"],
+  body.merge-mode table.xl tbody td[data-field="revTgt"]{
+    background-image:linear-gradient(rgba(122,91,211,.10),rgba(122,91,211,.10));
+    cursor:pointer;
+  }
+  body.merge-mode table.xl tbody td[data-field="tgtAmt"]:hover,
+  body.merge-mode table.xl tbody td[data-field="tgtVis"]:hover,
+  body.merge-mode table.xl tbody td[data-field="roiTgt"]:hover,
+  body.merge-mode table.xl tbody td[data-field="revTgt"]:hover{
+    background-image:linear-gradient(rgba(122,91,211,.22),rgba(122,91,211,.22));
+    outline:2px solid #7a5bd3;outline-offset:-2px;
+  }
+  /* 起点格：加深 + 实线紫框，提示「再点第二家店」 */
+  body.merge-mode table.xl tbody td.merge-anchor{
+    background-image:linear-gradient(rgba(122,91,211,.30),rgba(122,91,211,.30)) !important;
+    outline:2.4px solid #5b3fb0 !important;outline-offset:-2.4px;
+  }
+  /* 已合并的目标格：紫色细框（代表这一格覆盖了多家门店） */
+  table.xl tbody td.tgt-mg{outline:1.6px solid rgba(122,91,211,.62);outline-offset:-1.6px;}
+  body.merge-mode table.xl tbody td.tgt-mg:hover{outline:2.4px solid #5b3fb0;outline-offset:-2.4px;}
+
   .legend{display:flex;flex-wrap:wrap;gap:6px 16px;margin-top:10px;font-size:11.5px;color:var(--c-muted);}
   .legend i{display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:5px;vertical-align:-1px;border:1px solid rgba(0,0,0,.08);}
 
@@ -236,7 +261,8 @@
       <button class="btn" id="btn-export-png" title="导出整表图片（2 倍高清，颜色与页面完全一致）">🖼 导出图片</button>
       <span class="sep"></span>
       <button class="btn" id="btn-edit" title="开启编辑模式：单击表格内任意单元格（含店铺名）即可修改">✏️ 编辑</button>
-      <button class="btn btn-ghost" id="btn-clear-edit" title="清除本页所有手动修改（双击或编辑模式下改过的值，含店铺名）">↺ 清除修改</button>
+      <button class="btn" id="btn-merge-tgt" title="合并相邻门店的目标列：点同列的第一家店、再点第二家店 → 并成一格，设置一次全部生效；再点合并格即拆分">🔗 合并目标</button>
+      <button class="btn btn-ghost" id="btn-clear-edit" title="清除本页所有手动修改（双击或编辑模式下改过的值，含店铺名与目标合并设置）">↺ 清除修改</button>
     </div>
     <div class="tbl-wrap" id="tbl-wrap">
       <div class="empty" id="tbl-empty">
