@@ -1001,11 +1001,25 @@
     });
     App.vabLoaded = App.vab.length>0;
   }
+  /* VAB 持久化：localStorage 为主（小快），IndexedDB 为镜像兜底。
+     VAB 通常只有几百到几千行，但导入大批量会员时同样可能撑爆 5MB 配额；
+     与订单/收费保持一致的双写策略，避免「静默失败 → 刷新后要重新导入」。 */
+  const VAB_IDB_KEY = 'vab';
   function persistVab(){
-    try{ localStorage.setItem(VAB_LS_KEY, JSON.stringify(App.vab)); }catch(e){}
+    const has = App.vab && App.vab.length;
+    try{
+      if(has) localStorage.setItem(VAB_LS_KEY, JSON.stringify(App.vab));
+      else localStorage.removeItem(VAB_LS_KEY);
+    }catch(e){
+      // 配额不足：移除可能残留的旧快照，改由 IndexedDB 承载（恢复时按需回退）
+      try{ localStorage.removeItem(VAB_LS_KEY); }catch(_){}
+      console.warn('[medassess] VAB 超出 localStorage 配额，已改存 IndexedDB');
+    }
+    idbSet(VAB_IDB_KEY, has ? App.vab : null).catch(()=>{});
   }
-  // 页面加载时从本地缓存恢复（实现「直接展示在页面上 / 免重复导入」）
+  // 页面加载时从本地缓存恢复（实现「直接展示在页面上 / 免重复导入」）：localStorage 未命中则回退 IndexedDB
   function loadVabFromStorage(){
+    let restored = false;
     try{
       const raw = localStorage.getItem(VAB_LS_KEY);
       if(raw){
@@ -1015,9 +1029,22 @@
           seedVabSeq();
           rebuildVabIndex();
           renderVab();
+          restored = true;
         }
       }
     }catch(e){}
+    if(!restored){
+      idbGet(VAB_IDB_KEY).then(arr=>{
+        if(!Array.isArray(arr) || !arr.length) return;
+        App.vab = arr.map(r=>{ if(!r._id) r._id = newVabId(); return r; });
+        seedVabSeq();
+        rebuildVabIndex();
+        App.vabRev++;
+        renderVab();
+        refreshStats();
+        persistVab();          // 回写 localStorage（VAB 体量小），下次打开走同步路径，不必再等 IDB
+      }).catch(()=>{});
+    }
   }
 
   /* ---------- 收退款 / 收费明细 持久化（仿 VAB：刷新免重导，主动清空仍可清除） ----------
@@ -3290,6 +3317,7 @@ const PROJ_EXCLUDE = {
     rebuildVabIndex();
     App.vabRev++;
     try{ localStorage.removeItem(VAB_LS_KEY); }catch(e){}
+    idbSet(VAB_IDB_KEY, null).catch(()=>{});
 
     // 2) 领健 / ABC 明细（内存 + localStorage + IndexedDB）
     clearBiz('order');
@@ -3652,6 +3680,45 @@ const PROJ_EXCLUDE = {
     const p = new URLSearchParams(location.search).get('mod');
     setMod(p || 'vab');
     refreshStats();               // 基于已恢复的数据生成统计表
+  })();
+
+  /* ---------- 离开页面兜底刷写 ----------
+     原则：只有「清除页面数据 / 各面板清空」会删本地数据，其余情况一律保留。
+     导入或编辑后若立刻关页面、切标签被浏览器回收，最后一次写入可能还在异步队列里；
+     这里在 pagehide / 页面转入后台时再刷一次盘（localStorage 同步写，IndexedDB 尽力而为）。
+     用引用比较做节流，数据没换过对象就不重复写大表。 */
+  (function bindFlushOnHide(){
+    const lastFlushed = { vab: App.vab, order: App.lastOrder, charge: App.lastCharge };
+    function flush(){
+      if(App.vab !== lastFlushed.vab){
+        lastFlushed.vab = App.vab;
+        try{
+          if(App.vab.length) localStorage.setItem(VAB_LS_KEY, JSON.stringify(App.vab));
+          else localStorage.removeItem(VAB_LS_KEY);
+        }catch(e){}
+        idbSet(VAB_IDB_KEY, App.vab.length ? App.vab : null).catch(()=>{});
+      }
+      if(App.lastOrder !== lastFlushed.order){
+        lastFlushed.order = App.lastOrder;
+        const has = App.lastOrder && App.lastOrder.length;
+        try{
+          if(has) localStorage.setItem(ORDER_LS_KEY, JSON.stringify(App.lastOrder));
+          else localStorage.removeItem(ORDER_LS_KEY);
+        }catch(e){}
+        idbSet(ORDER_IDB_KEY, has ? App.lastOrder : null).catch(()=>{});
+      }
+      if(App.lastCharge !== lastFlushed.charge){
+        lastFlushed.charge = App.lastCharge;
+        const has = App.lastCharge && App.lastCharge.length;
+        try{
+          if(has) localStorage.setItem(CHARGE_LS_KEY, JSON.stringify(App.lastCharge));
+          else localStorage.removeItem(CHARGE_LS_KEY);
+        }catch(e){}
+        idbSet(CHARGE_IDB_KEY, has ? App.lastCharge : null).catch(()=>{});
+      }
+    }
+    window.addEventListener('pagehide', flush);
+    document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState === 'hidden') flush(); });
   })();
   </script>
 <script src="/shared/cloudbase-bridge.js?v=20261031b"></script>
