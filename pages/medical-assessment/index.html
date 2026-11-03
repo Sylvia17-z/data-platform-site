@@ -3680,7 +3680,10 @@ const PROJ_EXCLUDE = {
 })();
 </script>
 <script src="/shared/auth-gate.js?v=20261029a"></script>
-<script src="/shared/ma-cloud-sync.js?v=20261029a"></script>
+<!-- 医管考核各面板（VAB 会员清单 / 领健 / ABC / 到店率 / 重点项目 / 累计消费）数据只存本机，
+     不再上云：已移除 /shared/ma-cloud-sync.js 的加载（2026-11-03 业务要求）。
+     本地持久化不受影响（localStorage + IndexedDB），刷新免重导；
+     shared/ma-cloud-sync.js 文件保留但不再被任何页面引用。 -->
 <script>
 /* 筛选段折叠（全站统一规范 shared/filterbar.css）：⚙筛选 胶囊切换 fbody 显隐，状态按面板持久化 */
 (function(){

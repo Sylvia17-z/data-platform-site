@@ -1,5 +1,13 @@
 /* ================================================================
  * 医管考核页 云端同步（2026-10-13 需求：登录后数据多端同步）
+ *
+ * 【已停用 · 2026-11-03】业务要求：医管考核各面板（VAB 会员清单 / 领健 /
+ *   ABC / 到店率 / 重点项目 / 累计消费）数据只存本机，不再上云。
+ *   - pages/medical-assessment/index.html 已移除本脚本的 <script> 引用；
+ *   - 下方 ENABLED 开关置 false 作二次兜底：即使旧缓存的 HTML 仍引用本文件，
+ *     也不会读写云端（dp_medassess）。
+ *   - 如需恢复多端同步：把 ENABLED 改回 true，并在页面重新引入本脚本。
+ *
  * 策略：轮询 + 内容哈希，不侵入页面内部代码
  * - 本地数据源：localStorage med_vab_list / med_order_list / med_charge_list
  *   + IndexedDB(med_assess_db/kv: order, charge)（大表镜像，本地权威）
@@ -9,10 +17,11 @@
  * - 会话中：每 15s 检查本地哈希，变化即防抖上传（含主动清空→上传空包）
  * ================================================================ */
 (function(){
+  var ENABLED = false;                  // 2026-11-03 停用云同步（数据仅存本机）
+  if(!ENABLED){ window.__MA_CLOUD_SYNC_DISABLED__ = true; return; }
   if(window.__MA_CLOUD_SYNC__) return; window.__MA_CLOUD_SYNC__ = true;
 
-  var PK = (window.CLOUD_PK) || 'wbpk_KQXIeDHLXWDHN7WQp3zqUQ_Y5IlM6hJd7n10U8UN5bYmSGUYeevVOwl';
-  var ENDPOINT = (window.CLOUD_ENDPOINT) || 'https://haibei-medical.app.workbuddy.host';
+  // 后端已迁至腾讯云 CloudBase（shared/cloudbase-bridge.js）
   var TABLE = 'dp_medassess';
   var LS_VAB = 'med_vab_list', LS_ORDER = 'med_order_list', LS_CHARGE = 'med_charge_list';
   var IDB_DB = 'med_assess_db', IDB_ORDER = 'order', IDB_CHARGE = 'charge';
@@ -33,8 +42,8 @@
 
   function getCloud(){
     if(cloud) return cloud;
-    if(typeof window.WorkBuddyCloud === 'undefined') return null;
-    try{ cloud = window.WorkBuddyCloud.createWorkBuddyCloud({ endpoint: ENDPOINT, publishableKey: PK }); }catch(e){ cloud = null; }
+    if(!window.CB) return null;
+    try{ cloud = window.CB.client(); }catch(e){ cloud = null; }
     return cloud;
   }
   function lsGet(k){ try{ return localStorage.getItem(k); }catch(e){ return null; } }
