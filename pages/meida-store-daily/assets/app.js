@@ -150,10 +150,11 @@ const SUM_KEYS = ['tgtAmt', 'actAmt', 'lead', 'tgtVis', 'firstVis', 'newVab',
   'expo', 'visit', 'orderU', 'orderC', 'orderAmt', 'woU', 'woC', 'woAmt', 'vcC', 'vcAmt', 'realWo', 'promoFee', 'revTgt', 'revCnt', 'qrScan'];
 // 店级共享字段：当日数据与本月累计两行取值相同，渲染时纵向合并（rowspan=2），与原始模板表一致
 const MERGED_FIELDS = ['store', 'pm', 'op', 'mt', 'dp', 'rank'];
-/* 「投产比」+「好评」两组里的 5 列：原始模板表里同店两行是纵向合并的（目标 1:4 / 实际 1:0.47 …），
-   只有当两行取值确实不同时才保留两行（如好评目标 20 / 40）。故按「值相同 或 其中一行为空」动态合并。
-   推广费（元）在模板里逐行独立，不参与。 */
-const COND_MERGE_FIELDS = ['roiTgt', 'roiAct', 'revTgt', 'revCnt', 'revRate', 'perfRate'];
+/* 同店两行纵向合并（按值）：四个「月初设定、当月沿用」的月度目标（初诊目标 / 客量目标 / 投产比目标 / 好评目标）
+   两行本就同值，必须按门店并成一格；投产比 / 好评的实际值同理。
+   只在两行取值确实不同时才保留两行（如好评目标 20 / 40）。故按「值相同 或 其中一行为空」动态合并。
+   推广费（元）、客单价、各日业绩 / 客量逐行独立，不参与。 */
+const COND_MERGE_FIELDS = ['tgtAmt', 'tgtVis', 'roiTgt', 'roiAct', 'revTgt', 'revCnt', 'revRate', 'perfRate'];
 const AUTO_KEYS = COLS.filter((c) => c.auto).map((c) => c.k);
 
 /* ---------------- 持久化键 ---------------- */
