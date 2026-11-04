@@ -1373,6 +1373,12 @@ function hasDataForDate(date) {
 function cellValue(storeKey, field, which) {
   const date = state.date;
   const col = COLS.find((c) => c.k === field);
+  // 跨门店合并：合并格只保留一份「组内合计值」（存于首位门店），
+  // 组内其他门店不再持有独立值 —— 否则合计行会把同一笔目标重复相加。
+  if (TGT_MERGE_FIELDS.indexOf(field) >= 0) {
+    const own = groupOf(field, storeKey);
+    if (own && own[0] !== storeKey) return { v: null, kind: null };
+  }
   const mk = manualKey(date, storeKey, field);
   if (Object.prototype.hasOwnProperty.call(state.manual, mk)) {
     return { v: state.manual[mk], kind: 'manual' };
@@ -1435,19 +1441,30 @@ function cellValue(storeKey, field, which) {
     if (isNum(amt) && isNum(fee) && fee > 0) return { v: '1:' + (amt / fee).toFixed(2), kind: 'auto' };
   }
   // 业绩完成率 = 本月累计初诊业绩 / 初诊目标（目标为月度值：月初设定、当月沿用）
-  // 分母直接取「本月累计」行显示的目标值，保证与表内「初诊目标」列严格一致
+  // 分母直接取「本月累计」行显示的目标值，保证与表内「初诊目标」列严格一致。
+  // 若该门店的目标列已跨店合并：分子取组内各店月累计业绩之和，分母取合并格里的目标合计。
   if (col && col.k === 'perfRate' && state.source === 'auto') {
+    const grp = groupOf('tgtAmt', storeKey) || [storeKey];
     const agg = computeAgg();
-    const amt = agg && agg.cum ? (agg.cum[storeKey] || {}).actAmt : null;
-    const tgt = cellValue(storeKey, 'tgtAmt', 'cum').v;
-    if (isNum(amt) && isNum(tgt) && tgt > 0) return { v: amt / tgt, kind: 'auto' };
+    let amt = 0, has = false;
+    grp.forEach((k) => {
+      const v = agg && agg.cum ? (agg.cum[k] || {}).actAmt : null;
+      if (isNum(v)) { amt += v; has = true; }
+    });
+    const tgt = cellValue(grp[0], 'tgtAmt', 'cum').v;
+    if (has && isNum(tgt) && tgt > 0) return { v: amt / tgt, kind: 'auto' };
   }
-  // 好评完成率 = 月累计新增好评 / 好评目标（有日报表时才算，否则回落总表原值）
+  // 好评完成率 = 月累计新增好评 / 好评目标（有日报表时才算，否则回落总表原值）；合并口径同上
   if (col && col.k === 'revRate' && state.source === 'auto') {
+    const grp = groupOf('revTgt', storeKey) || [storeKey];
     const p = platAgg();
-    const cum = p && p.cum ? (p.cum[storeKey] || {}).revCnt : null;
-    const tgt = cellValue(storeKey, 'revTgt', which).v;
-    if (isNum(cum) && isNum(tgt) && tgt > 0) return { v: cum / tgt, kind: 'auto' };
+    let cum = 0, has = false;
+    grp.forEach((k) => {
+      const v = p && p.cum ? (p.cum[k] || {}).revCnt : null;
+      if (isNum(v)) { cum += v; has = true; }
+    });
+    const tgt = cellValue(grp[0], 'revTgt', which).v;
+    if (has && isNum(tgt) && tgt > 0) return { v: cum / tgt, kind: 'auto' };
   }
   if (sheetVal !== undefined) return normSheet(sheetVal);
   return { v: null, kind: null };
@@ -1506,6 +1523,14 @@ function shortName(storeKey) {
   if (!st) return storeKey;
   return storeName(st).replace(/^海蓓[^·]*·/, '');
 }
+/* 完成率列与其分母目标列的对应：业绩完成率→初诊目标，好评完成率→好评目标。
+   合并后完成率不再逐店计算，而是「组内月累计业绩合计 ÷ 组内目标合计」。 */
+const RATIO_TARGET_FIELD = { perfRate: 'tgtAmt', revRate: 'revTgt' };
+/** 参与合并值计算的门店集合：完成率跟随其分母目标列的合并组 */
+function calcGroupOf(field, storeKey) {
+  const tf = RATIO_TARGET_FIELD[field];
+  return (tf ? groupOf(tf, storeKey) : null) || groupOf(field, storeKey);
+}
 function fieldLabel(field) {
   const c = COLS.find((x) => x.k === field);
   return c ? c.label : field;
@@ -1522,14 +1547,6 @@ function crossMergeMap() {
   });
   return map;
 }
-/** 合并组内所有门店的「月累计」目标值是否一致（一致才算真正合并成一格） */
-function groupValuesOf(field, keys, which) {
-  return keys.map((k) => {
-    const { v } = cellValue(k, field, which || 'today');
-    return (v === null || v === undefined || v === '') ? '' : String(v);
-  });
-}
-
 /* ---------------- 渲染格式化 ---------------- */
 function display(kind, v, col) {
   if (v === null || v === undefined || v === '') return '<span class="dash">—</span>';
@@ -1892,20 +1909,20 @@ function startEdit(td) {
         if (v === '' || v === def) delete state.names[storeKey];
         else state.names[storeKey] = v;
       } else {
-        // 目标列若属于跨门店合并组：改一次 → 同步写入组内每家店（与合并格的语义一致）
-        const keys = groupOf(field, storeKey) || [storeKey];
+        // 合并格只有一份值：写到组内首位门店，其余门店清空覆盖（否则合计行会把同一笔目标重复相加）
+        const grp = groupOf(field, storeKey);
+        const target = grp ? grp[0] : storeKey;
         const textCol = col.type === 'text' || field === 'pm' || field === 'op';
-        keys.forEach((k) => {
-          const mk = manualKey(state.date, k, field);
-          if (v === '') { delete state.manual[mk]; return; }
-          if (textCol) state.manual[mk] = v;
-          else {
-            const n = Number(v.replace(/,/g, ''));
-            state.manual[mk] = isNaN(n) ? v : n;
-          }
-        });
-        if (keys.length > 1) {
-          toast('已同步到 ' + keys.length + ' 家门店：' + keys.map((k) => shortName(k)).join('、'), 'ok', 2400);
+        const mk = manualKey(state.date, target, field);
+        if (v === '') delete state.manual[mk];
+        else if (textCol) state.manual[mk] = v;
+        else {
+          const n = Number(v.replace(/,/g, ''));
+          state.manual[mk] = isNaN(n) ? v : n;
+        }
+        if (grp) {
+          grp.forEach((k) => { if (k !== target) delete state.manual[manualKey(state.date, k, field)]; });
+          toast('已写入合并格（' + grp.map((k) => shortName(k)).join('、') + ' 的合计值），合计行不重复计算', 'ok', 2600);
         }
       }
       saveLocal();
@@ -2012,31 +2029,66 @@ function toggleMergeMode() {
     : '已退出合并目标', 'ok', 3000);
 }
 
-/** 合并后的目标值统一：组内数值不一致时，以首店（或第一个有值的店）为准写入全部成员 */
-function unifyGroupValue(field, keys) {
-  const vals = groupValuesOf(field, keys, 'today');
-  const nonEmpty = vals.filter((v) => v !== '');
-  if (!nonEmpty.length) return null;
-  if (nonEmpty.every((v) => v === nonEmpty[0]) && nonEmpty.length === vals.length) return null;
-  const keep = nonEmpty[0];
+/** 合并后的目标值 = 组内合计（只保留一份，写在首位门店；组内其他门店清空覆盖）
+ *  · 各店原值互不相同 → 相加作为合并格的值（两家店的目标加在一起）
+ *  · 各店原值完全相同 → 视为「已统一过的一份值」，直接沿用（兼容旧数据里被复制到每店的值）
+ *  · 完成率是派生列（组内累计 ÷ 目标），不写手工值 */
+function seedGroupValue(field, keys) {
+  const del = (k) => { delete state.manual[manualKey(state.date, k, field)]; };
+  if (RATIO_TARGET_FIELD[field]) { keys.forEach(del); return null; }
   const col = COLS.find((c) => c.k === field);
   const textCol = col && (col.type === 'text' || col.type === 'scoreText');
-  const num = Number(String(keep).replace(/,/g, ''));
-  const out = (textCol || isNaN(num)) ? keep : num;
-  keys.forEach((k) => { state.manual[manualKey(state.date, k, field)] = out; });
+  const rawOf = (k) => {
+    let { v } = cellValue(k, field, 'today');
+    if (v === null || v === undefined || v === '') ({ v } = cellValue(k, field, 'cum'));
+    return (v === null || v === undefined) ? '' : String(v).trim();
+  };
+  const raws = keys.map(rawOf).filter((s) => s !== '' && s !== '—');
+  if (!raws.length) { keys.forEach(del); return null; }
+  const nums = raws.map((s) => Number(s.replace(/,/g, '')));
+  let out;
+  if (textCol || nums.some((n) => isNaN(n))) {
+    out = raws[0];                                   // 文本型目标（投产比）：取首个非空
+  } else if (nums.length === keys.length && nums.every((n) => n === nums[0])) {
+    out = nums[0];                                   // 各店同值：沿用（旧数据已被复制到每店）
+  } else {
+    out = nums.reduce((a, b) => a + b, 0);           // 不同值：合并 = 合计
+  }
+  state.manual[manualKey(state.date, keys[0], field)] = out;
+  keys.slice(1).forEach(del);
   return out;
 }
 
+/* 目标列合并时，对应的完成率必须同组：分母（目标）是共享的，分子也要按组合计，
+   否则两家店各自拿「自己的业绩 ÷ 合并后的总目标」算，数值无意义。 */
+const RATIO_OF_TARGET = { tgtAmt: 'perfRate', revTgt: 'revRate' };
 function addMergeGroup(field, keys) {
-  if (!Array.isArray(state.mergeGroups[field])) state.mergeGroups[field] = [];
-  state.mergeGroups[field].push(keys.slice());
+  const push = (f) => {
+    const arr = state.mergeGroups[f] || (state.mergeGroups[f] = []);
+    const sig = keys.join('|');
+    if (!arr.some((g) => g.join('|') === sig)) arr.push(keys.slice());
+  };
+  push(field);
+  const rf = RATIO_OF_TARGET[field];
+  if (rf) {
+    // 派生列不保留旧的逐店手工覆盖，避免合并后仍显示各自的值
+    keys.forEach((k) => { delete state.manual[manualKey(state.date, k, rf)]; });
+    push(rf);
+  }
 }
 function dropMergeGroup(field, storeKey) {
-  const gs = mergeGroupsFor(field);
   const g = groupOf(field, storeKey);
   if (!g) return null;
-  state.mergeGroups[field] = gs.filter((x) => x !== g);
-  if (!state.mergeGroups[field].length) delete state.mergeGroups[field];
+  const sig = g.join('|');
+  const rm = (f) => {                       // 按门店签名删除：各列的分组是各自 push 的数组副本，不能用引用比较
+    const gs = mergeGroupsFor(f);
+    const left = gs.filter((x) => x.join('|') !== sig);
+    if (left.length) state.mergeGroups[f] = left;
+    else delete state.mergeGroups[f];
+  };
+  rm(field);
+  const rf = RATIO_OF_TARGET[field];
+  if (rf) rm(rf);
   return g;
 }
 
@@ -2055,7 +2107,8 @@ function onMergePick(td) {
     _mergeAnchor = null;
     saveLocal();
     render();
-    toast('已拆分「' + fieldLabel(field) + '」：' + g.map((k) => shortName(k)).join('、'), 'ok', 2600);
+    toast('已拆分「' + fieldLabel(field) + '」：' + g.map((k) => shortName(k)).join('、') +
+      (RATIO_TARGET_FIELD[field] ? '；完成率恢复逐店计算' : '；合并格的值保留在 ' + shortName(g[0])), 'ok', 3000);
     return;
   }
   // 第一次点选：记起点
@@ -2082,13 +2135,17 @@ function onMergePick(td) {
     render();
     return;
   }
+  const keep = seedGroupValue(field, keys);   // 先按各店独立值算合计，再登记分组
   addMergeGroup(field, keys);
-  const keep = unifyGroupValue(field, keys);
   _mergeAnchor = null;
   saveLocal();
   render();
+  const pct = !!RATIO_TARGET_FIELD[field];
   toast('已合并 ' + keys.length + ' 家店的「' + fieldLabel(field) + '」' +
-    (keep === null ? '' : '，目标值统一为 ' + keep) + '；在合并格里设置一次即可', 'ok', 3600);
+    (pct
+      ? '：完成率 = 组内月累计业绩合计 ÷ 目标合计'
+      : (keep === null ? '；合并格里填一次 = 组内合计值' : '，合并格 = 组内合计 ' + keep + '（只有一份，合计行不重复计）')),
+    'ok', 3800);
 }
 
 function bindMerge() {
