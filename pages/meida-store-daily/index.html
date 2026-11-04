@@ -165,9 +165,16 @@
     background-image:linear-gradient(rgba(122,91,211,.30),rgba(122,91,211,.30)) !important;
     outline:2.4px solid #5b3fb0 !important;outline-offset:-2.4px;
   }
-  /* 已合并的目标格：紫色细框（代表这一格覆盖了多家门店） */
-  table.xl tbody td.tgt-mg{outline:1.6px solid rgba(122,91,211,.62);outline-offset:-1.6px;}
-  body.merge-mode table.xl tbody td.tgt-mg:hover{outline:2.4px solid #5b3fb0;outline-offset:-2.4px;}
+  /* 已合并的目标格：紫色外框（代表这一格覆盖了多家门店）
+     同时用 outline + inset box-shadow 画 2px 紫色框：outline 会被相邻单元格的
+     边框/底色覆盖掉一部分，inset 阴影始终在本格内部，四条边都稳定可见。 */
+  table.xl tbody td.tgt-mg{
+    outline:2px solid #7a5bd3;outline-offset:-2px;
+    box-shadow:inset 0 0 0 2px #7a5bd3;
+    background-image:linear-gradient(rgba(122,91,211,.07),rgba(122,91,211,.07));
+  }
+  body.merge-mode table.xl tbody td.tgt-mg{outline-color:#5b3fb0;box-shadow:inset 0 0 0 2px #5b3fb0;}
+  body.merge-mode table.xl tbody td.tgt-mg:hover{outline:3px solid #5b3fb0;outline-offset:-3px;box-shadow:inset 0 0 0 3px #5b3fb0;}
 
   .legend{display:flex;flex-wrap:wrap;gap:6px 16px;margin-top:10px;font-size:11.5px;color:var(--c-muted);}
   .legend i{display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:5px;vertical-align:-1px;border:1px solid rgba(0,0,0,.08);}
@@ -289,6 +296,7 @@
     <span><i style="background:var(--xl-today-a)"></i>当日数据行</span>
     <span><i style="background:var(--xl-cum-b)"></i>本月累计行</span>
     <span><i style="background:var(--xl-sum)"></i>合计行</span>
+    <span><i style="background:#eef0fb;border:2px solid #7a5bd3"></i>已合并门店（多店共用一格）</span>
     <span><i style="background:#1f8a4a;border-radius:50%"></i>订单自动计算</span>
     <span><i style="background:#3658d3;border-radius:50%"></i>平台三表汇总</span>
   </div>
