@@ -1157,17 +1157,18 @@ function platAgg() {
  * 四之四、门店报表（推广费）聚合
  * ---------------------------------------------------------------------
  * 数据源：门店报表_*.xlsx（A=日期 M-D / B=推广门店 / E=花费（元）= 推广费）。
- * 口径：当日取【报表当日】数据（D），与业绩 / 客量同一天口径；当日无数据则显示空（—），不向前借用。
- * 月累计 = 当月 1 日 ~ D 之间【有数据】的各日逐日累加。
+ * 口径：当日取【报表日前一天】的数据（报表日 11-04 → 取 11-03），与美团数据组一致；
+ *       前一天无数据则显示空（—），不向前借用更早日期（避免 11.1 / 11.2 显示同一值）。
+ * 月累计 = 当月 1 日 ~ D-1 之间【有数据】的各日逐日累加。
  * 优先级：手工覆盖 > 门店报表文件 > 七大店铺总表（cellValue 内裁决）。
  * ===================================================================== */
 let _promoCache = { key: '', data: null };
 
-// 推广费按「报表当日」取数：只取报表日期自己当天的花费；当日无数据则显示空（—），不向前借用其他日期
+// 推广费按「报表日前一天」取数：报表日 11-04 → 取 11-03 的花费；无数据则空（—），不向前借用其他日期
 function promoDate() {
   const date = state.date;
   if (!date) return '';
-  return date;
+  return addDays(date, -1);
 }
 
 /* 「美团数据」剩余列 + 「好评维护」组取的「前一天」：与 platDate() 同规则，作用在七大店铺总表的日期集合上 */
@@ -1504,10 +1505,11 @@ function mergeSetFor(store) {
  */
 // 可跨门店合并的列：四个月度目标 + 业绩完成率 / 好评完成率（2026-11-04 用户要求两家店可合一格设置）
 const TGT_MERGE_FIELDS = TARGET_FIELDS.concat(['perfRate', 'revRate']);
-/* 报表日当天无任何导入数据时，「当日数据」行只清空【按报表当日计】的列（业绩 / 客量 / 推广费）。
-   表头标注「填前一天数据」的列（美团数据组、榜单维护组、店铺评分）不动：它们本来就取导入表里
-   D-1 那一天的数据 —— 例：报表日期 11-04、导入表最新日期 11-03 → 这几种列显示 11-03 的数据。 */
-const TODAY_BLANK_FIELDS = ['actAmt', 'aov', 'lead', 'firstVis', 'newVab', 'promoFee'];
+/* 报表日当天无任何导入数据时，「当日数据」行只清空【按报表当日计】的列（业绩 / 客量 / 客资）。
+   其余列取的都是导入表里 D-1 那一天的数据，照常显示 —— 包括美团数据组、榜单维护组、店铺评分，
+   以及【推广费】（2026-11-04 起推广费也改为取前一天）。
+   例：报表日期 11-04、导入表最新日期 11-03 → 这些列显示 11-03 的数据。 */
+const TODAY_BLANK_FIELDS = ['actAmt', 'aov', 'lead', 'firstVis', 'newVab'];
 function mergeGroupsFor(field) {
   const arr = state.mergeGroups && state.mergeGroups[field];
   return Array.isArray(arr) ? arr.filter((g) => Array.isArray(g) && g.length > 1) : [];
@@ -1623,8 +1625,8 @@ function cellHTML(c, store, which, merge, mergedSet, crossMap) {
     return `<td class="txt editable${mk === 'manual' ? ' manual' : ''}" data-edit="1" data-store="${store.key}" data-field="${c.k}" data-which="${src}"${rs}>${esc(txt)}</td>`;
   }
   if (c.k === 'period') return `<td class="c-period"${rs}>${isToday ? '当日数据' : '本月累计'}</td>`;
-  // 报表日当天没有任何导入数据：只把【按报表当日计】的列（初诊业绩 / 客单价 / 客量 / 推广费）留空；
-  // 「填前一天数据」的列（美团数据 / 好评维护 / 店铺评分）照常显示导入表里 D-1 那一天的数据
+  // 报表日当天没有任何导入数据：只把【按报表当日计】的列（初诊业绩 / 客单价 / 客量 / 客资）留空；
+  // 取 D-1 数据的列（美团数据 / 好评维护 / 店铺评分 / 推广费）照常显示导入表里前一天的数据
   if (isToday && !state._todayHasData && TODAY_BLANK_FIELDS.indexOf(c.k) >= 0) {
     const blankKlass = (c.type === 'text' || c.type === 'scoreText' ? 'txt' : 'num') + (c.zone ? ' z-' + c.zone : '');
     return `<td class="${blankKlass}" data-edit="1" data-store="${store.key}" data-field="${c.k}" data-which="today"${rs}>—</td>`;
