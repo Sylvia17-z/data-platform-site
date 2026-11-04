@@ -483,6 +483,10 @@
   #render-error{margin-top:0 !important;padding:12px 14px !important;background:#fde4e4;color:#b3261e;border:1px solid #b3261e;border-radius:var(--radius-sm);font-size:13px;}
 
   /* ============ Toast ============ */
+  /* 文件输入视觉隐藏：不用 display:none —— 部分浏览器/扩展不把 <label for> 的点击转给 display:none 的 input */
+  .file-visually-hidden{position:absolute!important;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);clip-path:inset(50%);white-space:nowrap;border:0;}
+  label.btn[role="button"]{cursor:pointer;}
+  label.btn.drop-hot{outline:2px dashed #123c73;outline-offset:2px;background:#eaf2ff;}
   .toast{position:fixed;left:50%;top:24px;transform:translateX(-50%);background:#1f2d4d;color:#fff;padding:11px 20px;border-radius:10px;font-size:13px;box-shadow:var(--shadow-pop);z-index:9999;opacity:0;transition:opacity .25s;pointer-events:none;}
   .toast.show{opacity:1;}
   .toast.err{background:#b3261e;}
@@ -571,9 +575,10 @@
   <!-- 控制面板 -->
   <div class="panel" data-page-node-id="q3UG7s9I9lOeGXeyBazgrD">
     <h2 data-page-node-id="CAnTOEgbyucSNzEYBOtamy">① 数据导入</h2>
+    <p style="margin:-2px 0 10px;font-size:11.5px;color:var(--c-muted);line-height:1.6;">💡 点击按钮选择 Excel 文件；若点击没有反应，可直接把文件<b>拖到按钮上</b>导入。</p>
     <div class="dataseg" data-page-node-id="uRauk3BTriiIEQj3dJFP4P">
       <span class="seg-label" data-page-node-id="rcMNWKRBWP74I43ofv9dYm">订单明细</span>
-      <input type="file" id="file-orders" accept=".xlsx,.xls" hidden data-page-node-id="qPfudSznaBi8SGbJMA7Tvy" />
+      <input type="file" id="file-orders" accept=".xlsx,.xls" class="file-visually-hidden" data-page-node-id="qPfudSznaBi8SGbJMA7Tvy" />
       <label for="file-orders" class="btn btn-primary" data-page-node-id="BQzpkj18KygQmHmAUfLIfE">📁 上传订单表</label>
       <span class="seg-status">
         <span id="orders-meta" class="file-meta" data-page-node-id="WXC1BHVp6u6ppPQsqfxqkH">未导入</span>
@@ -588,7 +593,7 @@
     </div>
     <div class="dataseg" data-page-node-id="GuBPinJbNcTK30VWY2G5DZ">
       <span class="seg-label" data-page-node-id="nywmf7ZKstPW3vFTFE5ORl">VAB 名单</span>
-      <input type="file" id="file-vab" accept=".xlsx,.xls" hidden data-page-node-id="DXtBHsfyxdEcg3rFrb5nwS" />
+      <input type="file" id="file-vab" accept=".xlsx,.xls" class="file-visually-hidden" data-page-node-id="DXtBHsfyxdEcg3rFrb5nwS" />
       <label for="file-vab" class="btn" data-page-node-id="auLOVNlApcfoAfw3SxzTvF">👥 上传VAB会员表</label>
       <span class="seg-status">
         <span id="vab-meta" class="file-meta" data-page-node-id="xstmJe27hHeREDGXMIA0Ql">未导入</span>
@@ -600,7 +605,7 @@
     <!-- 2026-10-27：支持「追加导入 / 覆盖导入」模式选择；可一次多选多个文件；追加以「收款单号」去重（同单号新覆盖旧） -->
     <div class="dataseg">
       <span class="seg-label">历史明细</span>
-      <input type="file" id="file-history" accept=".xlsx,.xls" multiple hidden />
+      <input type="file" id="file-history" accept=".xlsx,.xls" multiple class="file-visually-hidden" />
       <label for="file-history" class="btn" title="上传最近一年的消费明细（订单项目收退款表格式，可一次选择多个文件）——用于判定「营销部顾客一年内无消费记录 → 视为初诊客户」；导入方式见右侧选择框，该数据不计入业绩金额，仅本地保存">📅 上传/追加历史消费明细数据</label>
       <select id="hist-import-mode" class="select" title="选择导入方式：追加导入=保留已有明细并合并去重；覆盖导入=清空已有明细后替换为本文件内容">
         <option value="append" selected>追加导入（合并去重）</option>

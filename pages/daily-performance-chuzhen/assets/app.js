@@ -5950,6 +5950,60 @@ function toggleTargetsPanel(){
   $('targets-arrow').textContent = targetsCollapsed ? '▼ 展开' : '▲ 收起';
 }
 
+/* ---- 文件选择入口加固（2026-11-04）----
+   现象：用户反馈「📁 上传订单表」点击完全没反应（Chrome 桌面；线上与本机文件字节一致，
+   排除版本错位）。根因不在业务逻辑：<label for> 的点击转发是浏览器原生行为，在部分浏览器
+   扩展 / 企业策略 / 内嵌 WebView 下会被吞掉；且 display:none 的 input 在个别环境无法被
+   programmatic click 可靠唤起。
+   措施：
+     ① input 由 hidden 改为视觉隐藏（.file-visually-hidden，见 index.html）；
+     ② label 显式接住 click → preventDefault + input.click()，不再依赖原生转发；
+     ③ label 同时作为拖拽落点：把 Excel 直接拖到按钮上即可导入，绕过文件选择框；
+     ④ 键盘 Enter / Space 同样可唤起（可访问性）。 */
+function bindFileImporters(){
+  const PAIRS = [
+    { id:'file-orders',  handler: onFileOrders,  name:'订单表' },
+    { id:'file-vab',     handler: onFileVab,     name:'VAB 会员表' },
+    { id:'file-history', handler: onFileHistory, name:'历史消费明细' },
+  ];
+  PAIRS.forEach(pair => {
+    const inp = $(pair.id);
+    if(!inp) return;
+    const label = document.querySelector('label[for="' + pair.id + '"]');
+    if(!label || label.dataset.importerBound === '1') return;
+    label.dataset.importerBound = '1';
+    label.setAttribute('role', 'button');
+    label.setAttribute('tabindex', '0');
+    label.title = '点击选择 Excel 文件；若点击无反应，可直接把文件拖到这里导入';
+
+    // 显式唤起：不依赖浏览器对 label→input 的原生转发
+    label.addEventListener('click', e => {
+      e.preventDefault();          // 阻止原生转发，避免二次弹框
+      try{ inp.click(); }catch(err){}
+    });
+    label.addEventListener('keydown', e => {
+      if(e.key === 'Enter' || e.key === ' '){ e.preventDefault(); try{ inp.click(); }catch(err){} }
+    });
+
+    // 拖拽导入：文件选择框被系统策略禁用时的兜底通道
+    let depth = 0;
+    label.addEventListener('dragenter', e => { e.preventDefault(); depth++; label.classList.add('drop-hot'); });
+    label.addEventListener('dragover',  e => { e.preventDefault(); try{ e.dataTransfer.dropEffect = 'copy'; }catch(_){} });
+    label.addEventListener('dragleave', e => { e.preventDefault(); if(--depth <= 0){ depth = 0; label.classList.remove('drop-hot'); } });
+    label.addEventListener('drop', e => {
+      e.preventDefault(); depth = 0; label.classList.remove('drop-hot');
+      const files = Array.from((e.dataTransfer && e.dataTransfer.files) || []);
+      if(!files.length) return;
+      const bad = files.find(f => !/\.(xlsx|xls)$/i.test(f.name || ''));
+      if(bad){ showToast('请拖入 Excel 文件（.xlsx / .xls）：' + bad.name, 'err', 5200); return; }
+      showToast('已接收拖入文件：' + files.map(f => f.name).join('、'), 'ok', 3000);
+      Promise.resolve(pair.handler({ files })).catch(err => {
+        showToast(pair.name + '导入失败：' + ((err && err.message) || err), 'err', 6000);
+      });
+    });
+  });
+}
+
 function initApp(){
   $('cutoff-date').value = todayIso();
   renderTargets();
@@ -5973,6 +6027,7 @@ function initApp(){
   $('file-vab').addEventListener('change', e=>onFileVab(e.target));
   // 历史消费明细数据导入 / 清除（2026-10-16 新增：一年内无消费→初诊 新客规则数据源）
   $('file-history').addEventListener('change', e=>onFileHistory(e.target));
+  bindFileImporters();   // 选择入口加固：显式唤起 + 拖拽导入（2026-11-04）
   // 追加上传（2026-10-27）：兼容旧缓存 HTML —— 确保可一次多选多个文件；并同步入口文案
   (function ensureHistAppendUi(){
     const fh = $('file-history');
