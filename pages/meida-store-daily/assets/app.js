@@ -1350,6 +1350,20 @@ function storeName(store) {
   return (v === null || v === undefined || v === '') ? store.name : v;
 }
 
+/** 报表日期当天是否有任何导入数据（七大店铺总表 / 平台三表 / 门店报表 / 订单） */
+function hasDataForDate(date) {
+  if (!date) return false;
+  if (state.rows[date] && Object.keys(state.rows[date] || {}).length) return true;
+  if (state.daily[date] && Object.keys(state.daily[date] || {}).length) return true;
+  if (state.promo[date] && Object.keys(state.promo[date] || {}).length) return true;
+  if (state.orders && state.orders.length) {
+    for (let i = 0; i < state.orders.length; i++) {
+      if (fmtDate(state.orders[i].payTime) === date) return true;
+    }
+  }
+  return false;
+}
+
 /**
  * 取某店某日某列的展示值
  * 返回 { v, kind }  kind: 'auto' | 'sheet' | 'manual' | 'merged' | null
@@ -1471,7 +1485,10 @@ function mergeSetFor(store) {
  * 结构：state.mergeGroups = { tgtAmt: [['美大-北郊保健','美大-北郊医疗'], …] }
  * 约束：组内门店在 STORES 顺序上必须连续，否则 rowspan 会跨到别的店的行上导致错位。
  */
-const TGT_MERGE_FIELDS = TARGET_FIELDS.slice();
+// 可跨门店合并的列：四个月度目标 + 业绩完成率 / 好评完成率（2026-11-04 用户要求两家店可合一格设置）
+const TGT_MERGE_FIELDS = TARGET_FIELDS.concat(['perfRate', 'revRate']);
+// 报表日当天无导入数据时，当日数据行仍保留的列：店铺信息 / 评分榜单 / 月度目标 / 完成率；其余当日数值列留空
+const TODAY_KEEP_FIELDS = MERGED_FIELDS.concat(TARGET_FIELDS, ['perfRate', 'revRate']);
 function mergeGroupsFor(field) {
   const arr = state.mergeGroups && state.mergeGroups[field];
   return Array.isArray(arr) ? arr.filter((g) => Array.isArray(g) && g.length > 1) : [];
@@ -1587,6 +1604,12 @@ function cellHTML(c, store, which, merge, mergedSet, crossMap) {
     return `<td class="txt editable${mk === 'manual' ? ' manual' : ''}" data-edit="1" data-store="${store.key}" data-field="${c.k}" data-which="${src}"${rs}>${esc(txt)}</td>`;
   }
   if (c.k === 'period') return `<td class="c-period"${rs}>${isToday ? '当日数据' : '本月累计'}</td>`;
+  // 报表日当天没有任何导入数据：当日数据行的数值列一律留空（含美团 D-1 列），
+  // 仅保留店铺信息 / 评分榜单 / 月度目标 / 业绩·好评完成率（2026-11-04 用户确认）
+  if (isToday && !state._todayHasData && TODAY_KEEP_FIELDS.indexOf(c.k) < 0) {
+    const blankKlass = (c.type === 'text' || c.type === 'scoreText' ? 'txt' : 'num') + (c.zone ? ' z-' + c.zone : '');
+    return `<td class="${blankKlass}" data-edit="1" data-store="${store.key}" data-field="${c.k}" data-which="today"${rs}>—</td>`;
+  }
   if (c.auto) {
     const { v, kind } = cellValue(store.key, c.k, src);
     const inner = (kind === 'auto' && typeof v === 'number')
@@ -1617,10 +1640,11 @@ function storeBlockHTML(store, crossMap) {
 }
 
 function sumRowHTML(label, which) {
+  const blankToday = which === 'today' && !state._todayHasData;   // 当日无导入：合计（当日）也留空
   const cells = COLS.map((c) => {
     if (c.k === 'store') return `<td class="c-store" style="font-weight:700;">${esc(label)}</td>`;
     if (c.k === 'period') return `<td class="c-period">—</td>`;
-    if (c.type === 'text' || c.type === 'scoreText' || !SUM_KEYS.includes(c.k)) {
+    if (blankToday || c.type === 'text' || c.type === 'scoreText' || !SUM_KEYS.includes(c.k)) {
       return `<td class="num${c.zone ? ' z-' + c.zone : ''}"><span class="dash">—</span></td>`;
     }
     let total = null;
@@ -1644,6 +1668,7 @@ function renderTable() {
   }
   $('tbl-empty').style.display = 'none';
   $('tbl').style.display = '';
+  state._todayHasData = hasDataForDate(state.date);   // 当日是否已导入数据（决定「当日数据」行是否留空）
   ensureColgroup();
   renderThead();
   const crossMap = crossMergeMap();
@@ -2017,7 +2042,7 @@ function onMergePick(td) {
   const field = td.dataset.field;
   const storeKey = td.dataset.store;
   if (TGT_MERGE_FIELDS.indexOf(field) < 0) {
-    toast('只有四个目标列可以合并：初诊目标 / 客量目标 / 投产比目标 / 好评目标', 'warn', 3000);
+    toast('可合并的列：初诊目标 / 客量目标 / 投产比目标 / 好评目标 / 业绩完成率 / 好评完成率', 'warn', 3200);
     return;
   }
   // 已在合并组里 → 本次点击视为拆分
