@@ -510,18 +510,35 @@ function invalidateMktKeyCaches(){
 /* =================== 云端持久化（WorkBuddy Cloud Service，按账号隔离） ===================
  * 根因：发布/访问环境会抹掉 localStorage/IndexedDB 的跨会话持久性（sandbox 不透明源 / origin 漂移），
  * 导致刷新/重进丢数据。改为订单数据落地云端（服务端），刷新 / 换设备 / 关机均不丢。
- * 仅在注册域名（haibei-medical.app.workbuddy.host）生效；本地/预览环境会优雅降级为「仅本机」。 */
-const CLOUD_ENDPOINT = (typeof window !== 'undefined' && window.CLOUD_ENDPOINT) || 'https://haibei-medical.app.workbuddy.host';
-const CLOUD_PK = (typeof window !== 'undefined' && window.CLOUD_PK) || 'wbpk_KQXIeDHLXWDHN7WQp3zqUQ_Y5IlM6hJd7n10U8UN5bYmSGUYeevVOwl';
+ * 后端已迁至腾讯云 CloudBase（shared/cloudbase-bridge.js 统一加载并初始化）；本地/预览环境 getCloud() 返回 null 优雅降级为「仅本机」。 */
+const CLOUD_ENDPOINT = (typeof window !== 'undefined' && window.CLOUD_ENDPOINT) || '';
+const CLOUD_PK = (typeof window !== 'undefined' && window.CLOUD_PK) || '';
 let _cloudClient = null;
 let _cloudUser = null;
 let _cloudSaveTimer = null;
 let _pendingOtp = null;
 
+/* 本地内置管理员（admin/123）→ 完全跳过云端：数据仅本机。
+ * 原因：CloudBase publishable key 会自动带一个「匿名会话」，getSession() 会返回它，
+ * 但匿名角色(anon)对 dp_* 表无授权（仅授权 authenticated + RLS 放行登录用户），
+ * 若照常上传会报 permission denied。管理员按设计本就是纯本地模式。 */
+function isLocalAdmin(){
+  try{
+    var s = JSON.parse(localStorage.getItem('site-admin-session') || 'null');
+    if(s && s.user && Number(s.expiresAt) > Date.now()) return true;
+  }catch(e){}
+  try{
+    var raw = localStorage.getItem('workbuddy-cloud.session.' + CLOUD_PK);
+    if(raw){ var j = JSON.parse(raw); if(j && j.user && (j.user.id === 'site-admin' || j.user.email === 'admin')) return true; }
+  }catch(e){}
+  return false;
+}
+
 function getCloud(){
+  if(isLocalAdmin()) return null;   // 本地管理员：不接云端，脏标记/同步全部降级为「仅本机」
   if(_cloudClient) return _cloudClient;
-  if(typeof window.WorkBuddyCloud === 'undefined') return null;
-  try{ _cloudClient = window.WorkBuddyCloud.createWorkBuddyCloud({ endpoint: CLOUD_ENDPOINT, publishableKey: CLOUD_PK }); }
+  if(!window.CB) return null;
+  try{ _cloudClient = window.CB.client(); }
   catch(e){ _cloudClient = null; }
   return _cloudClient;
 }
@@ -559,17 +576,11 @@ function readAuthBackup(){
 function clearAuthBackup(){ try{ localStorage.removeItem(AUTH_BACKUP_KEY); }catch(e){} }
 async function restoreAuthSession(){
   const cloud = getCloud(); if(!cloud) return null;
-  const bk = readAuthBackup(); if(!bk) return null;
+  // CloudBase v3 SDK 自行管理会话持久化（cookie/localStorage），直接探活即可
   try{
-    // 把备份会话写回 SDK 的存储键，再走 getSession() → ensure() → refreshOnce 静默续期
-    localStorage.setItem(SDK_SESSION_KEY, JSON.stringify({
-      accessToken: bk.accessToken, refreshToken: bk.refreshToken,
-      expiresAt: bk.expiresAt || 0, user: bk.user,
-    }));
     const r = await cloud.auth.getSession();
     if(r && r.data && r.data.user){ backupAuthSession(r.data); return r.data; }
   }catch(e){}
-  clearAuthBackup();
   return null;
 }
 let _cloudKeepaliveTimer = null;
@@ -719,6 +730,7 @@ async function applyCloudObj(obj){
 function markCloudDirty(force){
   if(_applyingCloud) return;              // 正在应用云端快照 → 不回写
   bumpSnapTs();
+  if(isLocalAdmin()) return;              // 本地管理员：只更新本机快照版本，不推送云端
   // 无订单时不推送（清空流程走 clearOrdersInCloud），避免把云端已有订单误覆盖成空快照
   if(Array.isArray(state.orders) && state.orders.length > 0) saveOrdersToCloud(!!force);
 }
@@ -739,6 +751,7 @@ function monthOfOrders(orders){
 async function syncFromCloud(opts){
   const silent = !!(opts && opts.silent);   // 后台轮询触发：不弹恢复提示
   const forcePull = !!(opts && opts.forcePull); // 「从云端恢复」手动按钮：忽略本地裁决，强制采用云端
+  if(isLocalAdmin()){ showCloudActions(false); setCloudStatus('本地管理员 · 数据仅保存在本机', 'warn'); return; }
   const cloud = getCloud();
   if(!cloud){ setCloudStatus('云端组件加载中…（多源回退）请稍候', 'warn'); return; }
   let session = null;
@@ -858,6 +871,7 @@ async function syncFromCloud(opts){
 }
 async function saveOrdersToCloud(force){
   if(_cloudSaveTimer){ clearTimeout(_cloudSaveTimer); _cloudSaveTimer = null; }
+  if(isLocalAdmin()) return;   // 本地管理员：不推送云端，静默跳过（避免误弹「云端未就绪」）
   // 失败可见性（2026-10-16）：force=true 表示用户显式动作（导入 / 清空 / 重算）触发的保存，
   // 此时若云端没写成，除状态条外再弹一次 toast，避免「以为已存云端、其实只在本机」的静默失败。
   const failSave = (msg) => {
@@ -931,6 +945,7 @@ async function saveOrdersToCloud(force){
 }
 // 仅明细（无订单）时上传：把 hist 合并进云端已有订单快照后 upsert，避免「仅明细设备」把云端订单清空（2026-10-20）
 async function saveHistOnlyToCloud(gz){
+  if(isLocalAdmin()) return;   // 本地管理员：明细仅本机
   const cloud = getCloud();
   if(!cloud){ setCloudStatus('云端组件未就绪：明细仅保存在本机', 'err'); return; }
   let session = null;
@@ -959,6 +974,7 @@ async function saveHistOnlyToCloud(gz){
 // 仅 VAB 名单（本机无订单）时上云：合并进云端已有快照后 upsert，避免「仅 VAB 设备」把云端订单/明细清空（2026-10-24）
 async function saveVabOnlyToCloud(){
   _vabCloudTimer = null;
+  if(isLocalAdmin()) return;   // 本地管理员：VAB 仅本机
   const cloud = getCloud();
   if(!cloud){ setCloudStatus('云端组件未就绪：VAB 名单仅保存在本机', 'err'); return; }
   let session = null;
@@ -1004,6 +1020,7 @@ async function pushLocalSnapshotToCloud(){
   if((state.vabList||[]).length > 0){ await saveVabOnlyToCloud(); return; }
 }
 async function clearOrdersInCloud(){
+  if(isLocalAdmin()) return;   // 本地管理员：无需清云端
   const cloud = getCloud(); if(!cloud) return;
   let session = null;
   try{ const r = await cloud.auth.getSession(); session = r.data; if(r.error) session = null; }catch(e){ session = null; }
@@ -2540,7 +2557,8 @@ function copyDailyColumn(dateStr, idx, isStore){
   });
   const text = lines.join('\n');
   copyTextToClipboard(text).then(ok=>{
-    showToast(ok ? `已复制 ${dateStr} 整列数据（${lines.length} 行）` : '复制失败，请手动选择复制', ok ? 'ok' : 'err', 2600);
+    if(ok) showToast(`已复制 ${dateStr} 整列数据（${lines.length} 行）`, 'ok', 2600);
+    else { copyTextFallbackUI(text); showToast('已弹出复制窗口，可长按文本复制', 'warn', 2600); }
   });
 }
 
@@ -2570,6 +2588,35 @@ function fallbackCopy(text){
     document.body.removeChild(ta);
     return ok;
   }catch(e){ return false; }
+}
+
+// 复制失败兜底：移动端 execCommand 常被禁用 / 非 HTTPS 无剪贴板权限，
+// 弹出一个可长按选择并复制的文本浮层，保证用户始终能手动取出数据。
+function copyTextFallbackUI(text){
+  try{
+    const old = document.getElementById('copy-fallback-mask');
+    if(old) old.remove();
+    const mask = document.createElement('div');
+    mask.id = 'copy-fallback-mask';
+    mask.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:2000;display:flex;align-items:center;justify-content:center;padding:16px;';
+    const box = document.createElement('div');
+    box.style.cssText = 'background:#fff;border-radius:10px;max-width:92vw;width:420px;padding:14px;box-shadow:0 8px 30px rgba(0,0,0,.25);font-family:sans-serif;';
+    const title = document.createElement('div');
+    title.textContent = '复制失败，请长按下方文本并选择「复制」';
+    title.style.cssText = 'font-size:14px;font-weight:600;color:#002060;margin-bottom:8px;';
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.readOnly = true;
+    ta.style.cssText = 'width:100%;height:160px;font-size:13px;line-height:1.5;padding:8px;border:1px solid #c9d8f0;border-radius:6px;resize:none;box-sizing:border-box;';
+    const close = document.createElement('button');
+    close.textContent = '知道了';
+    close.style.cssText = 'margin-top:10px;width:100%;padding:10px;border:none;border-radius:6px;background:#3658d3;color:#fff;font-size:14px;';
+    box.appendChild(title); box.appendChild(ta); box.appendChild(close); mask.appendChild(box);
+    document.body.appendChild(mask);
+    requestAnimationFrame(function(){ try{ ta.focus(); ta.select(); }catch(_){} });
+    close.addEventListener('click', function(){ mask.remove(); });
+    mask.addEventListener('click', function(e){ if(e.target === mask) mask.remove(); });
+  }catch(e){ /* 兜底失败静默 */ }
 }
 
 // 表格列宽设置与拖拽：动态列数
@@ -5191,6 +5238,7 @@ function openDatePick(target){
     <div class="datepick-grid" id="datepick-grid"><div class="file-meta">正在生成日历…</div></div>
     <div class="modal-actions">
       <span class="datepick-info" id="datepick-info"></span>
+      <button type="button" class="btn" id="datepick-copy" title="复制对话框中勾选的日期列（不依赖屏幕上该列是否可见）">📋 复制所选日期</button>
       <button type="button" class="btn" id="datepick-cancel">取消</button>
       <button type="button" class="btn btn-primary" id="datepick-apply">应用</button>
     </div>
@@ -5230,6 +5278,7 @@ function bindDatePickEvents(mask){
       syncDatePickChecks();
       return;
     }
+    if(e.target.closest('#datepick-copy')){ copySelectedDates(); return; }
     if(e.target.closest('#datepick-cancel')){ closeDatePick(); return; }
     if(e.target.closest('#datepick-apply')){ applyDatePick(); return; }
   });
@@ -5435,7 +5484,62 @@ function copyEcSubColumn(colKey){
     return raw !== undefined ? fmtPlain(raw) : (td.textContent || '').replace(/,/g, '').trim();
   });
   copyTextToClipboard(vals.join('\n')).then(ok=>{
-    showToast(ok ? `已复制该列 ${vals.length} 行` : '复制失败，请手动选择复制', ok ? 'ok' : 'err', 2200);
+    if(ok) showToast(`已复制该列 ${vals.length} 行`, 'ok', 2200);
+    else { copyTextFallbackUI(vals.join('\n')); showToast('已弹出复制窗口，可长按文本复制', 'warn', 2400); }
+  });
+}
+
+// 从「📅 指定日期」对话框复制当前勾选的日期列：不依赖屏幕上该列是否可见，
+// 移动端最可靠（避免列被收起 / 横向滚动导致找不到「复制」按钮）。多日期合并为一个文本块。
+function copySelectedDates(){
+  const target = _datePickTarget;
+  const sel = [...(_datePickSel || [])];
+  if(!target || !sel.length){ showToast('请先在对话框勾选要复制的日期', 'warn', 2200); return; }
+  sel.sort();
+  const parts = [];
+  if(target === 'ec'){
+    const body = $('ec-sub-body');
+    if(!body){ showToast('电商二级渠道报表尚未渲染', 'err', 2000); return; }
+    const subCols = [['cnt:d:','初诊客量'],['amt:d:','初诊金额'],['allcnt:d:','全部客量'],['allamt:d:','全部金额']];
+    for(const d of sel){
+      const lines = [];
+      for(const [prefix] of subCols){
+        const colKey = prefix + d;
+        const tds = [...body.querySelectorAll(`tr:not([data-total]) td[data-col="${colKey}"]`)];
+        const vals = tds.map(td => {
+          const raw = td.dataset.val;
+          return raw !== undefined ? fmtPlain(raw) : (td.textContent || '').replace(/,/g, '').trim();
+        });
+        if(vals.length) lines.push(...vals);
+      }
+      if(lines.length) parts.push(`【${d}】\n` + lines.join('\n'));
+    }
+  } else {
+    const isStore = (target === 'store');
+    const dailyResults = state.dailyResults || [];
+    const dateList = state.dateList || [];
+    const rows = isStore ? STORE_ROWS : REPORT_TEMPLATE;
+    for(const d of sel){
+      const idx = dateList.indexOf(d);
+      if(idx < 0) continue;
+      const dr = dailyResults[idx];
+      const lines = [];
+      rows.forEach(row=>{
+        if(row.hideRow) return;
+        const rowKey = row.valueKey || row.targetKey || row.sub || row.item;
+        const manualV = state.manual.daily[d]?.[rowKey];
+        const v = manualV !== undefined ? manualV
+          : (dr ? (dr.values[row.sub] ?? dr.values[row.item] ?? dr.values[row.targetKey] ?? 0) : 0);
+        lines.push(fmtPlain(v));
+      });
+      if(lines.length) parts.push(`【${d}】\n` + lines.join('\n'));
+    }
+  }
+  const text = parts.join('\n\n');
+  if(!text.trim()){ showToast('所选日期暂无可复制数据', 'err', 2000); return; }
+  copyTextToClipboard(text).then(ok=>{
+    if(ok) showToast(`已复制 ${sel.length} 个日期列（可黏贴到 Excel）`, 'ok', 2600);
+    else { copyTextFallbackUI(text); showToast('已弹出复制窗口，可长按文本复制', 'warn', 2600); }
   });
 }
 
