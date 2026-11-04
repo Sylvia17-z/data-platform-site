@@ -131,8 +131,8 @@
   function valueCell(col, storeKey, which, spec) {
     const { v, kind } = cellValue(storeKey, col.k, which);
     const base = Object.assign({}, spec);
-    // 当日无导入数据：当日行数值列留空（与页面 cellHTML 同一规则）
-    if (state._todayHasData === false && which === 'today' && TODAY_KEEP_FIELDS.indexOf(col.k) < 0) return dashCell(base);
+    // 当日无导入数据：只清空按报表当日计的列（与页面 cellHTML 同一规则）；D-1 列照常显示前一天数据
+    if (state._todayHasData === false && which === 'today' && TODAY_BLANK_FIELDS.indexOf(col.k) >= 0) return dashCell(base);
     if (kind === 'sheet') { base.color = TEXT.fallback; base.italic = true; }
     if (v === null || v === undefined || v === '') return dashCell(base);
     if (typeof v === 'number' && isFinite(v)) {
@@ -143,8 +143,8 @@
   // 合计行单格：与 sumRowHTML() 同源
   function sumCell(col, which, spec) {
     if (col.k === 'period') return { v: '—', t: 's', spec: Object.assign({}, spec, { color: TEXT.dash }) };
-    // 当日无导入数据：合计（当日）行同样留空（与页面 sumRowHTML 同一规则）
-    if (state._todayHasData === false && which === 'today') return dashCell(spec);
+    // 当日无导入数据：合计（当日）行同样只清空按报表当日计的列（与页面 sumRowHTML 同一规则）
+    if (state._todayHasData === false && which === 'today' && TODAY_BLANK_FIELDS.indexOf(col.k) >= 0) return dashCell(spec);
     if (isTextCol(col) || SUM_KEYS.indexOf(col.k) < 0) return dashCell(spec);
     let total = null;
     STORES.forEach((s) => {

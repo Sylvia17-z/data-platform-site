@@ -1487,8 +1487,10 @@ function mergeSetFor(store) {
  */
 // 可跨门店合并的列：四个月度目标 + 业绩完成率 / 好评完成率（2026-11-04 用户要求两家店可合一格设置）
 const TGT_MERGE_FIELDS = TARGET_FIELDS.concat(['perfRate', 'revRate']);
-// 报表日当天无导入数据时，当日数据行仍保留的列：店铺信息 / 评分榜单 / 月度目标 / 完成率；其余当日数值列留空
-const TODAY_KEEP_FIELDS = MERGED_FIELDS.concat(TARGET_FIELDS, ['perfRate', 'revRate']);
+/* 报表日当天无任何导入数据时，「当日数据」行只清空【按报表当日计】的列（业绩 / 客量 / 推广费）。
+   表头标注「填前一天数据」的列（美团数据组、榜单维护组、店铺评分）不动：它们本来就取导入表里
+   D-1 那一天的数据 —— 例：报表日期 11-04、导入表最新日期 11-03 → 这几种列显示 11-03 的数据。 */
+const TODAY_BLANK_FIELDS = ['actAmt', 'aov', 'lead', 'firstVis', 'newVab', 'promoFee'];
 function mergeGroupsFor(field) {
   const arr = state.mergeGroups && state.mergeGroups[field];
   return Array.isArray(arr) ? arr.filter((g) => Array.isArray(g) && g.length > 1) : [];
@@ -1604,9 +1606,9 @@ function cellHTML(c, store, which, merge, mergedSet, crossMap) {
     return `<td class="txt editable${mk === 'manual' ? ' manual' : ''}" data-edit="1" data-store="${store.key}" data-field="${c.k}" data-which="${src}"${rs}>${esc(txt)}</td>`;
   }
   if (c.k === 'period') return `<td class="c-period"${rs}>${isToday ? '当日数据' : '本月累计'}</td>`;
-  // 报表日当天没有任何导入数据：当日数据行的数值列一律留空（含美团 D-1 列），
-  // 仅保留店铺信息 / 评分榜单 / 月度目标 / 业绩·好评完成率（2026-11-04 用户确认）
-  if (isToday && !state._todayHasData && TODAY_KEEP_FIELDS.indexOf(c.k) < 0) {
+  // 报表日当天没有任何导入数据：只把【按报表当日计】的列（初诊业绩 / 客单价 / 客量 / 推广费）留空；
+  // 「填前一天数据」的列（美团数据 / 好评维护 / 店铺评分）照常显示导入表里 D-1 那一天的数据
+  if (isToday && !state._todayHasData && TODAY_BLANK_FIELDS.indexOf(c.k) >= 0) {
     const blankKlass = (c.type === 'text' || c.type === 'scoreText' ? 'txt' : 'num') + (c.zone ? ' z-' + c.zone : '');
     return `<td class="${blankKlass}" data-edit="1" data-store="${store.key}" data-field="${c.k}" data-which="today"${rs}>—</td>`;
   }
@@ -1640,11 +1642,12 @@ function storeBlockHTML(store, crossMap) {
 }
 
 function sumRowHTML(label, which) {
-  const blankToday = which === 'today' && !state._todayHasData;   // 当日无导入：合计（当日）也留空
+  const blankRow = which === 'today' && !state._todayHasData;   // 当日无导入：合计（当日）只清空按报表当日计的列
   const cells = COLS.map((c) => {
     if (c.k === 'store') return `<td class="c-store" style="font-weight:700;">${esc(label)}</td>`;
     if (c.k === 'period') return `<td class="c-period">—</td>`;
-    if (blankToday || c.type === 'text' || c.type === 'scoreText' || !SUM_KEYS.includes(c.k)) {
+    if ((blankRow && TODAY_BLANK_FIELDS.indexOf(c.k) >= 0)
+        || c.type === 'text' || c.type === 'scoreText' || !SUM_KEYS.includes(c.k)) {
       return `<td class="num${c.zone ? ' z-' + c.zone : ''}"><span class="dash">—</span></td>`;
     }
     let total = null;
