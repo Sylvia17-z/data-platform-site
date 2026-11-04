@@ -282,6 +282,7 @@
   </div>
 </div>
 
+<script src="/shared/cloudbase-bridge.js?v=20261031b"></script>
 <script src="/shared/kpi-cloud-sync.js?v=20261029a"></script>
 <script src="./vendor/xlsx.full.min.js"></script>
 <script src="./vendor/jszip.min.js"></script>
@@ -1282,8 +1283,7 @@
   /* ---------- 云端持久化（WorkBuddy Cloud Service，按账号隔离） ----------
    * 目的：导入的明细与聚合结果不随浏览器/设备丢失。整包 JSONB 快照存 dp_monthly，
    * 每账号一行（owner_id 由服务端 auth.uid() 填充 + RLS 隔离），未登录时不影响本机使用。 */
-  window.CLOUD_ENDPOINT = window.CLOUD_ENDPOINT || 'https://haibei-medical.app.workbuddy.host';
-  window.CLOUD_PK = window.CLOUD_PK || 'wbpk_KQXIeDHLXWDHN7WQp3zqUQ_Y5IlM6hJd7n10U8UN5bYmSGUYeevVOwl';
+  /* 后端已迁至腾讯云 CloudBase：环境/密钥由 shared/cloudbase-bridge.js (window.CB) 提供 */
   var KPI_TS_KEY = 'kpi_cloud_ts_monthly';
   function dashPayload(){
     if(!dash.rows || !dash.rows.length || !dash.map) return null;

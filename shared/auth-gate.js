@@ -13,12 +13,9 @@
 (function(){
   if(window.__SITE_AUTH_GATE__) return; window.__SITE_AUTH_GATE__ = true;
 
-  var PK = (window.CLOUD_PK) || 'wbpk_KQXIeDHLXWDHN7WQp3zqUQ_Y5IlM6hJd7n10U8UN5bYmSGUYeevVOwl';
-  /* 认证接口在云端服务上，默认不能用 location.origin：本机（localhost:8123）调试时它指向本地静态服务，
-     没有 /.cloud/auth 路由，getSession 会 404 → 被判成未登录 → 登录页与首页互相跳转成死循环。
-     与各业务页里硬编码的地址保持一致；需要切环境时先设 window.CLOUD_ENDPOINT 覆盖。 */
-  var ENDPOINT = (window.CLOUD_ENDPOINT) || 'https://haibei-medical.app.workbuddy.host';
-  var SESSION_KEY = 'workbuddy-cloud.session.' + PK;
+  /* 后端已迁至腾讯云 CloudBase（见 shared/cloudbase-bridge.js）：PK/ENDPOINT 改由 window.CB 提供。 */
+  var PK = (window.CB && window.CB.PK) || '';
+  var SESSION_KEY = 'workbuddy-cloud.session.' + (PK || 'local');
   var PING_KEY = 'site-auth-ping';
   var LOGIN_URL = '/pages/login/index.html';
   var ADMIN_KEY = 'site-admin-session';   // 默认管理员本地会话（登录页 seed，30 天）
@@ -30,32 +27,15 @@
     }catch(e){ return null; }
   }
 
-  /* ---------- SDK 加载（若宿主页已加载则直接复用） ---------- */
-  function loadSdk(cb){
-    if(window.WorkBuddyCloud) return cb();
-    var urls = [
-      'https://cdn.jsdelivr.net/npm/@tencent-ai/workbuddy-cloud-sdk@dev/lib/index.global.js',
-      'https://unpkg.com/@tencent-ai/workbuddy-cloud-sdk@dev/lib/index.global.js',
-      'https://registry.npmmirror.com/@tencent-ai/workbuddy-cloud-sdk/latest/files/lib/index.global.js'
-    ];
-    var i = 0;
-    (function tryNext(){
-      if(i >= urls.length){ setTimeout(function(){ tryNext(); }, 5000); return; }  // 全部失败 5s 后重试
-      var s = document.createElement('script');
-      s.src = urls[i++];
-      s.onload = function(){ if(window.WorkBuddyCloud) cb(); else tryNext(); };
-      s.onerror = function(){ tryNext(); };
-      document.head.appendChild(s);
-    })();
-  }
+  /* ---------- SDK 加载（委托 CloudBase 桥接） ---------- */
+  function loadSdk(cb){ if(window.CB) return window.CB.loadSdk(cb); if(cb) cb(); }
 
   var cloud = null, user = null, session = null;
 
   function getCloud(){
     if(cloud) return cloud;
-    if(typeof window.WorkBuddyCloud === 'undefined') return null;
-    try{ cloud = window.WorkBuddyCloud.createWorkBuddyCloud({ endpoint: ENDPOINT, publishableKey: PK }); }
-    catch(e){ cloud = null; }
+    if(!window.CB) return null;
+    try{ cloud = window.CB.client(); }catch(e){ cloud = null; }
     return cloud;
   }
 

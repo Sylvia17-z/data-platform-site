@@ -367,6 +367,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
 
 </script>
 
+<script src="/shared/cloudbase-bridge.js?v=20261031b"></script>
 <script src="/shared/kpi-cloud-sync.js?v=20261029a"></script>
 <script>
 
@@ -1427,8 +1428,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
    * 周客量平台的原始数据只存在内存里（此前仅手工调整 stats_ov 落 localStorage），
    * 刷新/换设备即丢。现把「预约 + 订单 + 数据区间 + 手工调整」整包快照存 dp_stats，
    * 每账号一行（owner_id 由服务端 auth.uid() 填充 + RLS 隔离）；未登录时不影响本机使用。 */
-  window.CLOUD_ENDPOINT = window.CLOUD_ENDPOINT || "https://haibei-medical.app.workbuddy.host";
-  window.CLOUD_PK = window.CLOUD_PK || "wbpk_KQXIeDHLXWDHN7WQp3zqUQ_Y5IlM6hJd7n10U8UN5bYmSGUYeevVOwl";
+  /* 后端已迁至腾讯云 CloudBase：环境/密钥由 shared/cloudbase-bridge.js (window.CB) 提供 */
   var KPI_TS_KEY = "kpi_cloud_ts_stats";
 
   function kpiPayload(){

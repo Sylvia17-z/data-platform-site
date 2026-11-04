@@ -318,25 +318,8 @@ https://github.com/nodeca/pako/blob/main/LICENSE
 
 </script>
 
-<script>
-/* 云端 SDK 加载（多源回退，与 shared/auth-gate.js 同源同序）：本页无登录门，直接复用同源已登录会话。 */
-(function(){
-  if(window.WorkBuddyCloud) return;
-  var urls=[
-    'https://cdn.jsdelivr.net/npm/@tencent-ai/workbuddy-cloud-sdk@dev/lib/index.global.js',
-    'https://unpkg.com/@tencent-ai/workbuddy-cloud-sdk@dev/lib/index.global.js',
-    'https://registry.npmmirror.com/@tencent-ai/workbuddy-cloud-sdk/latest/files/lib/index.global.js'
-  ];
-  var i=0;
-  (function next(){
-    if(i>=urls.length){ setTimeout(next,5000); return; }
-    var s=document.createElement('script'); s.src=urls[i++];
-    s.onload=function(){ if(!window.WorkBuddyCloud) next(); };
-    s.onerror=next;
-    document.head.appendChild(s);
-  })();
-})();
-</script>
+<!-- 后端已迁至腾讯云 CloudBase：shared/cloudbase-bridge.js 统一加载并初始化（自动设置 window.CB） -->
+<script src="/shared/cloudbase-bridge.js?v=20261031b"></script>
 <script src="/shared/kpi-cloud-sync.js?v=20261029a"></script>
 <script>
 
@@ -1384,8 +1367,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
   /* ---------- 云端持久化（WorkBuddy Cloud Service，按账号隔离） ----------
    * 与桌面版 index.html 共用同一张表 dp_stats 与同一份快照口径（预约 + 订单 + 区间 + 手工调整），
    * 保证手机端与电脑端看到的是同一份数据。本页无登录门：直接复用同源已登录会话。 */
-  window.CLOUD_ENDPOINT = window.CLOUD_ENDPOINT || "https://haibei-medical.app.workbuddy.host";
-  window.CLOUD_PK = window.CLOUD_PK || "wbpk_KQXIeDHLXWDHN7WQp3zqUQ_Y5IlM6hJd7n10U8UN5bYmSGUYeevVOwl";
+  /* 后端已迁至腾讯云 CloudBase：环境/密钥由 shared/cloudbase-bridge.js (window.CB) 提供 */
   var KPI_TS_KEY = "kpi_cloud_ts_stats";
 
   function kpiPayload(){

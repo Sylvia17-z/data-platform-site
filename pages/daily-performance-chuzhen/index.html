@@ -775,34 +775,8 @@
 
 <div class="toast" id="toast" data-page-node-id="cCI9nBoKLJBdwH301glleG"></div>
 
-<!-- 云端配置：仅在发布域名生效；本地/预览环境 getCloud() 返回 null 优雅降级为「仅本机」 -->
-<script>
-  window.CLOUD_ENDPOINT = 'https://haibei-medical.app.workbuddy.host';
-  window.CLOUD_PK = 'wbpk_KQXIeDHLXWDHN7WQp3zqUQ_Y5IlM6hJd7n10U8UN5bYmSGUYeevVOwl';
-</script>
-<!-- 云服务 SDK（多源回退：jsdelivr → unpkg → npmmirror，规避单一 CDN 不可达导致无法登录；getCloud 惰性取用，晚加载亦生效） -->
-<script>
-(function(){
-  var urls = [
-    'https://cdn.jsdelivr.net/npm/@tencent-ai/workbuddy-cloud-sdk@dev/lib/index.global.js',
-    'https://unpkg.com/@tencent-ai/workbuddy-cloud-sdk@dev/lib/index.global.js',
-    'https://registry.npmmirror.com/@tencent-ai/workbuddy-cloud-sdk/latest/files/lib/index.global.js'
-  ];
-  var i = 0;
-  function tryNext(){
-    if(i >= urls.length){ window.__CLOUD_SDK_FAILED = true; document.dispatchEvent(new Event('cloud-sdk-failed')); return; }
-    var s = document.createElement('script');
-    s.src = urls[i++];
-    s.onload = function(){
-      if(window.WorkBuddyCloud){ window.__CLOUD_SDK_LOADED = true; document.dispatchEvent(new Event('cloud-sdk-ready')); }
-      else tryNext();
-    };
-    s.onerror = function(){ tryNext(); };
-    document.head.appendChild(s);
-  }
-  tryNext();
-})();
-</script>
+<!-- 云端配置：后端已迁至腾讯云 CloudBase（shared/cloudbase-bridge.js 统一加载 SDK 并初始化，自动设置 window.CB） -->
+<script src="/shared/cloudbase-bridge.js?v=20261031b"></script>
 
 <!-- 缓存穿透：每次加载追加唯一戳，强制浏览器重新拉取最新 app.js，彻底规避「刷新后仍跑旧脚本导致丢数据」 -->
 <script>document.write('<script src="assets/app.js?v=20260929-06_' + Date.now() + '"><\/script>');</script><script src="/shared/rbac.js?v=20261028a"></script>

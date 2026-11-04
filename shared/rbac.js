@@ -17,8 +17,7 @@
   window.__RBAC__ = true;
 
   /* ---------- 常量 ---------- */
-  var PK = (window.CLOUD_PK) || 'wbpk_KQXIeDHLXWDHN7WQp3zqUQ_Y5IlM6hJd7n10U8UN5bYmSGUYeevVOwl';
-  var ENDPOINT = (window.CLOUD_ENDPOINT) || (typeof location !== 'undefined' ? location.origin : '');
+  // 后端已迁至腾讯云 CloudBase（shared/cloudbase-bridge.js）
   var ADMIN_KEY = 'site-admin-session';     // 本地内置超级管理员（admin/123）
   var ACL_TABLE = 'dp_acl';                 // 云表：单行 ACL 快照
   var ACL_CACHE_KEY = 'acl_cache';          // 云不可用时本机兜底缓存
@@ -63,8 +62,8 @@
   }
   function getCloud() {
     if (S._cloud) return S._cloud;
-    if (typeof window.WorkBuddyCloud === 'undefined') return null;
-    try { S._cloud = window.WorkBuddyCloud.createWorkBuddyCloud({ endpoint: ENDPOINT, publishableKey: PK }); }
+    if (!window.CB) return null;
+    try { S._cloud = window.CB.client(); }
     catch (e) { S._cloud = null; }
     return S._cloud;
   }

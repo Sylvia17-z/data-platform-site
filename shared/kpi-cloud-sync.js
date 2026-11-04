@@ -21,13 +21,10 @@
 (function(){
   if(window.__KPI_CLOUD_SYNC__) return; window.__KPI_CLOUD_SYNC__ = true;
 
-  var DEFAULT_PK = 'wbpk_KQXIeDHLXWDHN7WQp3zqUQ_Y5IlM6hJd7n10U8UN5bYmSGUYeevVOwl';
   var POLL_MS = 15000, DEBOUNCE_MS = 1200;
-
-  // 凭证惰性读取：页面可能在脚本之后才设置 window.CLOUD_PK / window.CLOUD_ENDPOINT，
-  // 故不在 IIFE 求值时锁定，而是在真正建 client 时再取。
-  function pk(){ return (typeof window !== 'undefined' && window.CLOUD_PK) || DEFAULT_PK; }
-  function endpoint(){ return (typeof window !== 'undefined' && window.CLOUD_ENDPOINT) || 'https://haibei-medical.app.workbuddy.host'; }
+  // 后端已迁至腾讯云 CloudBase（shared/cloudbase-bridge.js）：凭证由 window.CB 提供。
+  function pk(){ return (typeof window !== 'undefined' && window.CB && window.CB.PK) || ''; }
+  function endpoint(){ return (typeof window !== 'undefined' && window.CB && window.CB.STATIC) || ''; }
 
   var cloud = null, opts = null, timer = null, lastHash = null, initDone = false, dirty = false, flushing = false;
 
@@ -42,8 +39,8 @@
   }
   function getCloud(){
     if(cloud) return cloud;
-    if(typeof window.WorkBuddyCloud === 'undefined') return null;
-    try{ cloud = window.WorkBuddyCloud.createWorkBuddyCloud({ endpoint: endpoint(), publishableKey: pk() }); }catch(e){ cloud = null; }
+    if(!window.CB) return null;
+    try{ cloud = window.CB.client(); }catch(e){ cloud = null; }
     return cloud;
   }
   function tsGet(){ try{ return Number(localStorage.getItem(opts.tsKey)) || 0; }catch(e){ return 0; } }
