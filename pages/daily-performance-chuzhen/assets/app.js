@@ -120,6 +120,16 @@ function saveSnapTs(v){
 }
 function bumpSnapTs(){ state.snapTs = Date.now(); saveSnapTs(state.snapTs); return state.snapTs; }
 state.snapTs = loadSnapTs(); // 本机最后一次本地变更时刻（0 = 本机从未产生本地变更）
+
+/* 恢复守护（2026-11-05）：shared/data-backup.js 刚用备份覆盖本机后写入 24h 标记。
+   期间本机数据即权威，禁止云端旧快照按 ts 裁决回灌——否则「恢复完一刷新又变回旧数据」。
+   标记到期或用户手点「从云端恢复」时自然失效。 */
+function restoreGuardActive(){
+  try{
+    const g = JSON.parse(localStorage.getItem('bk_restore_guard') || 'null');
+    return !!(g && Number(g.exp) > Date.now());
+  }catch(e){ return false; }
+}
 function persistTargets(){ writeTargetsLocal(); markCloudDirty(); }
 function restoreTargets(){ try{ const raw = localStorage.getItem(TARGETS_STORAGE_KEY); if(raw) state.targets = {...DEFAULT_TARGETS, ...JSON.parse(raw)}; }catch(e){} }
 function persistManual(){ writeManualLocal(); markCloudDirty(); }
@@ -772,6 +782,7 @@ async function syncFromCloud(opts){
   backupAuthSession(session);   // 保持登录：每次拿到有效会话都刷新本地备份
   startCloudKeepalive();        // 页面打开期间定时续期，避免长期闲置后 refreshToken 失效
   setCloudStatus('已登录 · 同步云端', 'ok');
+  let guardOn = false;   // 恢复守护标记（跨 if/else 与 hist 兜底块共用）
   try{
     const { data, error } = await cloudRun(() => cloud.database.from('dp_orders')
       .select('id, payload, updated_at').order('updated_at', { ascending:false }).limit(1));
@@ -808,6 +819,9 @@ async function syncFromCloud(opts){
       else verdict = (cloudCnt === localCnt) ? 'same' : (cloudCnt > localCnt ? 'cloud' : 'local');
       // 「从云端恢复」手动按钮：跳过本地裁决，强制以云端为准（换设备/数据缺失时一键拉全量）
       if(forcePull) verdict = 'cloud';
+      // 恢复守护：本机刚被备份覆盖 → 本机权威（防止云端旧快照把恢复结果冲掉）
+      guardOn = !forcePull && restoreGuardActive() && !localEmpty;
+      if(guardOn) verdict = 'local';
       // 安全网：云端订单月份落后于本地 → 判定云端为陈旧快照，保留本地（防止旧快照把新数据倒退）；
       // 手动「从云端恢复」时用户意图明确，不触发该回退。
       if(!forcePull && verdict === 'cloud' && localMon && cloudMon && cloudMon < localMon) verdict = 'local';
@@ -856,7 +870,11 @@ async function syncFromCloud(opts){
       if(ch && typeof ch === 'object'){
         const chTs = Number(ch.histTs) || Number(snap.ts) || 0;
         const loTs = Number(state.histTs) || 0;
-        if((state.histOrders||[]).length === 0 || chTs > loTs){
+        // 恢复守护：刚用备份覆盖过本机，且本机明细非空 → 不回灌云端旧明细
+        if(guardOn && (state.histOrders||[]).length > 0){
+          histClouded = true;
+          if(typeof refreshHistMeta === 'function') refreshHistMeta();
+        }else if((state.histOrders||[]).length === 0 || chTs > loTs){
           applyCloudObj({ hist: ch, ts: snap.ts });
         }else{
           // 本机已是最新（ts 持平）→ 不重复回灌，但云端确有该明细，置云端标志避免误显「暂仅保存在本机」

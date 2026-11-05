@@ -23,7 +23,8 @@
   var DATE_TAG = '__hbdate__';
 
   // 已知数据库（indexedDB.databases() 不可用时的兜底）
-  var KNOWN_DBS = ['dailyPerformance', 'dpBridge'];
+  var DP_DB_NAME = 'dpBridge';           // 壳层共享数据桥接库（dpBridge/kv）
+  var KNOWN_DBS = ['dailyPerformance', DP_DB_NAME];
 
   // 不导出 / 不恢复的键：登录态、心跳、UI 偏好、权限缓存（有时效，跨机无意义）
   var SKIP = [
@@ -34,7 +35,10 @@
     /^acl_current_operator$/,
     /^acl_cache$/,
     /^sidebar-collapsed$/,
-    /_filters_collapsed$/
+    /_filters_collapsed$/,
+    /^bk_restore_guard$/,     // 恢复守护标记：跟设备/时刻绑定，跨机无意义
+    /^bk_restore_done$/,
+    /^bk_restore_pending$/
   ];
 
   // 本平台键前缀：恢复时用于清理备份中不存在的残留键
@@ -357,7 +361,7 @@
 
   /* ---------------- 恢复 ---------------- */
   function apply(payload, onProgress) {
-    var report = { idbOk: 0, idbFail: [], lsOk: 0, lsFail: [], dropped: 0 };
+    var report = { idbOk: 0, idbFail: [], lsOk: 0, lsFail: [], dropped: 0, tsAligned: 0 };
     var dbs = payload.indexedDB || {};
     var dbNames = Object.keys(dbs);
 
@@ -406,11 +410,95 @@
       });
       for (var m = 0; m < keys.length; m++) {
         var kk = keys[m];
-        try { localStorage.setItem(kk, map[kk]); report.lsOk++; }
-        catch (e) { report.lsFail.push(kk); }
+        try {
+          // 先删旧值再写：大键（订单整包常见 2~4MB）在配额紧张时 setItem 会抛错，
+          // 若保留旧值，页面读到的仍是恢复前的数据 → 用户会认为「恢复没生效」。
+          // 删掉旧值后即使写入失败，页面会回退到 IndexedDB（同样已写入备份内容）。
+          try { localStorage.removeItem(kk); } catch (e0) {}
+          localStorage.setItem(kk, map[kk]);
+          report.lsOk++;
+        } catch (e) { report.lsFail.push(kk); }
       }
+
+      // 3) 恢复守护（2026-11-05 用户实测「恢复之后数据还是旧的」根因修复）
+      //    只把数据写进本机是不够的：刷新后日业绩(dp_orders)、周客量(dp_stats)、
+      //    月度分析(dp_monthly) 会拿本地「最后变更时间」与云端快照比新旧，
+      //    而备份里的时间戳是备份那一刻的旧值 → 判定「云端更新」→ 云端旧快照立刻回灌，
+      //    把刚恢复的数据覆盖回去，用户看到的还是旧数据。
+      //    处理：把各模块的本地时间戳抬到当前时刻（本机成为最新），并留一个 24h
+      //    守护标记，各同步脚本在首次对齐时据此强制以本地为准、并把本地回推云端。
+      var now = Date.now();
+      var TS_ALIGN = [
+        'dailyPerformance_snap_ts', 'kpi_cloud_ts_stats', 'kpi_cloud_ts_monthly',
+        'medassess_cloud_ts', 'meidaStore_cloud_ts'
+      ];
+      for (var t = 0; t < TS_ALIGN.length; t++) {
+        var tk = TS_ALIGN[t];
+        var has = (tk in map);
+        if (!has) { try { has = localStorage.getItem(tk) != null; } catch (e) {} }
+        if (!has) continue;
+        try { localStorage.setItem(tk, String(now)); report.tsAligned++; } catch (e) {}
+      }
+      try {
+        localStorage.setItem('bk_restore_guard', JSON.stringify({
+          at: now,
+          exp: now + 24 * 3600 * 1000,   // 守护窗口：当天反复刷新都不被云端回灌
+          exportedAt: payload.exportedAt || '',
+          origin: payload.origin || '',
+          lsOk: report.lsOk,
+          idbOk: report.idbOk
+        }));
+      } catch (e) {}
       return report;
+    }).then(function (report) {
+      // 4) 兜底：清掉备份里没有的桥接缓存，避免壳层把旧值优先推给子页
+      return pruneStaleBridge(payload, report).then(function () { return report; });
     });
+  }
+
+  /* 清理陈旧的壳层桥接缓存（2026-11-05）
+     壳层 app.js 的 dpGet() 读共享数据时「以 IndexedDB(dpBridge/kv) 为准、localStorage 只有兜底」。
+     若备份里不含这份缓存（旧版本备份 / 另一入口从未写过），恢复后 dpGet 仍会返回恢复前的
+     旧订单，子页拿到的就是旧数据 → 用户看到「恢复完还是之前的数据」。
+     故：备份未包含的共享键，从本机 dpBridge 中删掉，让读取回退到刚恢复的 localStorage。 */
+  var DP_SHARED_KEYS = ['dailyPerformance_orders', 'dailyPerformance_hist', 'dailyPerformance_vab'];
+  function pruneStaleBridge(payload, report) {
+    var bridge = (payload.indexedDB || {}).dpBridge;
+    var kv = (bridge && bridge.kv) || [];
+    var keep = {};
+    for (var i = 0; i < kv.length; i++) {
+      var r = kv[i];
+      if (r && r.k != null) keep[String(r.k)] = 1;
+    }
+    var del = [];
+    for (var d = 0; d < DP_SHARED_KEYS.length; d++) {
+      if (!keep[DP_SHARED_KEYS[d]]) del.push(DP_SHARED_KEYS[d]);
+    }
+    if (!del.length) return Promise.resolve();
+    return listDbNames().then(function (names) {
+      if (names.indexOf(DP_DB_NAME) < 0) return;
+      return new Promise(function (res) {
+        var req;
+        try { req = indexedDB.open(DP_DB_NAME); } catch (e) { return res(); }
+        req.onupgradeneeded = function () { try { req.result.createObjectStore('kv'); } catch (e) {} };
+        req.onsuccess = function () {
+          var db = req.result;
+          try {
+            if (!db.objectStoreNames.contains('kv')) { db.close(); return res(); }
+            var tx = db.transaction('kv', 'readwrite');
+            var st = tx.objectStore('kv');
+            del.forEach(function (k) { try { st.delete(k); } catch (e) {} });
+            tx.oncomplete = function () {
+              report.bridgePruned = (report.bridgePruned || 0) + del.length;
+              try { db.close(); } catch (e) {}
+              res();
+            };
+            tx.onerror = function () { try { db.close(); } catch (e) {} res(); };
+          } catch (e) { try { db.close(); } catch (_) {} res(); }
+        };
+        req.onerror = function () { res(); };
+      });
+    }).catch(function () {});
   }
 
   function validate(p) {
@@ -678,6 +766,9 @@
       } else {
         log('恢复完成：数据库 ' + report.idbOk.toLocaleString() + ' 条，本地存储 ' + report.lsOk +
           ' 键，清理旧残留 ' + report.dropped + ' 键，用时 ' + secs + ' 秒。', 'ok');
+        if (report.tsAligned) {
+          log('已把 ' + report.tsAligned + ' 个模块的「本地更新时间」对齐到当前，避免刷新后被云端旧快照覆盖。', 'ok');
+        }
       }
       if (report.idbFail.length) {
         logKeep('部分数据表写入失败：' + report.idbFail.slice(0, 3).join('；'), 'err');
@@ -693,11 +784,16 @@
           at: (pending && pending.exportedAt) || '',
           lsOk: report.lsOk,
           idbOk: report.idbOk,
-          dropped: report.dropped
+          dropped: report.dropped,
+          lsFail: report.lsFail.length,
+          idbFail: report.idbFail.length,
+          tsAligned: report.tsAligned || 0
         }));
       } catch (e) {}
-      logKeep('数据已写入本机，2 秒后自动刷新页面…', 'ok');
-      setTimeout(function () { try { location.reload(); } catch (e) {} }, 2000);
+      logKeep('数据已写入本机，1 秒后自动刷新页面…', 'ok');
+      // 尽快刷新：延迟期间 iframe 内的模块仍在跑定时器，可能把旧内存状态写回本地，
+      // 造成「刚恢复完又被覆盖」。反馈由刷新后的顶部绿色提示承接。
+      setTimeout(function () { try { location.reload(); } catch (e) {} }, 900);
     }).catch(function (e) {
       log('恢复失败：' + ((e && e.message) || e), 'err');
       ui.foot.innerHTML = '<button class="bk-btn ghost" type="button" data-act="close">关闭</button>';
@@ -714,11 +810,17 @@
     try { info = JSON.parse(raw) || {}; } catch (e) { return; }
     var box = document.createElement('div');
     box.className = 'bk-toast';
+    var warn = (info.lsFail > 0)
+      ? '<br><span style="color:#b45309">⚠️ 有 ' + info.lsFail + ' 个大数据键因存储空间不足未能写入（旧值已清空），页面会改从数据库读取，功能不受影响。</span>'
+      : '';
+    if (info.idbFail > 0) {
+      warn += '<br><span style="color:#b91c1c">⚠️ 有 ' + info.idbFail + ' 张数据表写入失败，该部分可能仍是旧数据，请再次导入备份。</span>';
+    }
     box.innerHTML = '✅ 备份已恢复生效<br>' +
       '<span style="font-size:12px;line-height:1.7;display:inline-block;margin-top:3px">' +
       (info.lsOk || 0) + ' 个存储键 · ' + (info.idbOk || 0).toLocaleString() + ' 项数据表' +
       (info.at ? ' · 备份时间 ' + info.at : '') +
-      '<br>请重新打开需要的功能模块查看</span>';
+      '<br>已阻止云端旧快照回灌，请重新打开需要的功能模块查看' + warn + '</span>';
     function mount() {
       try { document.body.appendChild(box); } catch (e) { return; }
       setTimeout(function () { box.classList.add('out'); }, 4200);

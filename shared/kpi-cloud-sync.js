@@ -47,6 +47,20 @@
   function tsSet(v){ try{ localStorage.setItem(opts.tsKey, String(v)); }catch(e){} }
   function isEmpty(p){ return opts.isEmpty ? !!opts.isEmpty(p) : (p == null); }
   function countOf(p){ return opts.countOf ? (Number(opts.countOf(p)) || 0) : 0; }
+
+  /* 恢复守护（2026-11-05）：shared/data-backup.js 刚用备份覆盖本机时写入，
+     24h 内首次对齐一律以本机为准、禁止云端旧快照回灌，并把本机结果回推云端。
+     否则备份里的旧 ts 会被判「云端更新」，恢复完一刷新数据又变回旧的。 */
+  function readGuard(){
+    try{
+      var g = JSON.parse(localStorage.getItem('bk_restore_guard') || 'null');
+      if(g && Number(g.exp) > Date.now()) return g;
+    }catch(e){}
+    return null;
+  }
+  function saveGuard(g){
+    try{ localStorage.setItem('bk_restore_guard', JSON.stringify(g)); }catch(e){}
+  }
   function hashOf(o){
     if(o == null) return 'empty';
     // 排除易变的写入时间戳 ts：否则每次 collect() 都产生新哈希 → 无变更也反复上传
@@ -107,6 +121,34 @@
     try{
       var local = await opts.collect();
       var localEmpty = isEmpty(local);
+      var guard = readGuard();
+
+      // 恢复守护：本机刚被备份覆盖 → 本机即权威。
+      // 不 adopt 云端（哪怕云端 ts 更大 / 条目更多），并把本机结果强制回推一次，
+      // 让云端也更新成恢复后的数据，避免下次换设备又被旧快照带回。
+      if(guard && localEmpty){
+        // 恢复的备份本身为空：尊重恢复结果，不拉云端旧数据回来
+        lastHash = hashOf(local);
+        return;
+      }
+      if(guard && !localEmpty){
+        tsSet(Date.now());
+        if(!guard.pushed){
+          // 回推时把快照 ts 也改成「现在」：否则云端仍留着备份里的旧 ts，
+          // 下次换设备会判云端陈旧/本地陈旧来回拉扯。
+          var forced = (local && typeof local === 'object')
+            ? Object.assign({}, local, { ts: Date.now() })
+            : local;
+          var okp = await pushCloud(forced, true);
+          window.__KPI_SYNC_DEBUG.lastPush = okp;
+          window.__KPI_SYNC_DEBUG.restoreGuard = 'local-wins';
+          if(okp){ guard.pushed = 1; saveGuard(guard); }
+        }
+        tsSet(Date.now());
+        lastHash = hashOf(local);
+        return;
+      }
+
       var row = await fetchCloudRow();
       var cp = row && row.payload;
       if(cp && !isEmpty(cp)){
