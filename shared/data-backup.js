@@ -528,8 +528,11 @@
         /* 不设 accept 白名单：导出文件名是「海蓓数据备份_日期.json.gz」，
            Windows 文件对话框按最后一个扩展名（.gz）过滤，accept=".json" 会让
            备份文件变灰、根本选不中（2026-11-05 用户实测反馈）。
-           改为读取后校验内容：选错文件会得到明确提示，不再靠系统过滤。 */
-        f.style.display = 'none';
+           改为读取后校验内容：选错文件会得到明确提示，不再靠系统过滤。
+           隐藏方式用视觉隐藏而非 display:none —— 后者在部分浏览器/扩展下
+           无法被程序化 click 可靠唤起（与 11-04 上传按钮同一个坑）。 */
+        f.setAttribute('aria-hidden', 'true');
+        f.style.cssText = 'position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);clip-path:inset(50%);white-space:nowrap;border:0;';
         panel.appendChild(f);
         return f;
       })()
