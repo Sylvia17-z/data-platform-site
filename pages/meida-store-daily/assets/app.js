@@ -1139,14 +1139,29 @@ function platAgg() {
       }
     }
   });
-  // 优惠码扫码量（近7日）：口径与其他美团数据列一致 —— 当日 = D-1，月累计 = 当月 1 日 ~ D-1 累加
-  //（数据源已从七大店铺总表改为店铺日报表的「支付订单(个)」，见 PLAT_SUM_KEYS）
   STORE_KEYS.forEach((k) => {
     const c = cum[k];
     if (!c) return;
     if (c._secN) c.replySec = c._secW / c._secN;
     if (c._p30N) c.reply30 = c._p30W / c._p30N;
     delete c._secW; delete c._secN; delete c._p30W; delete c._p30N;
+  });
+  /* 优惠码扫码量（近7日）：列名写的是「近7日」，当日行就给【近 7 天滚动合计】——
+     pdate 往前数 7 天并包含 pdate（报表日 D 的口径即 D-7 ~ D-1），不再显示单日值。
+     月累计行仍是当月 1 日 ~ pdate 累加；合计行按 SUM_KEYS 同源求和。
+     浅拷贝后写入，避免污染 state.daily 里的源记录（today[k] 原本是引用）。 */
+  STORE_KEYS.forEach((k) => {
+    let sum = 0;
+    let hit = false;
+    for (let i = 0; i < 7; i++) {
+      const d = addDays(pdate, -i);
+      const r = d ? (state.daily[d] || {})[k] : null;
+      if (r && isNum(r.qrScan)) { sum += r.qrScan; hit = true; }
+    }
+    if (!hit) return;                                  // 近 7 天都没有扫码数据：保持原样（显示 —）
+    const base = today[k] ? Object.assign({}, today[k]) : {};
+    base.qrScan = sum;
+    today[k] = base;
   });
   const data = { today, cum };
   _platCache = { key, data };
@@ -1597,7 +1612,11 @@ function renderThead() {
       + '<rect x="1.2" y="1.2" width="6.2" height="6.2" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.1"/>'
       + '<rect x="4.6" y="4.6" width="6.2" height="6.2" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.1"/>'
       + '</svg>';
-    return `<th class="g3${isFirst ? ' c-store' : ''}">${esc(c.label)}`
+    // 口径提示：扫码量是滚动 7 天，跟其他「当日/累计」列不同，悬停列头时说明清楚
+    const tip = c.k === 'qrScan'
+      ? '近7日 = 报表日往前 7 天（D-7 ~ D-1）滚动合计；本月累计行 = 当月 1 日至 D-1 累加'
+      : '';
+    return `<th class="g3${isFirst ? ' c-store' : ''}"${tip ? ` title="${esc(tip)}"` : ''}>${esc(c.label)}`
       + `<button type="button" class="col-copy" data-col="${c.k}" title="复制「${esc(label)}」整列数据" aria-label="复制「${esc(label)}」整列">${icon}</button></th>`;
   }).join('');
   $('tbl-thead').innerHTML = `
