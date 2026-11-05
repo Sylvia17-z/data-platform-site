@@ -30,21 +30,7 @@
     background:var(--navy-50);font-size:14px;line-height:1.5;
   }
   .wrap{max-width:1320px;margin:0 auto;padding:16px 20px 40px;}
-  .topbar{
-    display:flex;align-items:center;gap:14px;flex-wrap:wrap;
-    background:linear-gradient(135deg,var(--navy-900) 0%,var(--navy) 58%,var(--navy-700) 100%);
-    color:#fff;border-radius:12px;padding:14px 20px;margin-bottom:16px;
-    box-shadow:var(--shadow-2);
-  }
-  .topbar h1{font-size:20px;margin:0;color:#fff;letter-spacing:.5px;}
-  .topbar .sub{color:rgba(255,255,255,.78);font-size:12.5px;}
-  .topbar-actions{display:flex;align-items:center;gap:8px;margin-left:auto;}
-  .topbar .home-link{color:#fff;opacity:.92;text-decoration:none;font-size:13px;border:1px solid rgba(255,255,255,.45);border-radius:8px;padding:5px 12px;white-space:nowrap;}
-  .topbar .home-link:hover{background:rgba(255,255,255,.14);opacity:1;}
-  .topbar .btn-clean{color:#fff;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.45);border-radius:8px;padding:5px 12px;font:inherit;font-size:13px;cursor:pointer;white-space:nowrap;transition:background .15s,border-color .15s;}
-  .topbar .btn-clean:hover{background:#b3261e;border-color:#b3261e;}
-  .topbar .btn-clean:disabled{opacity:.45;cursor:not-allowed;background:rgba(255,255,255,.08);border-color:rgba(255,255,255,.3);}
-  .topbar .btn-clean:disabled:hover{background:rgba(255,255,255,.08);border-color:rgba(255,255,255,.3);}
+  /* 2026-11-05：移除页首深蓝横幅（.topbar）—— 壳层已有页签与标题，子页不再重复 */
 
   /* 二级子功能面板：同一页面内按 mod 切换（由父框架 postMessage 控制） */
   .mod-panel{display:none;}
@@ -217,7 +203,6 @@
   @media (max-width:640px){
     .wrap{padding:10px 10px 40px;}
     .toolbar{padding:10px 12px;gap:8px;}
-    .topbar{padding:12px 14px;}
   }
 </style>
 <link rel="stylesheet" href="/shared/filterbar.css?v=20261019a">
@@ -232,14 +217,6 @@
 </head>
 <body>
   <div class="wrap">
-    <div class="topbar">
-      <h1>🏥 医管考核数据统计</h1>
-      <span class="sub" id="crumbSub">VAB 会员清单 · 收退款明细 · 收费明细三类报表</span>
-      <div class="topbar-actions">
-        <button type="button" class="btn-clean" id="clear-all" title="清除本页已导入的 VAB 会员清单 / 领健收退款明细 / ABC 收费明细 / 项目分类映射，并重置全部筛选条件（仅清本机缓存，不影响已导出的文件）">🧹 清除页面数据</button>
-        <a class="home-link" href="/" target="_top" title="返回平台首页，查看全部模块">🏠 全部模块</a>
-      </div>
-    </div>
 
     <!-- ============ 面板 1：VAB 会员清单 ============ -->
     <section class="mod-panel" data-mod="vab">
@@ -1483,7 +1460,8 @@ function exportXlsx(mod){
     if(!['vab','order','charge','stats','consumption','projects'].includes(m)) m='vab';
     document.querySelectorAll('.mod-panel').forEach(p=>p.classList.toggle('active', p.dataset.mod===m));
     const sub = {vab:'VAB 会员清单', order:'领健数据', charge:'ABC数据', stats:'到店率统计', consumption:'累计消费统计', projects:'重点项目达成情况统计'}[m];
-    document.getElementById('crumbSub').textContent = sub + ' · 医管考核数据统计';
+    const crumb = document.getElementById('crumbSub');   // 顶栏横幅已移除（2026-11-05），元素不存在时静默跳过
+    if(crumb) crumb.textContent = sub + ' · 医管考核数据统计';
     if(m==='stats') renderStats();   // 切换到统计表时重算（数据已在内存/本地缓存）
     if(m==='consumption') renderConsumption();
     if(m==='projects') renderProjects();
@@ -3745,7 +3723,8 @@ const PROJ_EXCLUDE = {
   document.getElementById('vabAdd').addEventListener('click', ()=>openVabModal(null,'edit'));
   document.getElementById('vabBatchDel').addEventListener('click', batchDeleteVab);
   document.getElementById('vabClearAll').addEventListener('click', clearAllVab);
-  document.getElementById('clear-all').addEventListener('click', clearPageAll);   // 顶栏：一键清除本页全部数据
+  const _clearAllBtn = document.getElementById('clear-all');   // 顶栏按钮已随横幅移除，存在才绑定
+  if(_clearAllBtn) _clearAllBtn.addEventListener('click', clearPageAll);
 
   /* 统计表：命中客户明细弹窗 关闭 */
   document.getElementById('statsDetailClose').addEventListener('click', closeStatsDetail);

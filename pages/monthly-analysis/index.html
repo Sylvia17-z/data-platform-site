@@ -35,13 +35,8 @@
   }
   .wrap{max-width:1240px;margin:0 auto;padding:16px 20px 40px;}
 
-  /* ===== 顶栏：标题 + 月份切换 ===== */
-  .topbar{
-    display:flex;align-items:center;gap:12px;flex-wrap:wrap;
-    padding:2px 0 12px;margin-bottom:14px;border-bottom:2px solid var(--navy);
-  }
-  .topbar h1{font-size:20px;margin:0;color:var(--navy-900);letter-spacing:.5px;}
-  .topbar .sub{color:var(--ink-soft);font-size:12.5px;flex:1;min-width:200px;}
+  /* 2026-11-05：移除页首标题栏（.topbar）—— 壳层已有页签与标题，子页不再重复。
+     本机缓存状态徽章迁到导入工具栏内，状态仍一眼可见。 */
   /* 本机缓存状态徽章（2026-11-05）：把「刷新会不会丢」变成一眼可见的事实 */
   .save-chip{
     font-size:12px;line-height:1.6;border-radius:999px;padding:4px 11px;cursor:pointer;
@@ -214,11 +209,6 @@
 </head>
 <body>
 <div class="wrap">
-  <div class="topbar">
-    <h1>月度分析面板</h1>
-    <span class="sub">科室业绩 / 健康管家业绩双表分析 · 支持多月份聚焦</span>
-    <span class="save-chip idle" id="saveChip" role="button" tabindex="0" title="本机缓存状态">○ 尚未导入数据</span>
-  </div>
 
   <div class="toolbar" id="importCard">
     <div class="dataseg">
@@ -234,6 +224,7 @@
         </select>
       </span>
       <span class="push"></span>
+      <span class="save-chip idle" id="saveChip" role="button" tabindex="0" title="本机缓存状态">○ 尚未导入数据</span>
       <button type="button" class="btn danger" id="btnClearData" title="清空已导入的全部数据与业绩目标（需二次确认）">🗑 清空数据</button>
     </div>
     <div class="fbar">
