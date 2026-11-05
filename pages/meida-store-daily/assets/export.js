@@ -513,6 +513,8 @@
     document.body.appendChild(holder);
 
     try {
+      // 表头右上角的「复制整列」小按钮属于交互控件，导出图里不该出现
+      clone.querySelectorAll('.col-copy').forEach((el) => el.remove());
       // 必须先挂到文档再读计算样式：脱离文档的节点 getComputedStyle 返回默认值，
       // 会把页面里的 position:sticky（吸附表头 / 冻结首列）误判成 static 而漏改，
       // 导致 html2canvas 把首列与表头绘制到错误位置（2026-10-28 实测：首列整列空白）。

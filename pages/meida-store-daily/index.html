@@ -73,7 +73,7 @@
   .kpi .v.rate{color:#0f766e;}
 
   /* ===== 数据表 ===== */
-  .tbl-head{display:flex;align-items:center;flex-wrap:wrap;gap:8px 10px;padding:9px 12px;background:#fbfcff;border-bottom:1px solid var(--c-border-soft);}
+  .tbl-head{display:flex;align-items:center;flex-wrap:wrap;gap:8px 10px;padding:9px 12px;background:#fbfcff;border-bottom:1px solid var(--c-border-soft);position:relative;}
   .tbl-head .tt{font-size:14.5px;font-weight:700;color:var(--c-head);}
   .tbl-head .sep{height:20px;}
   .tbl-head .file-meta{margin-left:auto;}
@@ -126,6 +126,48 @@
   td.editable:hover{outline:2px solid var(--c-accent);outline-offset:-2px;}
   /* 手工覆盖过的格子：曾用 inset 3px 蓝条标记，用户要求去掉，故不再画任何标记（类名保留，便于以后换样式） */
   td.manual{}
+
+  /* ===== 复制整列（2026-11-05） =====
+     ① 表头第 3 行每列右上角一个「⧉」小按钮：鼠标移到列头才显现，34 列不会满屏小方块；
+        触摸屏没有 hover，常显半透明态。点击复制该列当前可见的每一行（含合计行）。
+     ② 工具栏「📋 复制列」按钮：弹出按分组排列的列名清单，点一个即复制，
+        解决「列太窄看不清小按钮」与手机端不好点的问题。 */
+  table.xl thead tr:nth-child(3) th .col-copy{
+    position:absolute;top:2px;right:2px;width:14px;height:14px;padding:0;border:0;border-radius:3px;
+    background:transparent;color:rgba(255,255,255,.85);
+    font-family:var(--font-sans);cursor:pointer;opacity:0;
+    transition:opacity .12s,background .12s,color .12s;z-index:6;
+    display:flex;align-items:center;justify-content:center;
+  }
+  table.xl thead tr:nth-child(3) th:hover .col-copy,
+  table.xl thead tr:nth-child(3) th .col-copy:focus{opacity:1;}
+  table.xl thead tr:nth-child(3) th .col-copy:hover{background:rgba(255,255,255,.28);color:#fff;}
+  @media (hover:none){
+    table.xl thead tr:nth-child(3) th .col-copy{opacity:.7;}
+  }
+  .copy-pop{
+    position:absolute;z-index:60;top:calc(100% - 2px);left:12px;min-width:460px;max-width:min(760px,92vw);
+    max-height:62vh;overflow:auto;background:#fff;border:1px solid var(--c-border);border-radius:10px;
+    box-shadow:0 12px 30px rgba(31,45,77,.18);padding:10px 12px 12px;display:none;
+  }
+  .copy-pop.show{display:block;}
+  .copy-pop .cp-title{
+    display:flex;align-items:center;justify-content:space-between;gap:10px;
+    font-size:12.5px;font-weight:700;color:var(--c-head);padding-bottom:8px;margin-bottom:8px;
+    border-bottom:1px solid var(--c-border-soft);
+  }
+  .copy-pop .cp-close{border:0;background:#f1f4f9;color:#5a6d8c;border-radius:6px;width:22px;height:22px;
+    line-height:22px;text-align:center;cursor:pointer;font-size:13px;padding:0;}
+  .copy-pop .cp-close:hover{background:#e6ecf6;color:var(--c-head);}
+  .copy-pop .cp-h{font-size:11.5px;font-weight:700;color:var(--c-head);letter-spacing:.3px;margin:8px 0 6px;}
+  .copy-pop .cp-h:first-child{margin-top:0;}
+  .copy-pop .cp-grid{display:flex;flex-wrap:wrap;gap:6px;}
+  .copy-pop .cp-item{
+    border:1px solid var(--c-border);background:#f7f9fc;color:#25324b;border-radius:6px;
+    padding:4px 9px;font-size:12px;cursor:pointer;font-family:inherit;white-space:nowrap;
+  }
+  .copy-pop .cp-item:hover{border-color:var(--c-accent);background:var(--c-accent-soft);color:var(--c-accent);}
+  .copy-pop .cp-tip{margin-top:9px;font-size:11.5px;color:var(--c-muted);line-height:1.6;}
 
   /* ===== 编辑模式（点「编辑」按钮开启） ===== */
   /* 可编辑范围以浅蓝蒙版标出，不改变原有行/列底色（用 background-image 叠加，不动 background-color） */
@@ -258,6 +300,8 @@
       <span class="sep"></span>
       <button class="btn" id="btn-export-xlsx" title="导出带样式的 Excel（列宽、底色、框线、合并单元格、冻结窗格均与页面一致）">⬇ 导出 Excel</button>
       <button class="btn" id="btn-export-png" title="导出整表图片（2 倍高清，颜色与页面完全一致）">🖼 导出图片</button>
+      <button class="btn" id="btn-copy-col" title="复制某一整列的数据到剪贴板（每行一个值，可直接粘到 Excel）">📋 复制列</button>
+      <div class="copy-pop" id="copy-col-pop"></div>
       <span class="sep"></span>
       <button class="btn" id="btn-edit" title="开启编辑模式：单击表格内任意单元格（含店铺名）即可修改">✏️ 编辑</button>
       <button class="btn" id="btn-merge-tgt" title="合并相邻门店的目标列：点同列的第一家店、再点第二家店 → 并成一格，设置一次全部生效；再点合并格即拆分">🔗 合并目标</button>

@@ -1591,7 +1591,14 @@ function renderThead() {
   const row3 = COLS.map((c) => {
     if (c.k === 'period') return '';
     const isFirst = c.k === 'store';
-    return `<th class="g3${isFirst ? ' c-store' : ''}">${esc(c.label)}</th>`;
+    const label = c.label || '统计口径';
+    // 图标用内联 SVG（两个重叠矩形＝复制），比字符图标更可控、不会被字体 fallback 成圆圈
+    const icon = '<svg viewBox="0 0 12 12" width="11" height="11" aria-hidden="true">'
+      + '<rect x="1.2" y="1.2" width="6.2" height="6.2" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.1"/>'
+      + '<rect x="4.6" y="4.6" width="6.2" height="6.2" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.1"/>'
+      + '</svg>';
+    return `<th class="g3${isFirst ? ' c-store' : ''}">${esc(c.label)}`
+      + `<button type="button" class="col-copy" data-col="${c.k}" title="复制「${esc(label)}」整列数据" aria-label="复制「${esc(label)}」整列">${icon}</button></th>`;
   }).join('');
   $('tbl-thead').innerHTML = `
     <tr><th class="t-title" colspan="${COLS.length}" style="width:${totalW}px">海蓓医疗七大店铺团购数据总表</th></tr>
@@ -1715,6 +1722,187 @@ function paintMergeAnchor() {
   if (!state.mergeMode || !_mergeAnchor) return;
   const td = tbl.querySelector(`td[data-store="${_mergeAnchor.store}"][data-field="${_mergeAnchor.field}"]`);
   if (td) td.classList.add('merge-anchor');
+}
+
+/* =====================================================================
+ * 七·五、复制整列（2026-11-05）
+ * ---------------------------------------------------------------------
+ * 需求：「在页面上增加可以复制整列数据的按钮」。
+ * 两个入口：
+ *   ① 表头第 3 行每列右上角的 ⧉ 小按钮 —— 精确到列，鼠标移到列头上才显现；
+ *   ② 工具栏「📋 复制列」—— 弹出按分组罗列的列名，点一个即复制（列太窄 / 手机端更好点）。
+ * 口径：与表格严格同源（全部走 cellValue），行数 = 当前「行显示」模式下屏幕上的行
+ *   （both = 每店当日 + 本月累计两行；today / cum = 每店一行），末尾附合计行。
+ *   纵向合并单元格不会让中间行缺失：合并只是视觉，复制时每行都填真实值。
+ * 格式：每行一个值、行间 CRLF，可直接粘进 Excel 单列；金额 / 整数 / 星级去掉货币符号与
+ *   千分位（百分比保留 %，Excel 会识别成数值而非文本）。
+ * ===================================================================== */
+function plainFmt(col, v) {
+  if (v === null || v === undefined || v === '') return '';
+  if (typeof v !== 'number') return String(v);
+  if (!col) return String(v);
+  switch (col.type) {
+    case 'pct': return (v * 100).toFixed(2) + '%';
+    case 'money': return Number(v).toFixed(2);
+    case 'money0': return String(Math.round(v));
+    case 'int': return String(Math.round(v));
+    case 'sec': return Number(v).toFixed(1);
+    case 'score': return Number(v).toFixed(1);
+    default: return String(v);
+  }
+}
+
+/* 单店单行取值（与 cellHTML 同源，含店铺名 / 责任人 / 统计口径的特判与默认值兜底） */
+function plainOfStore(c, store, which) {
+  if (c.k === 'store') return storeName(store);
+  if (c.k === 'period') return which === 'today' ? '当日数据' : '本月累计';
+  if (c.k === 'pm' || c.k === 'op') {
+    const { v } = cellValue(store.key, c.k, which);
+    const def = c.k === 'pm' ? store.pm : store.op;
+    return (v === null || v === undefined || v === '') ? (def || '') : String(v);
+  }
+  // 报表日当天没有导入数据时，按报表当日计的列在屏幕上显示「—」，复制同样留空
+  if (which === 'today' && !state._todayHasData && TODAY_BLANK_FIELDS.indexOf(c.k) >= 0) return '';
+  const { v } = cellValue(store.key, c.k, which);
+  return plainFmt(c, v);
+}
+
+/* 合计行取值（与 sumRowHTML 完全同源） */
+function plainOfSum(c, which) {
+  if (c.k === 'store') return '合计';
+  if (c.k === 'period') return '';
+  if ((which === 'today' && !state._todayHasData && TODAY_BLANK_FIELDS.indexOf(c.k) >= 0)
+      || c.type === 'text' || c.type === 'scoreText' || !SUM_KEYS.includes(c.k)) return '';
+  let total = null;
+  STORES.forEach((s) => {
+    const { v } = cellValue(s.key, c.k, which);
+    if (typeof v === 'number') total = (total || 0) + v;
+  });
+  return total === null ? '' : plainFmt(c, total);
+}
+
+/** 生成某一列的整列文本；返回 null 表示列不存在 */
+function columnText(field) {
+  const c = COLS.find((x) => x.k === field);
+  if (!c) return null;
+  const whichs = state.period === 'both' ? ['today', 'cum'] : [state.period];
+  const lines = [];
+  STORES.forEach((s) => whichs.forEach((w) => lines.push(plainOfStore(c, s, w))));
+  // 合计行与 renderTable 保持一致：both 模式下合计行合计的是「当日数据」
+  lines.push(plainOfSum(c, state.period === 'cum' ? 'cum' : 'today'));
+  return { text: lines.join('\r\n'), rows: lines.length, col: c };
+}
+
+/** 写剪贴板：优先异步 API（https 下可用），失败回退 textarea + execCommand（iframe 内更可靠） */
+function copyText(text) {
+  return new Promise((resolve) => {
+    const fallback = () => {
+      try {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.setAttribute('readonly', '');
+        ta.style.cssText = 'position:fixed;top:-2000px;left:-2000px;opacity:0';
+        document.body.appendChild(ta);
+        ta.select();
+        ta.setSelectionRange(0, text.length);
+        const ok = document.execCommand('copy');
+        document.body.removeChild(ta);
+        resolve(!!ok);
+      } catch (e) { resolve(false); }
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(() => resolve(true)).catch(fallback);
+    } else fallback();
+  });
+}
+
+function colTitle(c) {
+  if (!c) return '';
+  return c.label || (c.k === 'period' ? '统计口径' : c.k);
+}
+
+function copyColumn(field, fromPop) {
+  const r = columnText(field);
+  if (!r) return;
+  copyText(r.text).then((ok) => {
+    if (!ok) {
+      toast('复制失败：浏览器拒绝了剪贴板访问，请手动选中表格内容复制', 'warn', 4200);
+      return;
+    }
+    const scope = state.period === 'both' ? '（每店当日 + 本月累计，含合计行）' : '（含合计行）';
+    toast('已复制「' + colTitle(r.col) + '」' + r.rows + ' 行' + scope, 'ok', 2600);
+    if (fromPop) closeCopyPop();
+  });
+}
+
+function buildCopyPop() {
+  const pop = $('copy-col-pop');
+  if (!pop) return;
+  const byG = new Map();
+  COLS.forEach((c) => {
+    if (!byG.has(c.g)) byG.set(c.g, []);
+    byG.get(c.g).push(c);
+  });
+  let html = '<div class="cp-title"><span>📋 复制整列 — 选择要复制的列</span>'
+    + '<button type="button" class="cp-close" data-act="close" aria-label="关闭">✕</button></div>';
+  GROUPS.forEach((g) => {
+    const cols = byG.get(g.id);
+    if (!cols || !cols.length) return;
+    html += `<div class="cp-h">${esc(g.label)}</div><div class="cp-grid">`
+      + cols.map((c) => `<button type="button" class="cp-item" data-col="${c.k}">${esc(colTitle(c))}</button>`).join('')
+      + '</div>';
+  });
+  html += '<div class="cp-tip">点列名即复制该列当前可见的全部行（含合计行），可直接粘贴到 Excel 单列。'
+    + '鼠标移到表格列头右上角，也会出现同一个复制按钮。</div>';
+  pop.innerHTML = html;
+}
+
+function openCopyPop() {
+  buildCopyPop();
+  const pop = $('copy-col-pop');
+  if (pop) pop.classList.add('show');
+}
+function closeCopyPop() {
+  const pop = $('copy-col-pop');
+  if (pop) pop.classList.remove('show');
+}
+function toggleCopyPop() {
+  const pop = $('copy-col-pop');
+  if (!pop) return;
+  if (pop.classList.contains('show')) closeCopyPop();
+  else openCopyPop();
+}
+
+function bindCopy() {
+  const btn = $('btn-copy-col');
+  if (btn) btn.addEventListener('click', (e) => { e.stopPropagation(); toggleCopyPop(); });
+  const pop = $('copy-col-pop');
+  if (pop) {
+    pop.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (e.target.closest('.cp-close')) { closeCopyPop(); return; }
+      const b = e.target.closest('.cp-item');
+      if (b && b.dataset.col) copyColumn(b.dataset.col, true);
+    });
+  }
+  // 表头每 render 都会重建，事件必须委托到 thead 本身（元素不变，内容被替换）
+  const thead = $('tbl-thead');
+  if (thead) {
+    thead.addEventListener('click', (e) => {
+      const b = e.target.closest('.col-copy');
+      if (!b) return;
+      e.preventDefault();
+      e.stopPropagation();
+      copyColumn(b.dataset.col);
+    });
+  }
+  document.addEventListener('click', (e) => {
+    const pop2 = $('copy-col-pop');
+    if (!pop2 || !pop2.classList.contains('show')) return;
+    if (pop2.contains(e.target) || (e.target.closest && e.target.closest('#btn-copy-col'))) return;
+    closeCopyPop();
+  });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeCopyPop(); });
 }
 
 function renderKpis() {
@@ -2452,6 +2640,7 @@ function bindUI() {
   });
   $('btn-edit').addEventListener('click', toggleEditMode);
   $('btn-merge-tgt').addEventListener('click', toggleMergeMode);
+  bindCopy();   // 复制整列（表头小按钮 + 工具栏弹层）
   $('btn-clear-edit').addEventListener('click', () => {
     const nManual = Object.keys(state.manual).length;
     const nNames = Object.keys(state.names).length;
