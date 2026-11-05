@@ -1007,6 +1007,7 @@
      与订单/收费保持一致的双写策略，避免「静默失败 → 刷新后要重新导入」。 */
   const VAB_IDB_KEY = 'vab';
   function persistVab(){
+      if(window.__dpFrozen) return;   // 壳层正在恢复备份：冻结旧状态回写
     const has = App.vab && App.vab.length;
     try{
       if(has) localStorage.setItem(VAB_LS_KEY, JSON.stringify(App.vab));
@@ -1093,6 +1094,7 @@
     })).catch(()=>null);
   }
   function persistOrder(){
+      if(window.__dpFrozen) return;   // 壳层正在恢复备份：冻结旧状态回写
     const has = App.lastOrder && App.lastOrder.length;
     try{
       if(has) localStorage.setItem(ORDER_LS_KEY, JSON.stringify(App.lastOrder));
@@ -1103,6 +1105,7 @@
     idbSet(ORDER_IDB_KEY, has? App.lastOrder : null).catch(()=>{});
   }
   function persistCharge(){
+      if(window.__dpFrozen) return;   // 壳层正在恢复备份：冻结旧状态回写
     const has = App.lastCharge && App.lastCharge.length;
     try{
       if(has) localStorage.setItem(CHARGE_LS_KEY, JSON.stringify(App.lastCharge));
@@ -3771,6 +3774,7 @@ const PROJ_EXCLUDE = {
   (function bindFlushOnHide(){
     const lastFlushed = { vab: App.vab, order: App.lastOrder, charge: App.lastCharge };
     function flush(){
+      if(window.__dpFrozen) return;   // 壳层正在恢复备份：冻结旧状态回写
       if(App.vab !== lastFlushed.vab){
         lastFlushed.vab = App.vab;
         try{

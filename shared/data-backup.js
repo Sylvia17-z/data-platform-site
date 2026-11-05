@@ -24,7 +24,7 @@
 
   // 已知数据库（indexedDB.databases() 不可用时的兜底）
   var DP_DB_NAME = 'dpBridge';           // 壳层共享数据桥接库（dpBridge/kv）
-  var KNOWN_DBS = ['dailyPerformance', DP_DB_NAME];
+  var KNOWN_DBS = ['dailyPerformance', DP_DB_NAME, 'med_assess_db'];
 
   // 不导出 / 不恢复的键：登录态、心跳、UI 偏好、权限缓存（有时效，跨机无意义）
   var SKIP = [
@@ -361,7 +361,7 @@
 
   /* ---------------- 恢复 ---------------- */
   function apply(payload, onProgress) {
-    var report = { idbOk: 0, idbFail: [], lsOk: 0, lsFail: [], dropped: 0, tsAligned: 0 };
+    var report = { idbOk: 0, idbFail: [], lsOk: 0, lsFail: [], dropped: 0, tsAligned: 0, copiesAligned: 0 };
     var dbs = payload.indexedDB || {};
     var dbNames = Object.keys(dbs);
 
@@ -452,53 +452,128 @@
       return report;
     }).then(function (report) {
       // 4) 兜底：清掉备份里没有的桥接缓存，避免壳层把旧值优先推给子页
-      return pruneStaleBridge(payload, report).then(function () { return report; });
+      return syncCopies(payload, report).then(function () { return report; });
     });
   }
 
-  /* 清理陈旧的壳层桥接缓存（2026-11-05）
-     壳层 app.js 的 dpGet() 读共享数据时「以 IndexedDB(dpBridge/kv) 为准、localStorage 只有兜底」。
-     若备份里不含这份缓存（旧版本备份 / 另一入口从未写过），恢复后 dpGet 仍会返回恢复前的
-     旧订单，子页拿到的就是旧数据 → 用户看到「恢复完还是之前的数据」。
-     故：备份未包含的共享键，从本机 dpBridge 中删掉，让读取回退到刚恢复的 localStorage。 */
-  var DP_SHARED_KEYS = ['dailyPerformance_orders', 'dailyPerformance_hist', 'dailyPerformance_vab'];
-  function pruneStaleBridge(payload, report) {
-    var bridge = (payload.indexedDB || {}).dpBridge;
-    var kv = (bridge && bridge.kv) || [];
-    var keep = {};
-    for (var i = 0; i < kv.length; i++) {
-      var r = kv[i];
-      if (r && r.k != null) keep[String(r.k)] = 1;
+  /* 恢复后的「副本一致性」对齐（2026-11-05 第二次实测「恢复后仍是旧数据」的根因）
+     ------------------------------------------------------------------
+     同一份业务数据在浏览器里有多份副本，且读取规则并不一致：
+       · dailyPerformance_orders / hist / vab
+           - localStorage（页内同步首选）
+           - IndexedDB dailyPerformance/kv（chuzhen 兜底：ts 更新或条数更多者胜 → 会反过来覆盖 localStorage）
+           - IndexedDB dpBridge/kv（壳层 dpGet 以它为准，直接推给子页）
+       · med_order_list / med_charge_list / med_vab_list
+           - localStorage（首选）
+           - IndexedDB med_assess_db/kv（键名 order / charge / vab，localStorage 未命中才回退）
+     备份时这些副本可能并不是同一份快照（某次写入失败、旧版本只写了一份、被云端回灌过旧值…）。
+     恢复时若原样写回，页内「挑更新的那份」就会把旧副本挑出来盖掉刚恢复的数据。
+     故：恢复末尾统一裁决一次（ts 更新 / 条数更多者胜），把同一份写进所有副本。 */
+  var SHARED_STR_KEYS = ['dailyPerformance_orders', 'dailyPerformance_hist', 'dailyPerformance_vab'];
+  var MED_KEYS = [
+    { ls: 'med_order_list', idbKey: 'order' },
+    { ls: 'med_charge_list', idbKey: 'charge' },
+    { ls: 'med_vab_list', idbKey: 'vab' }
+  ];
+  var MED_DB = 'med_assess_db';
+
+  function findKvRow(payload, dbName, key) {
+    var stores = (payload.indexedDB || {})[dbName] || {};
+    var names = Object.keys(stores);
+    for (var i = 0; i < names.length; i++) {
+      var rows = stores[names[i]] || [];
+      for (var j = 0; j < rows.length; j++) {
+        var r = rows[j];
+        if (r && String(r.k) === String(key)) return r.v;
+      }
     }
-    var del = [];
-    for (var d = 0; d < DP_SHARED_KEYS.length; d++) {
-      if (!keep[DP_SHARED_KEYS[d]]) del.push(DP_SHARED_KEYS[d]);
-    }
-    if (!del.length) return Promise.resolve();
-    return listDbNames().then(function (names) {
-      if (names.indexOf(DP_DB_NAME) < 0) return;
+    return undefined;
+  }
+  function metaOf(v) {
+    var o;
+    try { o = (typeof v === 'string') ? JSON.parse(v) : v; } catch (e) { return null; }
+    if (Array.isArray(o)) return { ts: 0, n: o.length };
+    if (!o || typeof o !== 'object') return null;
+    var arr = o.orders || o.list || o.rows || [];
+    var ts = Number(o.ts) || Number(o.histTs) || 0;
+    return { ts: ts, n: Array.isArray(arr) ? arr.length : 0 };
+  }
+  /* 两份里取更完整的一份（与页内读取规则保持一致），返回原始值（字符串或对象） */
+  function betterOf(a, b) {
+    var ma = metaOf(a), mb = metaOf(b);
+    if (!ma) return b;
+    if (!mb) return a;
+    if (mb.ts > ma.ts) return b;
+    if (ma.ts > mb.ts) return a;
+    return mb.n > ma.n ? b : a;
+  }
+  function kvWrite(dbName, items, report) {
+    if (!items.length) return Promise.resolve();
+    return ensureDb(dbName, ['kv']).then(function (db) {
       return new Promise(function (res) {
-        var req;
-        try { req = indexedDB.open(DP_DB_NAME); } catch (e) { return res(); }
-        req.onupgradeneeded = function () { try { req.result.createObjectStore('kv'); } catch (e) {} };
-        req.onsuccess = function () {
-          var db = req.result;
-          try {
-            if (!db.objectStoreNames.contains('kv')) { db.close(); return res(); }
-            var tx = db.transaction('kv', 'readwrite');
-            var st = tx.objectStore('kv');
-            del.forEach(function (k) { try { st.delete(k); } catch (e) {} });
-            tx.oncomplete = function () {
-              report.bridgePruned = (report.bridgePruned || 0) + del.length;
-              try { db.close(); } catch (e) {}
-              res();
-            };
-            tx.onerror = function () { try { db.close(); } catch (e) {} res(); };
-          } catch (e) { try { db.close(); } catch (_) {} res(); }
+        var tx;
+        try { tx = db.transaction('kv', 'readwrite'); }
+        catch (e) { try { db.close(); } catch (_) {} return res(); }
+        var st = tx.objectStore('kv');
+        items.forEach(function (it) {
+          try { if (it.val == null) st.delete(it.key); else st.put(it.val, it.key); } catch (e) {}
+        });
+        tx.oncomplete = function () {
+          report.copiesAligned = (report.copiesAligned || 0) + items.length;
+          try { db.close(); } catch (e) {}
+          res();
         };
-        req.onerror = function () { res(); };
+        tx.onerror = tx.onabort = function () { try { db.close(); } catch (e) {} res(); };
       });
     }).catch(function () {});
+  }
+  function syncCopies(payload, report) {
+    var lsMap = payload.localStorage || {};
+    var planDp = [], planBridge = [], planMed = [];
+    // 只覆盖备份里本来就有的桥接键：dpBridge 是壳层缓存，历史明细整包可达数 MB，
+    // 无差别补写会让同一份数据在浏览器里存两遍，容易顶到配额。
+    var bridgeHas = {};
+    var bKv = ((payload.indexedDB || {})[DP_DB_NAME] || {}).kv || [];
+    for (var bi = 0; bi < bKv.length; bi++) {
+      var br = bKv[bi];
+      if (br && br.k != null) bridgeHas[String(br.k)] = 1;
+    }
+
+    SHARED_STR_KEYS.forEach(function (k) {
+      var lsVal = lsMap[k];
+      var idbVal = findKvRow(payload, 'dailyPerformance', k);
+      if (lsVal == null && idbVal == null) {
+        // 备份里完全没有 → 本机旧副本也要清掉，否则读取时又会把旧值捡回来
+        planDp.push({ key: k, val: null });
+        planBridge.push({ key: k, val: null });
+        return;
+      }
+      var win = (lsVal != null && idbVal != null) ? betterOf(lsVal, idbVal) : (lsVal != null ? lsVal : idbVal);
+      var str = (typeof win === 'string') ? win : JSON.stringify(win);
+      planDp.push({ key: k, val: str });
+      // 备份里没有这份桥接缓存 → 清掉本机旧记录，让 dpGet 回退到刚恢复的 localStorage；
+      // 有则对齐成同一份（不无差别补写，避免同一份大数据在浏览器里存两遍）
+      planBridge.push({ key: k, val: bridgeHas[k] ? str : null });
+      // 无论原 LS 是否命中，只要裁决结果不同就回写：IDB 更完整时也要同步到 LS，
+      // 否则页内先读到的仍是 LS 里那份旧的，看起来像「没恢复」。
+      if (lsVal !== str) { try { localStorage.setItem(k, str); } catch (e) {} }
+    });
+
+    MED_KEYS.forEach(function (m) {
+      var lsVal = lsMap[m.ls];
+      var idbVal = findKvRow(payload, MED_DB, m.idbKey);
+      if (lsVal == null && idbVal == null) { planMed.push({ key: m.idbKey, val: null }); return; }
+      var win = (lsVal != null && idbVal != null) ? betterOf(lsVal, idbVal) : (lsVal != null ? lsVal : idbVal);
+      var str = (typeof win === 'string') ? win : JSON.stringify(win);
+      var parsed = null;
+      try { parsed = JSON.parse(str); } catch (e) { parsed = null; }
+      planMed.push({ key: m.idbKey, val: parsed });
+      if (lsVal !== str) { try { localStorage.setItem(m.ls, str); } catch (e) {} }
+    });
+
+    return kvWrite('dailyPerformance', planDp, report)
+      .then(function () { return kvWrite(DP_DB_NAME, planBridge, report); })
+      .then(function () { return kvWrite(MED_DB, planMed, report); });
   }
 
   function validate(p) {
@@ -525,6 +600,7 @@
     '.bk-cell .lb{font-size:11.5px;color:#7b8ba3;margin-bottom:4px}',
     '.bk-cell .vl{font-size:15px;font-weight:600;color:#123c73;font-variant-numeric:tabular-nums}',
     '.bk-acts{display:flex;flex-direction:column;gap:9px;margin:4px 0 12px}',
+    '.bk-content{font-size:12px;line-height:1.7;color:#41526b;background:#f6f9fd;border:1px dashed #dbe6f3;border-radius:8px;padding:8px 10px;margin:0 0 12px}',
     '.bk-btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;border-radius:8px;padding:11px 14px;font-size:13.5px;line-height:1.2;font-family:inherit;cursor:pointer;border:1px solid transparent}',
     '.bk-btn:disabled{opacity:.55;cursor:not-allowed}',
     '.bk-btn.primary{background:#123c73;color:#fff;border-color:#123c73}',
@@ -595,6 +671,7 @@
       '    <div class="bk-cell"><div class="lb">数据表项</div><div class="vl" data-k="idbn">统计中…</div></div>',
       '    <div class="bk-cell"><div class="lb">最近数据更新</div><div class="vl" data-k="ts">—</div></div>',
       '  </div>',
+      '  <div class="bk-content" data-k="content">—</div>',
       '  <div class="bk-acts">',
       '    <button class="bk-btn primary" type="button" data-act="export">⬇️ 下载本机数据备份</button>',
       '    <button class="bk-btn ghost" type="button" data-act="pick">⬆️ 从备份文件恢复</button>',
@@ -611,7 +688,7 @@
     var q = function (k) { return panel.querySelector('[data-k="' + k + '"]'); };
     ui = {
       panel: panel,
-      lsn: q('lsn'), lsb: q('lsb'), idbn: q('idbn'), ts: q('ts'),
+      lsn: q('lsn'), lsb: q('lsb'), idbn: q('idbn'), ts: q('ts'), content: q('content'),
       log: q('log'), confirm: q('confirm'), foot: q('foot'),
       file: (function () {
         var f = document.createElement('input');
@@ -652,6 +729,44 @@
     refreshStats();
   }
 
+  /* 内容清单：把「备份里到底有什么」直接说清楚（用户需要能自查备份是否完整） */
+  function countIn(str, paths) {
+    var o;
+    try { o = JSON.parse(str); } catch (e) { return 0; }
+    if (Array.isArray(o)) return o.length;
+    if (!o || typeof o !== 'object') return 0;
+    for (var i = 0; i < paths.length; i++) {
+      var v = o[paths[i]];
+      if (Array.isArray(v)) return v.length;
+      if (typeof v === 'number' && v > 0) return v;
+    }
+    return 0;
+  }
+  function contentSummary(map) {
+    map = map || {};
+    var parts = [];
+    var orders = countIn(map['dailyPerformance_orders'], ['orders']);
+    if (orders) parts.push('订单 ' + orders.toLocaleString() + ' 条');
+    var hist = countIn(map['dailyPerformance_hist'], ['list', 'hist', 'rows']);
+    if (hist) parts.push('历史明细 ' + hist.toLocaleString() + ' 条');
+    else if (map['dailyPerformance_hist']) parts.push('历史明细 已存');
+    var vab = countIn(map['dailyPerformance_vab'], ['list', 'rows']);
+    if (vab) parts.push('VAB ' + vab + ' 人');
+    var mv = countIn(map['med_vab_list'], []);
+    if (mv) parts.push('医管VAB ' + mv + ' 人');
+    var mo = countIn(map['med_order_list'], []);
+    if (mo) parts.push('医管订单 ' + mo.toLocaleString() + ' 条');
+    var mc = countIn(map['med_charge_list'], []);
+    if (mc) parts.push('收费 ' + mc.toLocaleString() + ' 条');
+    var tgt = 0;
+    try { tgt = Object.keys(JSON.parse(map['monthly_mgr_targets_v1'] || '{}')).length; } catch (e) {}
+    if (tgt) parts.push('月目标 ' + tgt + ' 个月');
+    var meida = 0;
+    for (var k in map) if (Object.prototype.hasOwnProperty.call(map, k) && k.indexOf('meidaStore_') === 0) meida++;
+    if (meida) parts.push('美大店铺 ' + meida + ' 项');
+    return parts.length ? parts.join(' · ') : '尚未导入任何业务数据';
+  }
+
   function refreshStats() {
     var ls = readLocal();
     ui.lsn.textContent = Object.keys(ls.map).length + ' 个';
@@ -660,6 +775,7 @@
     try { ts = Number(localStorage.getItem('dailyPerformance_snap_ts') || 0); } catch (e) {}
     ui.ts.textContent = ts ? isoLocal(new Date(ts)).slice(5, 16) : '—';
     ui.ts.style.fontSize = ts ? '13px' : '';
+    if (ui.content) ui.content.innerHTML = '<b>本机现有数据：</b>' + contentSummary(ls.map);
     withTimeout(countAllIdb(), 2500, null).then(function (r) {
       if (!ui) return;
       if (!r) { ui.idbn.textContent = '—'; return; }
@@ -736,6 +852,7 @@
       '    <span>💽 ' + idbRecords.toLocaleString() + ' 项数据表</span>',
       '    <span>📦 ' + fmtBytes(file.size) + '</span>',
       '  </div>',
+      '  <div style="margin-top:7px"><b>包含：</b>' + contentSummary(p.localStorage) + '</div>',
       '  <div style="margin-top:7px;color:#8a5a00">来源：' + (p.origin || '未知') + (s.lsKeys && s.lsKeys !== lsKeys ? '（备份时 ' + s.lsKeys + ' 键）' : '') + '</div>',
       '</div>'
     ].join('');
@@ -750,9 +867,34 @@
     }
   }
 
+  /* 恢复前冻结子页回写（2026-11-05 第二次实测「恢复后仍是旧数据」的直接原因之二）
+     子页在 beforeunload / pagehide / visibilitychange 时会把内存里的旧数据刷回
+     localStorage + IndexedDB。恢复写盘到页面刷新之间的几百毫秒里，只要发生一次回写，
+     刚恢复的数据就被旧值盖回去——与云端无关，管理员本地模式同样会中招。
+     做法：恢复一开始就给所有 iframe 打 __dpFrozen 标记（同源直接写变量，跨域再补一条消息），
+     刷新前把 iframe 从 DOM 移除（移除 iframe 只触发 unload，不触发 beforeunload）。 */
+  function freezeFrames() {
+    var fs = document.querySelectorAll('iframe');
+    for (var i = 0; i < fs.length; i++) {
+      var w = null;
+      try { w = fs[i].contentWindow; } catch (e) {}
+      if (!w) continue;
+      try { w.__dpFrozen = true; } catch (e) {}
+      try { w.postMessage({ type: 'dp:freeze' }, '*'); } catch (e) {}
+    }
+    return fs.length;
+  }
+  function detachFrames() {
+    var fs = document.querySelectorAll('iframe');
+    for (var i = 0; i < fs.length; i++) {
+      try { fs[i].parentNode.removeChild(fs[i]); } catch (e) {}
+    }
+  }
+
   function doApply(btn) {
     if (!pending) return;
     btn.disabled = true;
+    freezeFrames();          // 立刻冻结：后续 apply 可能耗时数秒，期间不许子页回写
     ui.foot.innerHTML = '';
     ui.log.innerHTML = '';
     var t0 = Date.now();
@@ -790,10 +932,14 @@
           tsAligned: report.tsAligned || 0
         }));
       } catch (e) {}
+      freezeFrames();        // 二次冻结（apply 期间可能有 iframe 重载丢失标记）
       logKeep('数据已写入本机，1 秒后自动刷新页面…', 'ok');
-      // 尽快刷新：延迟期间 iframe 内的模块仍在跑定时器，可能把旧内存状态写回本地，
-      // 造成「刚恢复完又被覆盖」。反馈由刷新后的顶部绿色提示承接。
-      setTimeout(function () { try { location.reload(); } catch (e) {} }, 900);
+      // 尽快刷新：先把 iframe 摘掉再刷新，彻底断掉 beforeunload 把旧数据写回的路径。
+      // 反馈由刷新后的顶部绿色提示承接。
+      setTimeout(function () {
+        detachFrames();
+        try { location.reload(); } catch (e) {}
+      }, 900);
     }).catch(function (e) {
       log('恢复失败：' + ((e && e.message) || e), 'err');
       ui.foot.innerHTML = '<button class="bk-btn ghost" type="button" data-act="close">关闭</button>';

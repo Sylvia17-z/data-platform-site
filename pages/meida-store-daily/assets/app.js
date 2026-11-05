@@ -2176,6 +2176,7 @@ function bindMerge() {
  * ===================================================================== */
 let _saveTimer = 0;
 function saveLocal() {
+  if (window.__dpFrozen) return;   // 壳层正在恢复备份：冻结旧状态回写
   clearTimeout(_saveTimer);
   _saveTimer = setTimeout(() => {
     lsSet(LS.rows, JSON.stringify(state.rows));

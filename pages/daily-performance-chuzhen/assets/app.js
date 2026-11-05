@@ -220,6 +220,7 @@ function applyOrdersRaw(raw){
 }
 
 function persistOrders(force, syncNow){
+  if(window.__dpFrozen) return;   // 壳层正在恢复备份：禁止用旧内存状态回写，否则会盖掉刚恢复的数据
   // 空态守卫：内存 orders 为空、而已存储中存在非空数据时，绝不用空数据覆写真数据。
   // 根因：beforeunload 与多处路径都会调用 persistOrders()，若此刻内存态为空/残缺
   //（如刚加载未恢复、切走标签、渲染中断），无条件写回会把已存的真实订单清空，
@@ -418,6 +419,7 @@ function queueHistGz(){
     .catch(() => { state.histGz = null; }); // 压缩失败：本次上传不带 hist（仅本地），订单不受影响
 }
 function persistHist(){
+  if(window.__dpFrozen) return;   // 同上：恢复期间冻结回写
   state.histTs = Date.now();
   const basePayload = JSON.stringify({ histOrders: state.histOrders, ts: state.histTs });
   // 先落盘「无 gz 版」（保证本机可读）；gz 压缩完成后会就地补写（见 .then），
@@ -1119,6 +1121,7 @@ function makeEditable(el, onSave, opts={}){
 const VAB_STORAGE_KEY = 'dailyPerformance_vab';
 let _vabStorageWarned = false;
 function persistVab(){
+  if(window.__dpFrozen) return;   // 同上：恢复期间冻结回写
   try{
     // set 保存规范化集合用于匹配；list 保存原始会员号（展示/去重）；rows 保存导入表格全部字段用于按原表字段展示
     localStorage.setItem(VAB_STORAGE_KEY, JSON.stringify({
