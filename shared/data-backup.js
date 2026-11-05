@@ -175,6 +175,30 @@
     });
   }
 
+  /* 兜底：indexedDB.databases() 在个别浏览器/首次枚举时可能长时间不返回，
+     不能让面板一直停在「统计中…」，到点用中性占位收尾。 */
+  function withTimeout(promise, ms, fallback) {
+    return new Promise(function (resolve) {
+      var done = false;
+      var timer = setTimeout(function () {
+        if (done) return;
+        done = true;
+        resolve(fallback);
+      }, ms);
+      promise.then(function (v) {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        resolve(v);
+      }, function () {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        resolve(fallback);
+      });
+    });
+  }
+
   function countAllIdb() {
     return listDbNames().then(function (names) {
       var total = 0, dbNames = [];
@@ -539,8 +563,9 @@
     try { ts = Number(localStorage.getItem('dailyPerformance_snap_ts') || 0); } catch (e) {}
     ui.ts.textContent = ts ? isoLocal(new Date(ts)).slice(5, 16) : '—';
     ui.ts.style.fontSize = ts ? '13px' : '';
-    countAllIdb().then(function (r) {
+    withTimeout(countAllIdb(), 2500, null).then(function (r) {
       if (!ui) return;
+      if (!r) { ui.idbn.textContent = '—'; return; }
       ui.idbn.textContent = r.records ? r.records.toLocaleString() + ' 项' : (r.dbs.length ? '空' : '—');
     }).catch(function () { if (ui) ui.idbn.textContent = '—'; });
   }
