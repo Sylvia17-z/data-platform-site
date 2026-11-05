@@ -447,6 +447,9 @@
     '.bk-btn.danger:hover:not(:disabled){background:#8f1d17}',
     '.bk-tip{font-size:12px;line-height:1.7;color:#5b6b82;background:#f6f9fd;border:1px solid #e7edf5;border-left:3px solid #123c73;border-radius:6px;padding:9px 11px}',
     '.bk-tip b{color:#123c73}',
+    '.bk-toast{position:fixed;left:50%;top:22px;transform:translateX(-50%);z-index:99999;background:#0f5132;color:#fff;border-radius:10px;padding:12px 18px;font-size:13px;line-height:1.6;box-shadow:0 10px 30px rgba(16,32,56,.28);max-width:min(420px,92vw);text-align:center;transition:opacity .5s,transform .5s}',
+    '.bk-toast.out{opacity:0;transform:translateX(-50%) translateY(-10px)}',
+    '.bk-must{background:#fff4e5;border:1px solid #ffd7a8;color:#8a4b00;border-radius:6px;padding:8px 10px;margin-bottom:7px;font-size:12.5px}',
     '.bk-log{margin-top:11px;font-size:12px;line-height:1.7;color:#5b6b82;min-height:0}',
     '.bk-log .ok{color:#166534}.bk-log .err{color:#b3261e}.bk-log .warn{color:#a15c00}',
     '.bk-confirm{margin-top:12px;border:1px solid #f0d9a8;background:#fffbf0;border-radius:8px;padding:11px 12px;font-size:12.5px;line-height:1.75;color:#6b5320}',
@@ -637,6 +640,7 @@
     ui.log.innerHTML = '';
     ui.confirm.innerHTML = [
       '<div class="bk-confirm">',
+      '  <div class="bk-must">⚠️ 文件已读取成功，还需<b>再点一次下方红色按钮</b>「确认覆盖并恢复」才会真正开始写入。</div>',
       '  <div>即将用此备份<b>覆盖本机现有数据</b>：</div>',
       '  <div class="bk-kv">',
       '    <span>📅 ' + (p.exportedAt || '未知时间') + '</span>',
@@ -649,6 +653,13 @@
     ].join('');
     ui.foot.innerHTML = '<button class="bk-btn ghost" type="button" data-act="close">取消</button>' +
       '<button class="bk-btn danger" type="button" data-act="apply">确认覆盖并恢复</button>';
+    // 选完文件后把确认按钮带进视野并聚焦：否则用户容易以为「选完就恢复好了」
+    var ab = ui.foot.querySelector('[data-act="apply"]');
+    if (ab) {
+      try { ui.confirm.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); } catch (e) {}
+      try { ab.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (e) {}
+      try { ab.focus({ preventScroll: true }); } catch (e) {}
+    }
   }
 
   function doApply(btn) {
@@ -672,10 +683,49 @@
         logKeep('部分数据表写入失败：' + report.idbFail.slice(0, 3).join('；'), 'err');
       }
       ui.foot.innerHTML = '<button class="bk-btn primary" type="button" data-act="reload">立即刷新查看</button>';
+
+      // 恢复已落盘，但页面内存里还是旧数据（各模块只在加载时读取一次）。
+      // 不重建页面的话，用户看到的仍是旧数字，会以为「没恢复成功」——
+      // 2026-11-05 用户实测反馈正是这个现象。故：通知壳层失效内存缓存 + 自动刷新。
+      try { window.postMessage({ type: 'dp:reset' }, '*'); } catch (e) {}
+      try {
+        sessionStorage.setItem('bk_restore_done', JSON.stringify({
+          at: (pending && pending.exportedAt) || '',
+          lsOk: report.lsOk,
+          idbOk: report.idbOk,
+          dropped: report.dropped
+        }));
+      } catch (e) {}
+      logKeep('数据已写入本机，2 秒后自动刷新页面…', 'ok');
+      setTimeout(function () { try { location.reload(); } catch (e) {} }, 2000);
     }).catch(function (e) {
       log('恢复失败：' + ((e && e.message) || e), 'err');
       ui.foot.innerHTML = '<button class="bk-btn ghost" type="button" data-act="close">关闭</button>';
     });
+  }
+
+  /* 恢复完成 → 自动刷新后，给一个明确的落地反馈，避免用户猜「到底生效没有」 */
+  function flashRestoreResult() {
+    var raw = null;
+    try { raw = sessionStorage.getItem('bk_restore_done'); } catch (e) { return; }
+    if (!raw) return;
+    try { sessionStorage.removeItem('bk_restore_done'); } catch (e) {}
+    var info = {};
+    try { info = JSON.parse(raw) || {}; } catch (e) { return; }
+    var box = document.createElement('div');
+    box.className = 'bk-toast';
+    box.innerHTML = '✅ 备份已恢复生效<br>' +
+      '<span style="font-size:12px;line-height:1.7;display:inline-block;margin-top:3px">' +
+      (info.lsOk || 0) + ' 个存储键 · ' + (info.idbOk || 0).toLocaleString() + ' 项数据表' +
+      (info.at ? ' · 备份时间 ' + info.at : '') +
+      '<br>请重新打开需要的功能模块查看</span>';
+    function mount() {
+      try { document.body.appendChild(box); } catch (e) { return; }
+      setTimeout(function () { box.classList.add('out'); }, 4200);
+      setTimeout(function () { try { box.parentNode.removeChild(box); } catch (e) {} }, 5000);
+    }
+    if (document.body) mount();
+    else document.addEventListener('DOMContentLoaded', mount);
   }
 
   function open() { build(); mask.style.display = 'flex'; refreshStats(); }
@@ -708,8 +758,9 @@
   ensureStyle();
 
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', mountButton);
+    document.addEventListener('DOMContentLoaded', function () { mountButton(); flashRestoreResult(); });
   } else {
     mountButton();
+    flashRestoreResult();
   }
 })();

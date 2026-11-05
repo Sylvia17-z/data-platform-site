@@ -12,7 +12,7 @@ const state = { modules: [], tabs: [], current: null };
 // 发布版本号：由 index.html 顶部的 <script>window.SITE_VER=... 注入，作为唯一权威来源，避免双文件版本漂移。
 // 此处保留兜底常量，仅在脱离 Shell 独立打开时生效。用于 iframe 缓存穿透，确保线上改动即时可见。
 // file:// 双击打开时不加查询串（带查询串的 iframe 在 file:// 下可能无法加载）。
-const SITE_VER = (typeof window !== 'undefined' && window.SITE_VER) || '20261104e';
+const SITE_VER = (typeof window !== 'undefined' && window.SITE_VER) || '20261104f';
 // 每次页面加载的唯一戳：拼到所有子页 iframe URL 之后，确保浏览器每次都重新拉取最新脚本，
 // 彻底规避「服务器无 Cache-Control 时浏览器启发式缓存旧脚本导致刷新丢数据」的问题。
 // file:// 双击打开时不加查询串。
@@ -162,6 +162,10 @@ window.addEventListener('message', (e) => {
     dpGet(m.key).then(payload => {
       try { if(e.source && e.source.postMessage) e.source.postMessage({ type:'dp:payload', key:m.key, payload: payload || null }, '*'); } catch(_){}
     });
+  } else if(m.type === 'dp:reset'){
+    // 备份恢复已直接改写 localStorage / IndexedDB，内存缓存必须失效，
+    // 否则后续 pushEmbeddedState 或 dp:request 应答会把旧数据回灌给子页。
+    dpMem.clear();
   } else if(m.type === 'rbac:request'){
     // 子页（iframe）请求当前权限快照：回发 rbac:state 供其守卫禁用无权限操作
     try { if (e.source && e.source.postMessage) e.source.postMessage({ type:'rbac:state', payload: RBAC.snapshotForChild() }, '*'); } catch(_){}
