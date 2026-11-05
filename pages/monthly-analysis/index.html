@@ -435,6 +435,151 @@
     setStatus((fromCloud?'已从云端恢复 ':(note||('已导入 '+fmtInt(rows.length)+' 行'))),'ok');
     renderMonthPop();
     renderDashboard();
+    saveLocalDash();   // 落本机：刷新/重开浏览器都不用重新导入
+  }
+
+  /* ---------- 本机持久化（2026-11-05）：不点「清空数据」，刷新就不丢 ----------
+     背景：本页原先只靠云端 dp_monthly 快照持久化，而管理员本地账号会被
+     kpi-cloud-sync 整体跳过（adminMode 直接 return）→ 刷新即丢，每次都要重新导入。
+     存储：IndexedDB「monthlyDash/kv」存整包（真实订单明细约 3~5MB，localStorage 放不下）；
+           localStorage 只存轻量指纹（ts / 行数 / 文件名 / 月份选择），供快速判空与备份核对。
+     读取：IDB 为主；IDB 不可用（隐私模式等）时才退回 localStorage 完整副本。
+     不做「多副本择优」：两份内容同源，按 ts 取新即可，避免又出现挑到旧副本的问题。 */
+  var LD_META_KEY='monthly_dash_meta_v1';
+  var LD_FULL_KEY='monthly_dash_v1';
+  var LD_DB='monthlyDash', LD_STORE='kv', LD_KEY='dash';
+  var ldTimer=0, ldBusy=false, ldPending=false;
+
+  function ldOpen(){
+    return new Promise(function(res,rej){
+      var req;
+      try{ req=indexedDB.open(LD_DB,1); }catch(e){ rej(e); return; }
+      req.onupgradeneeded=function(){ try{ req.result.createObjectStore(LD_STORE); }catch(e){} };
+      req.onsuccess=function(){ res(req.result); };
+      req.onerror=function(){ rej(req.error||new Error('idb-open')); };
+      req.onblocked=function(){ rej(new Error('idb-blocked')); };
+    });
+  }
+  function ldGet(){
+    return ldOpen().then(function(db){
+      return new Promise(function(res){
+        var tx;
+        try{ tx=db.transaction(LD_STORE,'readonly'); }catch(e){ try{db.close();}catch(_){} return res(null); }
+        var rq=tx.objectStore(LD_STORE).get(LD_KEY);
+        rq.onsuccess=function(){ var v=rq.result; try{db.close();}catch(e){} res(v==null?null:v); };
+        rq.onerror=function(){ try{db.close();}catch(e){} res(null); };
+      });
+    }).catch(function(){ return null; });
+  }
+  function ldPut(str){
+    return ldOpen().then(function(db){
+      return new Promise(function(res,rej){
+        var tx;
+        try{ tx=db.transaction(LD_STORE,'readwrite'); }catch(e){ try{db.close();}catch(_){} return rej(e); }
+        tx.objectStore(LD_STORE).put(str,LD_KEY);
+        tx.oncomplete=function(){ try{db.close();}catch(e){} res(true); };
+        tx.onerror=tx.onabort=function(){ var er=tx.error; try{db.close();}catch(e){} rej(er||new Error('idb-put')); };
+      });
+    });
+  }
+  function ldDel(){
+    return ldOpen().then(function(db){
+      return new Promise(function(res){
+        var tx;
+        try{ tx=db.transaction(LD_STORE,'readwrite'); }catch(e){ try{db.close();}catch(_){} return res(); }
+        tx.objectStore(LD_STORE).delete(LD_KEY);
+        tx.oncomplete=tx.onerror=tx.onabort=function(){ try{db.close();}catch(e){} res(); };
+      });
+    }).catch(function(){});
+  }
+
+  function saveLocalDash(){
+    if(ldTimer) clearTimeout(ldTimer);
+    ldTimer=setTimeout(doSaveLocalDash,350);   // 导入时数据量大，防抖避免连续写
+  }
+  function doSaveLocalDash(){
+    var d=dash;
+    if(!d||!d.rows||!d.rows.length||!d.map){ clearLocalDash(); return; }
+    var pack={ v:1, ts:Date.now(), rows:d.rows, map:d.map, fname:d.fname||'',
+               scope:d.scope||'__all__', selMonths:(d.selMonths||[]).slice() };
+    var json;
+    try{ json=JSON.stringify(pack); }catch(e){ return; }
+    // 写 IDB 期间若又有新数据，落盘完成后补写一次，避免丢最后一次修改
+    ldPut(json).then(function(){
+      try{ localStorage.removeItem(LD_FULL_KEY); }catch(e){}   // IDB 成功则不再留完整副本
+    }).catch(function(){
+      // IDB 不可用 → 退回 localStorage（超过配额则明确告知，不让用户以为已经存住了）
+      try{ localStorage.setItem(LD_FULL_KEY,json); }
+      catch(e){ setStatus('⚠️ 本机存储空间不足，本次数据未能保存到本机，刷新后需重新导入。','err'); }
+    });
+    try{
+      localStorage.setItem(LD_META_KEY,JSON.stringify({
+        ts:pack.ts, n:d.rows.length, fname:pack.fname,
+        months:d.months||[], scope:pack.scope, selMonths:pack.selMonths
+      }));
+    }catch(e){}
+    // 本机数据的时间戳即「本机最后变更时刻」：云端首次对齐时据此判断谁更新，
+    // 否则全新设备上 tsGet()=0 会被判「云端更新」，把刚导入的数据反灌成云端旧快照。
+    try{ localStorage.setItem('kpi_cloud_ts_monthly',String(pack.ts)); }catch(e){}
+  }
+  /* 只更新「月份筛选」这类轻量 UI 状态：点一下月份不必把几 MB 明细重写一遍 */
+  function saveLocalUI(){
+    try{
+      var m=JSON.parse(localStorage.getItem(LD_META_KEY)||'null');
+      if(!m) return;
+      m.ts=Date.now(); m.scope=dash.scope||'__all__'; m.selMonths=(dash.selMonths||[]).slice();
+      localStorage.setItem(LD_META_KEY,JSON.stringify(m));
+    }catch(e){}
+  }
+  function clearLocalDash(){
+    try{ localStorage.removeItem(LD_META_KEY); }catch(e){}
+    try{ localStorage.removeItem(LD_FULL_KEY); }catch(e){}
+    if(ldTimer){ clearTimeout(ldTimer); ldTimer=0; }
+    return ldDel();
+  }
+  function loadLocalDash(){
+    var lsFull=null, meta=null;
+    try{
+      var s=localStorage.getItem(LD_FULL_KEY);
+      if(s) lsFull=JSON.parse(s);
+    }catch(e){}
+    try{ meta=JSON.parse(localStorage.getItem(LD_META_KEY)||'null'); }catch(e){}
+    return ldGet().then(function(str){
+      var pack=null;
+      try{ if(str) pack=(typeof str==='string')?JSON.parse(str):str; }catch(e){}
+      if(lsFull&&(!pack||(Number(lsFull.ts)||0)>(Number(pack.ts)||0))) pack=lsFull;
+      // 月份筛选是轻量 UI 状态，单独存在 meta 里（点一下月份不必重写整包几 MB）
+      if(pack&&meta&&Array.isArray(meta.selMonths)&&meta.ts&&Number(meta.ts)>=Number(pack.ts||0)){
+        pack.selMonths=meta.selMonths; pack.scope=meta.scope||pack.scope;
+      }
+      return pack;
+    }).then(function(pack){
+      if(!pack||!Array.isArray(pack.rows)||!pack.rows.length) return false;
+      var map=pack.map;
+      if(typeof map==='string'){ try{ map=JSON.parse(map); }catch(e){} }
+      if(!map||typeof map!=='object'||map.cash==null) return false;
+      // 表头别名可能随版本升级，沿用云端恢复的做法：能用当前表头重算就重算
+      try{
+        var fresh=resolveHeaders(Object.keys(pack.rows[0]||{}));
+        if(fresh.cash!=null&&(fresh.ym!=null||fresh.date!=null)) map=fresh;
+      }catch(e){}
+      // 提示文案里的月份数不能在这里拼：applyData 才会算出 dash.months，
+      // 参数在调用前求值，写 dash.months.length 会显示成「0 个月」。月份覆盖看 fMeta 即可。
+      applyData(pack.rows, map, pack.fname||'本机缓存数据', false,
+                '已恢复上次导入的数据（'+fmtInt(pack.rows.length)+' 行，无需重新导入）');
+      try{ localStorage.setItem('kpi_cloud_ts_monthly',String(Number(pack.ts)||Date.now())); }catch(e){}
+      // 月份筛选也一并还原（校验：只保留本次数据里真实存在的月份）
+      if(Array.isArray(pack.selMonths)&&pack.selMonths.length){
+        var valid=pack.selMonths.filter(function(m){ return (dash.months||[]).indexOf(m)>=0; });
+        if(valid.length){
+          dash.selMonths=valid; dash.scope=valid[valid.length-1];
+          if(typeof window.__maSyncMonthUI==='function') window.__maSyncMonthUI();
+          renderDashboard();
+          saveLocalDash();
+        }
+      }
+      return true;
+    }).catch(function(){ return false; });
   }
 
   /* ---------- 月份多选：选中集合（空=全部导入月） + 焦点月（最新选中月） ---------- */
@@ -1314,7 +1459,8 @@
     renderMonthPop();
     renderDashboard();
   }
-  if(window.KpiCloudSync){
+  function startCloudSync(){
+    if(!window.KpiCloudSync) return;
     window.KpiCloudSync.start({
       table: 'dp_monthly',
       tsKey: KPI_TS_KEY,
@@ -1326,6 +1472,12 @@
   }
   /* 暴露给外部脚本：月份多选浮层 / 清空数据按钮（独立 <script> 块） */
   window.dash=dash; window.setStatus=setStatus; window.renderDashboard=renderDashboard; window.renderMonthPop=renderMonthPop; window.TGT_KEY=TGT_KEY;
+  window.clearLocalDash=clearLocalDash; window.saveLocalDash=saveLocalDash; window.saveLocalUI=saveLocalUI;
+
+  /* 页面打开先读本机缓存，再启动云端对齐 —— 顺序不能颠倒：
+     kpi-cloud-sync 的首次对齐会先 collect()，本机若还没恢复就会判成「本地为空」，
+     直接 adopt 云端快照；万一云端是旧的，就把本机刚导入/刚恢复的数据盖掉了。 */
+  loadLocalDash().then(startCloudSync, startCloudSync);
 })();
 </script>
 <script src="/shared/rbac.js?v=20261028a"></script>
@@ -1374,6 +1526,8 @@
       cb.checked = (v==='__all__') ? (sel.length===0) : (sel.indexOf(v)>=0);
     });
   }
+  // 供本机缓存恢复后回填 UI（恢复晚于本脚本执行，syncLabel 需要被重新调用一次）
+  window.__maSyncMonthUI=function(){ syncLabel(); applyChecks(); };
   btn.addEventListener('click', function(e){
     e.stopPropagation();
     var open = pop.style.display!=='none';
@@ -1390,7 +1544,9 @@
     else if(cb.checked){ if(sel.indexOf(v)<0) sel.push(v); }
     else { sel=sel.filter(function(x){ return x!==v; }); }
     window.dash.selMonths=sel;
+    window.dash.scope = sel.length ? sel[sel.length-1] : '__all__';
     syncLabel(); applyChecks();
+    if(window.saveLocalUI) window.saveLocalUI();   // 月份筛选也记住，刷新后保持上次选择
     if(window.renderDashboard) window.renderDashboard();
   });
   syncLabel();
@@ -1433,6 +1589,8 @@
     if(!window.confirm('再次确认：将清空所有已导入明细与业绩目标，确定继续？')) return;
     d.rows=[]; d.map=null; d.fname=''; d.scope='__all__'; d.selMonths=[]; d.months=[];
     try{ localStorage.removeItem(window.TGT_KEY); }catch(e){}
+    // 本机缓存一并清掉，否则刷新后又被读回来 —— 用户明确点过「清空」，这就是唯一的删除入口
+    try{ if(window.clearLocalDash) window.clearLocalDash(); }catch(e){}
     var fm=document.getElementById('fMeta'); if(fm) fm.textContent='未导入';
     var mc=document.getElementById('monthCats'); if(mc) mc.innerHTML='';
     var tb=document.getElementById('tables'); if(tb) tb.style.display='none';

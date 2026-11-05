@@ -24,7 +24,7 @@
 
   // 已知数据库（indexedDB.databases() 不可用时的兜底）
   var DP_DB_NAME = 'dpBridge';           // 壳层共享数据桥接库（dpBridge/kv）
-  var KNOWN_DBS = ['dailyPerformance', DP_DB_NAME, 'med_assess_db'];
+  var KNOWN_DBS = ['dailyPerformance', DP_DB_NAME, 'med_assess_db', 'monthlyDash'];
 
   // 不导出 / 不恢复的键：登录态、心跳、UI 偏好、权限缓存（有时效，跨机无意义）
   var SKIP = [
@@ -571,9 +571,21 @@
       if (lsVal !== str) { try { localStorage.setItem(m.ls, str); } catch (e) {} }
     });
 
+    // 月度分析本机缓存（2026-11-05 新增，monthlyDash/kv）：整包明细只存这一处。
+    // 备份里没有它（旧备份、或该数据本就是空的）→ 必须清掉本机，否则「恢复成空」之后
+    // 页面又把恢复前的旧缓存读回来，看起来像恢复没生效。
+    var planMonthly = [];
+    var mdKv = ((payload.indexedDB || {}).monthlyDash || {}).kv || [];
+    var mdHas = false;
+    for (var mi = 0; mi < mdKv.length; mi++) {
+      if (mdKv[mi] && String(mdKv[mi].k) === 'dash') { mdHas = true; break; }
+    }
+    if (!mdHas) planMonthly.push({ key: 'dash', val: null });
+
     return kvWrite('dailyPerformance', planDp, report)
       .then(function () { return kvWrite(DP_DB_NAME, planBridge, report); })
-      .then(function () { return kvWrite(MED_DB, planMed, report); });
+      .then(function () { return kvWrite(MED_DB, planMed, report); })
+      .then(function () { return kvWrite('monthlyDash', planMonthly, report); });
   }
 
   function validate(p) {
@@ -761,6 +773,10 @@
     var tgt = 0;
     try { tgt = Object.keys(JSON.parse(map['monthly_mgr_targets_v1'] || '{}')).length; } catch (e) {}
     if (tgt) parts.push('月目标 ' + tgt + ' 个月');
+    // 月度分析：明细整包存在 IndexedDB（localStorage 只留指纹），这里读指纹里的行数
+    var mdMeta = null;
+    try { mdMeta = JSON.parse(map['monthly_dash_meta_v1'] || 'null'); } catch (e) {}
+    if (mdMeta && mdMeta.n) parts.push('月度分析 ' + Number(mdMeta.n).toLocaleString() + ' 行');
     var meida = 0;
     for (var k in map) if (Object.prototype.hasOwnProperty.call(map, k) && k.indexOf('meidaStore_') === 0) meida++;
     if (meida) parts.push('美大店铺 ' + meida + ' 项');
