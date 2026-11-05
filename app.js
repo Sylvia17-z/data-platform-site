@@ -12,7 +12,7 @@ const state = { modules: [], tabs: [], current: null };
 // 发布版本号：由 index.html 顶部的 <script>window.SITE_VER=... 注入，作为唯一权威来源，避免双文件版本漂移。
 // 此处保留兜底常量，仅在脱离 Shell 独立打开时生效。用于 iframe 缓存穿透，确保线上改动即时可见。
 // file:// 双击打开时不加查询串（带查询串的 iframe 在 file:// 下可能无法加载）。
-const SITE_VER = (typeof window !== 'undefined' && window.SITE_VER) || '20261105b';
+const SITE_VER = (typeof window !== 'undefined' && window.SITE_VER) || '20261105c';
 // 每次页面加载的唯一戳：拼到所有子页 iframe URL 之后，确保浏览器每次都重新拉取最新脚本，
 // 彻底规避「服务器无 Cache-Control 时浏览器启发式缓存旧脚本导致刷新丢数据」的问题。
 // file:// 双击打开时不加查询串。
@@ -175,6 +175,7 @@ window.addEventListener('message', (e) => {
 /* ---------- 启动 ---------- */
 async function boot() {
   startClock();
+  setupVerTag();
   setupDrawer();
   setupSidebarToggle();
   state.modules = MODULES;
@@ -452,6 +453,46 @@ function startClock() {
   const el = $('#clock');
   const tick = () => { el.textContent = new Date().toLocaleString('zh-CN', { hour12: false }); };
   tick(); setInterval(tick, 1000);
+}
+
+/* ---------- 顶栏版本号徽章 ---------- */
+// 显示当前发布版本（唯一权威来源 = index.html 的 window.SITE_VER），点击复制。
+// 作用：用户不用开 F12 就能确认「浏览器里跑的是不是最新一版」——排查缓存问题时第一眼要看的。
+function copyText(t) {
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = t;
+    ta.setAttribute('readonly', '');
+    ta.style.cssText = 'position:fixed;left:-9999px;top:0;opacity:0';
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand('copy');
+    document.body.removeChild(ta);
+    return ok;
+  } catch (e) { return false; }
+}
+function setupVerTag() {
+  const el = $('#ver-tag');
+  if (!el) return;
+  const text = 'v' + SITE_VER;
+  el.textContent = text;
+  el.title = '当前发布版本 ' + SITE_VER + '（点击复制）';
+  let timer = 0;
+  const flash = () => {
+    el.textContent = '已复制';
+    el.classList.add('copied');
+    clearTimeout(timer);
+    timer = setTimeout(() => { el.textContent = text; el.classList.remove('copied'); }, 1100);
+  };
+  el.addEventListener('click', () => {
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(SITE_VER).then(flash, () => { if (copyText(SITE_VER)) flash(); });
+        return;
+      }
+    } catch (e) {}
+    if (copyText(SITE_VER)) flash();
+  });
 }
 
 boot();
