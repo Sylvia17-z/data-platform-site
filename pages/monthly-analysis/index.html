@@ -42,6 +42,17 @@
   }
   .topbar h1{font-size:20px;margin:0;color:var(--navy-900);letter-spacing:.5px;}
   .topbar .sub{color:var(--ink-soft);font-size:12.5px;flex:1;min-width:200px;}
+  /* 本机缓存状态徽章（2026-11-05）：把「刷新会不会丢」变成一眼可见的事实 */
+  .save-chip{
+    font-size:12px;line-height:1.6;border-radius:999px;padding:4px 11px;cursor:pointer;
+    border:1px solid var(--navy-100);background:#f6f9fd;color:#41526b;white-space:nowrap;
+    font-family:var(--font);user-select:none;
+  }
+  .save-chip.saved{border-color:#b7e3c4;background:#eefaf1;color:#166534;}
+  .save-chip.saving{border-color:#c9d9ee;background:#eef3fa;color:#1e3a8a;}
+  .save-chip.error{border-color:#f3c6a5;background:#fff7ed;color:#b45309;}
+  .save-chip:hover{filter:brightness(.98);}
+  .save-chip:focus-visible{outline:2px solid var(--navy-500);outline-offset:2px;}
   .month-chips{display:flex;gap:6px;flex-wrap:wrap;}
   .chip{
     border:1px solid var(--navy-100);background:#fff;color:var(--navy);
@@ -206,6 +217,7 @@
   <div class="topbar">
     <h1>月度分析面板</h1>
     <span class="sub">科室业绩 / 健康管家业绩双表分析 · 支持多月份聚焦</span>
+    <span class="save-chip idle" id="saveChip" role="button" tabindex="0" title="本机缓存状态">○ 尚未导入数据</span>
   </div>
 
   <div class="toolbar" id="importCard">
@@ -271,7 +283,12 @@
     </section>
   </div>
 
-  <div id="placeholder" class="empty">尚未导入数据 —— 请先选择 Excel 文件。</div>
+  <div id="placeholder" class="empty">尚未导入数据 —— 请先选择 Excel 文件。
+    <div id="phCache" style="display:none;margin-top:14px;">
+      <button type="button" class="btn" id="btnLoadCache">↻ 载入本机上次的数据</button>
+      <div id="phCacheMeta" style="margin-top:8px;font-size:12px;color:var(--ink-soft);"></div>
+    </div>
+  </div>
 
   <div class="drill-mask" id="drillMask">
     <div class="drill-card">
@@ -431,11 +448,17 @@
   function applyData(rows, map, fname, fromCloud, note){
     dash.rows=rows; dash.map=map; dash.fname=fname; dash.scope='__all__'; dash.selMonths=[];
     dash.months=(function(){ var s=new Set(); rows.forEach(function(r){ var m=rowMonth(r,map); if(m) s.add(m); }); return Array.from(s).sort(); })();
+    // ⚠️ 先落盘、再渲染（2026-11-05）：保存原先写在渲染之后，一旦渲染在个别数据上抛错，
+    // 保存就被跳过 → 刷新必丢。数据此刻已在内存里，先存下来最稳。
+    saveLocalDash();
     document.getElementById('fMeta').textContent = (fname? fname+' · ':'') + fmtInt(rows.length)+' 行 · 覆盖 '+dash.months.length+' 个月（'+dash.months.join('、')+'）';
     setStatus((fromCloud?'已从云端恢复 ':(note||('已导入 '+fmtInt(rows.length)+' 行'))),'ok');
-    renderMonthPop();
-    renderDashboard();
-    saveLocalDash();   // 落本机：刷新/重开浏览器都不用重新导入
+    try{ renderMonthPop(); renderDashboard(); }
+    catch(e){
+      // 渲染出错不影响数据已经保存；把错误如实报出来，便于定位是哪类数据触发的
+      setStatus('数据已导入并保存到本机（'+fmtInt(rows.length)+' 行），但页面渲染出错：'+(e&&e.message?e.message:e),'err');
+      try{ console.error('[monthly-analysis] render error', e); }catch(_){}
+    }
   }
 
   /* ---------- 本机持久化（2026-11-05）：不点「清空数据」，刷新就不丢 ----------
@@ -493,34 +516,86 @@
     }).catch(function(){});
   }
 
-  function saveLocalDash(){
-    if(ldTimer) clearTimeout(ldTimer);
-    ldTimer=setTimeout(doSaveLocalDash,350);   // 导入时数据量大，防抖避免连续写
+  /* 保存状态：把「刷新会不会丢」变成页面上一眼可见的事实，不靠猜（2026-11-05） */
+  var ldState={ status:'idle', ts:0, n:0, msg:'' };
+  var ldDirty=false;
+  function hhmm(ts){
+    try{ return new Date(ts).toLocaleTimeString('zh-CN',{hour12:false}).slice(0,5); }catch(e){ return ''; }
   }
-  function doSaveLocalDash(){
-    var d=dash;
-    if(!d||!d.rows||!d.rows.length||!d.map){ clearLocalDash(); return; }
-    var pack={ v:1, ts:Date.now(), rows:d.rows, map:d.map, fname:d.fname||'',
-               scope:d.scope||'__all__', selMonths:(d.selMonths||[]).slice() };
-    var json;
-    try{ json=JSON.stringify(pack); }catch(e){ return; }
-    // 写 IDB 期间若又有新数据，落盘完成后补写一次，避免丢最后一次修改
-    ldPut(json).then(function(){
-      try{ localStorage.removeItem(LD_FULL_KEY); }catch(e){}   // IDB 成功则不再留完整副本
-    }).catch(function(){
-      // IDB 不可用 → 退回 localStorage（超过配额则明确告知，不让用户以为已经存住了）
-      try{ localStorage.setItem(LD_FULL_KEY,json); }
-      catch(e){ setStatus('⚠️ 本机存储空间不足，本次数据未能保存到本机，刷新后需重新导入。','err'); }
-    });
+  function paintChip(){
+    var el=document.getElementById('saveChip');
+    if(!el) return;
+    var t,cls;
+    if(ldState.status==='saved'){ t='✅ 本机已保存 · '+fmtInt(ldState.n)+' 行 · '+hhmm(ldState.ts); cls='saved'; }
+    else if(ldState.status==='saving'){ t='⏳ 正在保存到本机…'; cls='saving'; }
+    else if(ldState.status==='error'){ t='⚠️ 本机未保存：'+(ldState.msg||'未知原因'); cls='error'; }
+    else { t='○ 尚未导入数据'; cls='idle'; }
+    el.textContent=t; el.className='save-chip '+cls;
+    el.title=(ldState.status==='saved')
+      ? '本机缓存已写入浏览器数据库，刷新 / 重开浏览器都会自动接上。点击可立即重写并校验。'
+      : (ldState.msg||'本机缓存状态');
+  }
+  function writeMeta(pack,d){
     try{
       localStorage.setItem(LD_META_KEY,JSON.stringify({
         ts:pack.ts, n:d.rows.length, fname:pack.fname,
         months:d.months||[], scope:pack.scope, selMonths:pack.selMonths
       }));
     }catch(e){}
-    // 本机数据的时间戳即「本机最后变更时刻」：云端首次对齐时据此判断谁更新，
-    // 否则全新设备上 tsGet()=0 会被判「云端更新」，把刚导入的数据反灌成云端旧快照。
+  }
+  function saveLocalDash(){
+    ldDirty=true;
+    if(ldTimer) clearTimeout(ldTimer);
+    ldTimer=setTimeout(function(){ ldTimer=0; doSaveLocalDash(); },350);   // 导入时数据量大，防抖避免连续写
+  }
+  /* 页面被卸载 / 切后台时把待写的一次性补上：导入后立刻刷新也不会丢 */
+  function flushLocalDash(){
+    if(!ldDirty) return;
+    if(ldTimer){ clearTimeout(ldTimer); ldTimer=0; }
+    doSaveLocalDash();
+  }
+  function doSaveLocalDash(verify){
+    var d=dash;
+    if(!d||!d.rows||!d.rows.length||!d.map){
+      // ⚠️ 空状态绝不能删缓存：可能是「本机数据还没读回来」或另一个旧标签页触发，
+      // 删掉就真的丢了。删除只允许走「清空数据」按钮（用户明确点过两次确认）。
+      if(ldState.status!=='saved') paintChip();
+      return;
+    }
+    var pack={ v:1, ts:Date.now(), rows:d.rows, map:d.map, fname:d.fname||'',
+               scope:d.scope||'__all__', selMonths:(d.selMonths||[]).slice() };
+    var json;
+    try{ json=JSON.stringify(pack); }
+    catch(e){ ldState={status:'error',ts:0,n:d.rows.length,msg:'数据序列化失败'}; paintChip(); return; }
+    ldDirty=false;
+    ldState={status:'saving',ts:0,n:d.rows.length,msg:''}; paintChip();
+    // 云端对齐用的「本机最后变更时刻」，与是否落盘成功无关，先写
     try{ localStorage.setItem('kpi_cloud_ts_monthly',String(pack.ts)); }catch(e){}
+    function markSaved(){
+      try{ localStorage.removeItem(LD_FULL_KEY); }catch(e){}   // IDB 成功则不再留完整副本
+      ldState={status:'saved',ts:pack.ts,n:d.rows.length,msg:''}; paintChip();
+      writeMeta(pack,d);
+      if(verify){
+        ldGet().then(function(st){
+          var okLen=(typeof st==='string') && st.length===json.length;
+          setStatus(okLen
+            ? ('本机缓存校验通过：'+fmtInt(d.rows.length)+' 行已写入浏览器数据库，刷新不会丢。')
+            : '⚠️ 本机缓存校验未通过（读回内容与写入不一致），请重新导入一次。', okLen?'ok':'err');
+        });
+      }
+    }
+    function fallbackLocal(){
+      // IDB 不可用 → 退回 localStorage（超过配额则明确告知，不让用户以为已经存住了）
+      try{
+        localStorage.setItem(LD_FULL_KEY,json);
+        ldState={status:'saved',ts:pack.ts,n:d.rows.length,msg:''}; paintChip();
+        writeMeta(pack,d);
+      }catch(e){
+        ldState={status:'error',ts:0,n:d.rows.length,msg:'浏览器存储空间不足'}; paintChip();
+        setStatus('⚠️ 本机存储空间不足，本次数据未能保存到本机，刷新后需重新导入。建议先清理浏览器存储，或保留备份文件用于恢复。','err');
+      }
+    }
+    ldPut(json).then(markSaved, fallbackLocal);
   }
   /* 只更新「月份筛选」这类轻量 UI 状态：点一下月份不必把几 MB 明细重写一遍 */
   function saveLocalUI(){
@@ -535,7 +610,27 @@
     try{ localStorage.removeItem(LD_META_KEY); }catch(e){}
     try{ localStorage.removeItem(LD_FULL_KEY); }catch(e){}
     if(ldTimer){ clearTimeout(ldTimer); ldTimer=0; }
+    ldDirty=false;
+    ldState={status:'idle',ts:0,n:0,msg:''};
+    paintChip();
     return ldDel();
+  }
+  /* 空态下告诉用户「本机其实有缓存」，并给一个手动载入入口（自动读取失败时的兜底） */
+  function showCacheHint(meta, why){
+    var box=document.getElementById('phCache'), mm=document.getElementById('phCacheMeta');
+    if(!box) return;
+    if(meta&&meta.n){
+      box.style.display='block';
+      if(mm){
+        var when='';
+        try{ when=meta.ts?new Date(meta.ts).toLocaleString('zh-CN',{hour12:false}):''; }catch(e){}
+        mm.textContent='检测到本机缓存：'+fmtInt(meta.n)+' 行'+
+          (meta.fname?(' · '+meta.fname):'')+(when?(' · '+when):'')+
+          (why?('（'+why+'）'):'')+'。若载入失败，请重新导入一次 Excel（只需一次）。';
+      }
+    }else{
+      box.style.display='none';
+    }
   }
   function loadLocalDash(){
     var lsFull=null, meta=null;
@@ -554,15 +649,24 @@
       }
       return pack;
     }).then(function(pack){
-      if(!pack||!Array.isArray(pack.rows)||!pack.rows.length) return false;
+      if(!pack||!Array.isArray(pack.rows)||!pack.rows.length){ showCacheHint(meta); return false; }
       var map=pack.map;
       if(typeof map==='string'){ try{ map=JSON.parse(map); }catch(e){} }
-      if(!map||typeof map!=='object'||map.cash==null) return false;
+      if(!map||typeof map!=='object'||map.cash==null){
+        // 数据在、但列名认不出来：绝不删缓存，提示用户重导一次即可
+        showCacheHint(meta,'缓存里的列名无法识别');
+        ldState={status:'error',ts:Number(pack.ts)||0,n:pack.rows.length,msg:'缓存列名无法识别'};
+        paintChip();
+        return false;
+      }
       // 表头别名可能随版本升级，沿用云端恢复的做法：能用当前表头重算就重算
       try{
         var fresh=resolveHeaders(Object.keys(pack.rows[0]||{}));
         if(fresh.cash!=null&&(fresh.ym!=null||fresh.date!=null)) map=fresh;
       }catch(e){}
+      // 缓存里本来就有这份数据 → 徽章直接显示「已保存」，不必等防抖写盘
+      ldState={status:'saved',ts:Number(pack.ts)||Date.now(),n:pack.rows.length,msg:''};
+      paintChip();
       // 提示文案里的月份数不能在这里拼：applyData 才会算出 dash.months，
       // 参数在调用前求值，写 dash.months.length 会显示成「0 个月」。月份覆盖看 fMeta 即可。
       applyData(pack.rows, map, pack.fname||'本机缓存数据', false,
@@ -1473,6 +1577,48 @@
   /* 暴露给外部脚本：月份多选浮层 / 清空数据按钮（独立 <script> 块） */
   window.dash=dash; window.setStatus=setStatus; window.renderDashboard=renderDashboard; window.renderMonthPop=renderMonthPop; window.TGT_KEY=TGT_KEY;
   window.clearLocalDash=clearLocalDash; window.saveLocalDash=saveLocalDash; window.saveLocalUI=saveLocalUI;
+  window.__maLoadLocal=loadLocalDash; window.__maSaveNow=function(){ doSaveLocalDash(false); };
+
+  /* 徽章：点击立即重写并校验，用户可自查「到底存住了没有」 */
+  (function bindSaveChip(){
+    var el=document.getElementById('saveChip');
+    if(!el) return;
+    var run=function(){ doSaveLocalDash(true); };
+    el.addEventListener('click',run);
+    el.addEventListener('keydown',function(e){
+      if(e.key==='Enter'||e.key===' '){ e.preventDefault(); run(); }
+    });
+  })();
+  (function bindLoadCache(){
+    var btn=document.getElementById('btnLoadCache');
+    if(!btn) return;
+    btn.addEventListener('click',function(){
+      btn.disabled=true;
+      loadLocalDash().then(function(ok){
+        btn.disabled=false;
+        if(!ok) setStatus('本机没有可用的缓存（可能已被清理，或换过浏览器/设备）。请重新导入 Excel。','err');
+        else setStatus('已从本机缓存载入 '+fmtInt((dash.rows||[]).length)+' 行。','ok');
+      });
+    });
+  })();
+  /* 卸载 / 切后台时补写待落盘的数据：导入后立刻刷新也不会丢 */
+  window.addEventListener('pagehide',flushLocalDash);
+  document.addEventListener('visibilitychange',function(){
+    if(document.visibilityState==='hidden') flushLocalDash();
+  });
+  /* 申请持久化存储：降低空间紧张时浏览器回收 IndexedDB 的概率（被拒也不影响功能） */
+  try{ if(navigator.storage&&navigator.storage.persist) navigator.storage.persist().catch(function(){}); }catch(e){}
+  /* 存储可用性探测：无痕/受限模式下 IndexedDB 直接失败，必须当场说清楚，
+     否则用户会以为「导入成功但刷新就丢」是系统 bug */
+  (function probeStorage(){
+    ldOpen().then(function(db){ try{ db.close(); }catch(e){} },function(){
+      if(ldState.status==='saved') return;
+      ldState={status:'error',ts:0,n:0,msg:'浏览器数据库不可用'};
+      paintChip();
+      setStatus('⚠️ 当前浏览器无法使用本机数据库（常见于无痕 / 受限模式或禁用了网站数据），数据只存在内存里，刷新会丢。请用普通窗口打开，或先用「💾 备份」导出备份文件。','err');
+    });
+  })();
+  paintChip();
 
   /* 页面打开先读本机缓存，再启动云端对齐 —— 顺序不能颠倒：
      kpi-cloud-sync 的首次对齐会先 collect()，本机若还没恢复就会判成「本地为空」，
