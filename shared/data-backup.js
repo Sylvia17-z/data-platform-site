@@ -508,7 +508,7 @@
       '    <button class="bk-btn primary" type="button" data-act="export">⬇️ 下载本机数据备份</button>',
       '    <button class="bk-btn ghost" type="button" data-act="pick">⬆️ 从备份文件恢复</button>',
       '  </div>',
-      '  <div class="bk-tip">备份文件包含：订单明细、历史消费、VAB 名单、月目标、手工调整、美大店铺数据、医管考核数据等<b>全部业务数据</b>。<br>不包含<b>账号密码 / 登录状态</b>。换电脑、换浏览器、换入口链接后，导入这份文件即可恢复现状。</div>',
+      '  <div class="bk-tip">备份文件包含：订单明细、历史消费、VAB 名单、月目标、手工调整、美大店铺数据、医管考核数据等<b>全部业务数据</b>。<br>不包含<b>账号密码 / 登录状态</b>。换电脑、换浏览器、换入口链接后，导入这份文件即可恢复现状。<br>恢复支持 <b>.json</b> 与 <b>.json.gz</b> 两种格式（导出的压缩版体积更小，手机也能传）。</div>',
       '  <div class="bk-log" data-k="log"></div>',
       '  <div data-k="confirm"></div>',
       '  <div class="bk-foot" data-k="foot"></div>',
@@ -525,7 +525,10 @@
       file: (function () {
         var f = document.createElement('input');
         f.type = 'file';
-        f.accept = '.json,application/json';
+        /* 不设 accept 白名单：导出文件名是「海蓓数据备份_日期.json.gz」，
+           Windows 文件对话框按最后一个扩展名（.gz）过滤，accept=".json" 会让
+           备份文件变灰、根本选不中（2026-11-05 用户实测反馈）。
+           改为读取后校验内容：选错文件会得到明确提示，不再靠系统过滤。 */
         f.style.display = 'none';
         panel.appendChild(f);
         return f;
@@ -612,7 +615,11 @@
       pending = p;
       showConfirm(file, p);
     }).catch(function (e) {
-      log('无法识别该文件：' + ((e && e.message) || e), 'err');
+      var msg = (e && e.message) || String(e);
+      if (/JSON|Unexpected token|Unexpected end|Unterminated|not valid/i.test(msg)) {
+        msg = '这不是本平台的备份文件（或文件已损坏）。请选择文件名以「海蓓数据备份_」开头的文件，支持 .json 与 .json.gz 两种格式';
+      }
+      log('无法读取「' + file.name + '」：' + msg, 'err');
     });
   }
 
