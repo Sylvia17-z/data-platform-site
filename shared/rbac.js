@@ -198,19 +198,20 @@
     }
     if (window.addEventListener) window.addEventListener('site-auth-ready', go);
     // 兜底探测：auth-gate 早于/晚于本脚本时，自行探测会话；始终无会话则降级完成（不阻塞壳层渲染）
+    // 轮询上限 10 次 × 600ms ≈ 6 秒：菜单已先行渲染，这里只需尽快收敛，无需再等 20 秒
     var tries = 0;
     (function probe() {
       if (fired) return;
-      if (tries++ > 25) { fired = true; S.cloudAcl = false; finishInit(); return; }
+      if (tries++ > 9) { fired = true; S.cloudAcl = false; finishInit(); return; }
       var c = getCloud();
       if (c) {
         try {
           c.auth.getSession().then(function (r) {
             if (r.data && r.data.user) go();
-            else setTimeout(probe, 800);
-          }).catch(function () { setTimeout(probe, 800); });
-        } catch (e) { setTimeout(probe, 800); }
-      } else setTimeout(probe, 800);
+            else setTimeout(probe, 600);
+          }).catch(function () { setTimeout(probe, 600); });
+        } catch (e) { setTimeout(probe, 600); }
+      } else setTimeout(probe, 600);
     })();
   }
   async function initCloud() {
