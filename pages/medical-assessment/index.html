@@ -2287,6 +2287,8 @@ const PROJ_EXCLUDE = {
   /* ---------- 工具：复制文本到剪贴板（含降级方案，兼容 file:// 与非安全上下文） ---------- */
   function copyText(text){
     const s = String(text==null?'':text);
+    // 统一走 shared/clipboard.js：移动端同步 execCommand 优先，iframe 内有顶层代理兜底
+    if(window.HBCopy) return window.HBCopy.copy(s);
     // 1) 优先标准剪贴板 API（需 https/安全上下文）
     if(navigator.clipboard && navigator.clipboard.writeText){
       return navigator.clipboard.writeText(s).then(()=>true).catch(()=> fallbackCopy(s));
@@ -2294,6 +2296,15 @@ const PROJ_EXCLUDE = {
     return Promise.resolve(fallbackCopy(s));
   }
   function fallbackCopy(s){
+    if(window.HBCopy){
+      try{ if(window.HBCopy.copySync(s)){ toast('已复制到剪贴板'); return true; } }catch(e){}
+      window.HBCopy.showManual(s, {
+        title: '文本已全选，请长按并选择「复制」',
+        hint: '浏览器未允许自动写入剪贴板时，可长按上方文本 →「全选」→「复制」；也可点「再试一次」。',
+        onSuccess: ()=>toast('已复制到剪贴板')
+      });
+      return false;
+    }
     try{
       const ta = document.createElement('textarea');
       ta.value = s;
@@ -2305,17 +2316,6 @@ const PROJ_EXCLUDE = {
       const ok = document.execCommand('copy');
       document.body.removeChild(ta);
       if(ok){ toast('已复制到剪贴板'); return true; }
-    }catch(e){}
-    // 最后兜底：弹窗展示，手动全选复制
-    try{
-      const w = window.open('', '_blank', 'width=520,height=420');
-      if(w){
-        w.document.write('<textarea style="width:100%;height:320px;font-size:13px;"></textarea>');
-        w.document.close();
-        const t = w.document.querySelector('textarea');
-        t.value = s; t.focus(); t.select();
-        return true;
-      }
     }catch(e){}
     toast('复制失败，请手动选择表格内容复制');
     return false;
@@ -3786,6 +3786,7 @@ const PROJ_EXCLUDE = {
   })();
   </script>
 <script src="/shared/cloudbase-bridge.js?v=20261031b"></script>
+<script src="/shared/clipboard.js?v=20261105h"></script>
 <script src="/shared/rbac.js?v=20261028a"></script>
 <script>
 /* 敏感操作 → 权限点映射：集中维护，rbac.js 守卫据此禁用无权限按钮（导入/导出/清除/编辑/重算）。

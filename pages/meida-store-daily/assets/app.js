@@ -1793,8 +1793,9 @@ function columnText(field) {
   return { text: lines.join('\r\n'), rows: lines.length, col: c };
 }
 
-/** 写剪贴板：优先异步 API（https 下可用），失败回退 textarea + execCommand（iframe 内更可靠） */
+/** 写剪贴板：统一走 shared/clipboard.js（移动端同步 execCommand 优先，iframe 内更可靠） */
 function copyText(text) {
+  if (window.HBCopy) return window.HBCopy.copy(text);
   return new Promise((resolve) => {
     const fallback = () => {
       try {
@@ -1826,7 +1827,14 @@ function copyColumn(field, fromPop) {
   if (!r) return;
   copyText(r.text).then((ok) => {
     if (!ok) {
-      toast('复制失败：浏览器拒绝了剪贴板访问，请手动选中表格内容复制', 'warn', 4200);
+      if (window.HBCopy) {
+        window.HBCopy.showManual(r.text, {
+          title: '文本已全选，请长按并选择「复制」',
+          hint: '「' + colTitle(r.col) + '」共 ' + r.rows + ' 行。浏览器未允许自动写入剪贴板时，可长按上方文本 →「全选」→「复制」。',
+        });
+      } else {
+        toast('复制失败：浏览器拒绝了剪贴板访问，请手动选中表格内容复制', 'warn', 4200);
+      }
       return;
     }
     const scope = state.period === 'both' ? '（每店当日 + 本月累计，含合计行）' : '（含合计行）';

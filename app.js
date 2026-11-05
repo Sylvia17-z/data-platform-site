@@ -12,7 +12,7 @@ const state = { modules: [], tabs: [], current: null };
 // 发布版本号：由 index.html 顶部的 <script>window.SITE_VER=... 注入，作为唯一权威来源，避免双文件版本漂移。
 // 此处保留兜底常量，仅在脱离 Shell 独立打开时生效。用于 iframe 缓存穿透，确保线上改动即时可见。
 // file:// 双击打开时不加查询串（带查询串的 iframe 在 file:// 下可能无法加载）。
-const SITE_VER = (typeof window !== 'undefined' && window.SITE_VER) || '20261105g';
+const SITE_VER = (typeof window !== 'undefined' && window.SITE_VER) || '20261105h';
 // 每次页面加载的唯一戳：拼到所有子页 iframe URL 之后，确保浏览器每次都重新拉取最新脚本，
 // 彻底规避「服务器无 Cache-Control 时浏览器启发式缓存旧脚本导致刷新丢数据」的问题。
 // file:// 双击打开时不加查询串。
@@ -318,6 +318,8 @@ function createChildTab(tab, parent, child) {
   frame.className = 'embed-frame';
   frame.title = parent.name + ' · ' + child.name;
   frame.setAttribute('loading', 'lazy');
+  // 允许子页使用剪贴板（移动端复制列数据依赖此权限策略）
+  frame.setAttribute('allow', 'clipboard-write; clipboard-read');
   // 注意：不要给 iframe src 加 ?mod= 查询串——在 file:// 双击打开时，带查询串的 iframe 可能无法加载。
   // 改用 postMessage 把子功能（a/b）发给子应用，兼容 file:// 与 http/https 两种打开方式。
   // 独立页面（如月度分析面板，现已作为一级菜单）使用 src 直接嵌入，无需 postMessage。
@@ -349,6 +351,7 @@ function createTabPage(tab, mod) {
   frame.className = 'embed-frame';
   frame.title = mod.name;
   frame.setAttribute('loading', 'lazy');
+  frame.setAttribute('allow', 'clipboard-write; clipboard-read');
   frame.src = withVer(mod.src.replace(/^\//, '')); // 去掉前导斜杠，兼容 GitHub Pages 子路径；http(s) 下追加版本号防缓存
   frame.addEventListener('load', () => { pushEmbeddedState(frame); broadcastRbacState(); });
   page.appendChild(frame);
@@ -459,6 +462,10 @@ function startClock() {
 // 显示当前发布版本（唯一权威来源 = index.html 的 window.SITE_VER），点击复制。
 // 作用：用户不用开 F12 就能确认「浏览器里跑的是不是最新一版」——排查缓存问题时第一眼要看的。
 function copyText(t) {
+  // 统一走 shared/clipboard.js：移动端同步 execCommand 优先，兼容 iframe / 权限受限环境
+  if (window.HBCopy) {
+    try { if (window.HBCopy.copySync(t)) return true; } catch (e) {}
+  }
   try {
     const ta = document.createElement('textarea');
     ta.value = t;

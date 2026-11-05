@@ -2583,9 +2583,11 @@ function copyDailyColumn(dateStr, idx, isStore){
   });
 }
 
-// 写入剪贴板：优先 navigator.clipboard（http/localhost 安全上下文），
-// 失败或 file:// 非安全上下文时回退到 textarea + execCommand
+// 写入剪贴板：统一走 shared/clipboard.js。
+// 移动端（尤其被壳层 iframe 嵌入时）优先用「视口内 1px textarea + execCommand」同步复制，
+// 这条路在华为/微信/夸克内核里比 navigator.clipboard 可靠得多；桌面端仍以 clipboard API 优先。
 function copyTextToClipboard(text){
+  if(window.HBCopy) return window.HBCopy.copy(text);
   return new Promise(resolve=>{
     try{
       if(navigator.clipboard && navigator.clipboard.writeText){
@@ -2597,6 +2599,7 @@ function copyTextToClipboard(text){
   });
 }
 function fallbackCopy(text){
+  if(window.HBCopy){ try{ return window.HBCopy.copySync(text); }catch(e){} }
   try{
     const ta = document.createElement('textarea');
     ta.value = text;
@@ -2614,6 +2617,14 @@ function fallbackCopy(text){
 // 复制失败兜底：移动端 execCommand 常被禁用 / 非 HTTPS 无剪贴板权限，
 // 弹出一个可长按选择并复制的文本浮层，保证用户始终能手动取出数据。
 function copyTextFallbackUI(text){
+  if(window.HBCopy){
+    window.HBCopy.showManual(text, {
+      title: '文本已全选，请长按并选择「复制」',
+      hint: '浏览器未允许自动写入剪贴板时，可长按上方文本 →「全选」→「复制」；也可点「再试一次」。',
+      onSuccess: ()=>{ try{ showToast('已复制', 'ok', 1600); }catch(e){} }
+    });
+    return;
+  }
   try{
     const old = document.getElementById('copy-fallback-mask');
     if(old) old.remove();
