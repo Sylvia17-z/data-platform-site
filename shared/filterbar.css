@@ -1,10 +1,10 @@
 /* ============================================================
-   shared/filterbar.css — 全站筛选区统一规范 (v=20261106a)
+   shared/filterbar.css — 全站筛选区统一规范 (v=20261106b)
    ------------------------------------------------------------
    设计令牌 + 数据段(.dataseg) + 筛选段(.fbar/.detail-filters)
    + 按钮三级分级 + msel/分页条/弹窗/toast 规范值
    引用方式（必须放在页面自身 <style> 之后，后加载覆盖旧值）：
-     <link rel="stylesheet" href="/shared/filterbar.css?v=20261106a">
+     <link rel="stylesheet" href="/shared/filterbar.css?v=20261106b">
    口径：改本文件必须同步 bump 全站引用版本号。
    ============================================================ */
 

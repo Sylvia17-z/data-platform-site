@@ -311,6 +311,7 @@
       <button class="btn" id="btn-export-xlsx" title="导出带样式的 Excel（列宽、底色、框线、合并单元格、冻结窗格均与页面一致）">⬇ 导出 Excel</button>
       <button class="btn" id="btn-export-png" title="导出整表图片（2 倍高清，颜色与页面完全一致）">🖼 导出图片</button>
       <button class="btn" id="btn-copy-col" title="复制某一整列的数据到剪贴板（每行一个值，可直接粘到 Excel）">📋 复制列</button>
+      <button class="btn btn-primary" id="btn-wecom-sync" data-rbac="export" title="把当前屏幕上这份报表（同日期 / 同口径 / 含手工修改）写成同步文件，双击本机「同步到企微」即可写入企业微信在线表格。右键可直接复制为表格数据">☁ 同步企微</button>
       <div class="copy-pop" id="copy-col-pop"></div>
       <span class="sep"></span>
       <button class="btn" id="btn-edit" title="开启编辑模式：单击表格内任意单元格（含店铺名）即可修改">✏️ 编辑</button>
@@ -349,10 +350,11 @@
 
 <div class="toast" id="toast"></div>
 
-<script src="/shared/cloudbase-bridge.js?v=20261106a"></script>
-<script src="/shared/clipboard.js?v=20261106a"></script>
-<script src="/shared/rbac.js?v=20261106a"></script>
-<script src="/shared/auth-gate.js?v=20261106a"></script>
+<script src="/shared/cloudbase-bridge.js?v=20261106b"></script>
+<script src="/shared/clipboard.js?v=20261106b"></script>
+<script src="/shared/wecom-sync.js?v=20261106b"></script>
+<script src="/shared/rbac.js?v=20261106b"></script>
+<script src="/shared/auth-gate.js?v=20261106b"></script>
 <script>document.write('<script src="assets/app.js?v=' + Date.now() + '"><\/script>');</script>
 <script>document.write('<script src="assets/export.js?v=' + Date.now() + '"><\/script>');</script>
 </body>

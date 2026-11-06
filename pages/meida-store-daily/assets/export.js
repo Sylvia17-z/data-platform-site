@@ -606,11 +606,40 @@
     }
   }
 
+  /* 同步到企业微信在线表格：把当前屏幕这份报表（同日期 / 同口径 / 含手工修改）
+     序列化成约定命名的 TSV 下载到本地，由本机 wecom-sync 工具写入。
+     企微 API 无跨域头，浏览器拿不到 access_token，所以这里只负责「产出数据」。 */
+  function exportWecom() {
+    if (!state.date) { toast('暂无可同步的数据，请先导入订单表 / 店铺总表 / 平台数据', 'warn'); return; }
+    if (!window.HBWecomSync) { toast('同步组件未加载，请刷新页面重试', 'err', 5000); return; }
+    const g = buildGrid();
+    const r = window.HBWecomSync.push(g, {
+      module: 'meida-store-daily',
+      date: state.date,
+      period: state.period || '',
+      label: '美大店铺日数据',
+      headerRows: 3,
+      expandMerges: 'all',
+    });
+    if (r && r.ok) {
+      setBusy(false, '已生成同步文件：' + r.cols + ' 列 × ' + r.rows + ' 行，双击「同步到企微.bat」写入');
+    }
+  }
+
   function bind() {
     const bx = document.getElementById('btn-export-xlsx');
     const bp = document.getElementById('btn-export-png');
     if (bx) bx.addEventListener('click', exportXlsx);
     if (bp) bp.addEventListener('click', exportPng);
+
+    const bw = document.getElementById('btn-wecom-sync');
+    if (bw) {
+      bw.addEventListener('click', exportWecom);
+      // 右键 = 复制为表格数据（不依赖本机脚本的最后兜底）
+      if (window.HBWecomSync && window.HBWecomSync.bindContextMenu) {
+        window.HBWecomSync.bindContextMenu(bw, function () { return buildGrid(); }, { module: 'meida-store-daily' });
+      }
+    }
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', bind);
   else bind();
@@ -622,6 +651,7 @@
     pngCanvas: buildPngCanvas,
     exportXlsx: exportXlsx,
     exportPng: exportPng,
+    exportWecom: exportWecom,
     FILL: FILL,
   };
 })();

@@ -5941,6 +5941,24 @@ async function exportXlsx(){
   });
 }
 
+/* 同步到企业微信在线表格：只负责把当前网格序列化成约定命名的 TSV，
+   真正的写入由本机 platform/tools/wecom-sync 完成（企微 API 无跨域头、也拿不到 access_token）。
+   列数随截止日变化，清空范围交给推送脚本按「上次 ∪ 本次」处理，这里不裁剪列。 */
+function exportWecomSync(){
+  if(!state.results){ showToast('请先计算', 'err'); return; }
+  if(!window.HBWecomSync){ showToast('同步组件未加载，请刷新页面重试', 'err'); return; }
+  const g = buildReportGrid();
+  const r = window.HBWecomSync.push(g, {
+    module: 'daily-performance-chuzhen',
+    date: state.cutoffDate || todayIso(),
+    period: '',
+    label: '日业绩',
+    headerRows: 2,
+    expandMerges: 'all',
+  });
+  if(r && r.ok) showToast('已生成同步文件：' + r.cols + ' 列 × ' + r.rows + ' 行，双击「同步到企微.bat」写入', 'ok');
+}
+
 // 门店业绩导出
 async function exportStorePng(){
   await ensureHtml2canvas();
@@ -6119,6 +6137,14 @@ function initApp(){
   $('targets-toggle').addEventListener('click', toggleTargetsPanel);
   $('export-png').addEventListener('click', exportPng);
   $('export-xlsx').addEventListener('click', exportXlsx);
+  // 同步到企业微信在线表格（右键 = 复制为表格数据，不依赖本机脚本）
+  const wecomBtn = $('wecom-sync');
+  if(wecomBtn){
+    wecomBtn.addEventListener('click', exportWecomSync);
+    if(window.HBWecomSync && window.HBWecomSync.bindContextMenu){
+      window.HBWecomSync.bindContextMenu(wecomBtn, () => buildReportGrid(), { module: 'daily-performance-chuzhen' });
+    }
+  }
   $('export-store-png').addEventListener('click', exportStorePng);
   $('export-store-xlsx').addEventListener('click', exportStoreXlsx);
   // ⑤ 电商组二级渠道业绩导出

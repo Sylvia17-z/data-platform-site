@@ -565,7 +565,7 @@
     #drill-mask .drill-title{font-size:13.5px;}
   }
 </style>
-<link rel="stylesheet" href="/shared/filterbar.css?v=20261106a">
+<link rel="stylesheet" href="/shared/filterbar.css?v=20261106b">
 <link rel="manifest" href="/manifest.json">
 <meta name="theme-color" content="#123c73">
 <link rel="apple-touch-icon" href="/icons/icon-192.png">
@@ -684,6 +684,7 @@
         <button class="btn" id="expand-all" title="展开所有日期列">+展开</button>
         <button class="btn" id="export-xlsx" data-page-node-id="Dl7Z2nfnhq1k54Mfn2mTHp">📥 导出Excel</button>
         <button class="btn btn-orange" id="export-png" data-page-node-id="0x4LNDHlO1Zk1WlyHKHfaD">🖼 导出图片</button>
+        <button class="btn btn-primary" id="wecom-sync" title="把③业绩报表（当前截止日、全部日期列、含手工覆盖）写成同步文件，双击本机「同步到企微」即可写入企业微信在线表格。右键可直接复制为表格数据">☁ 同步企微</button>
       </div>
       </div>
     <div class="stage" id="report-stage" data-page-node-id="gPrDky1AOxq96CYabE4OYN">
@@ -790,12 +791,14 @@
 <div class="toast" id="toast" data-page-node-id="cCI9nBoKLJBdwH301glleG"></div>
 
 <!-- 云端配置：后端已迁至腾讯云 CloudBase（shared/cloudbase-bridge.js 统一加载 SDK 并初始化，自动设置 window.CB） -->
-<script src="/shared/cloudbase-bridge.js?v=20261106a"></script>
+<script src="/shared/cloudbase-bridge.js?v=20261106b"></script>
 <!-- 统一剪贴板：移动端 / iframe 内复制整列依赖它（同步 execCommand + 顶层代理兜底） -->
-<script src="/shared/clipboard.js?v=20261106a"></script>
+<script src="/shared/clipboard.js?v=20261106b"></script>
+<!-- 同步到企微在线表格：只负责把当前网格序列化成约定命名的 TSV，写入由本机 wecom-sync 工具完成 -->
+<script src="/shared/wecom-sync.js?v=20261106b"></script>
 
 <!-- 缓存穿透：每次加载追加唯一戳，强制浏览器重新拉取最新 app.js，彻底规避「刷新后仍跑旧脚本导致丢数据」 -->
-<script>document.write('<script src="assets/app.js?v=20260929-06_' + Date.now() + '"><\/script>');</script><script src="/shared/rbac.js?v=20261106a"></script>
+<script>document.write('<script src="assets/app.js?v=20260929-06_' + Date.now() + '"><\/script>');</script><script src="/shared/rbac.js?v=20261106b"></script>
 <script>
 /* 敏感操作 → 权限点映射：集中维护，rbac.js 守卫据此禁用无权限按钮（导入/导出/清除/编辑/重算）。
    覆盖全站各页常见触发器，不存在的选择器自动跳过。 */
@@ -804,7 +807,7 @@
     'file-orders':'import','file-vab':'import','file-history':'import','fileVab':'import','fileOrder':'import',
     'fileCharge':'import','fileProjMap':'import','fileBoth':'import','fileAppt':'import',
     'file':'import','drop':'import','reimport':'import',
-    'export-xlsx':'export','export-png':'export','export-store-xlsx':'export','export-store-png':'export',
+    'export-xlsx':'export','export-png':'export','wecom-sync':'export','export-store-xlsx':'export','export-store-png':'export',
     'vabExport':'export','orderExport':'export','chargeExport':'export','statsExport':'export',
     'consExport':'export','projExport':'export','projExportMap':'export','btnPng':'export','btnXlsx':'export','btnNextPng':'export','btnNextXlsx':'export',
     'clear-vab':'clear','clear-manual':'clear','clear-date':'clear','clear-all':'clear','clear-hist':'clear','projClearMap':'clear','btnClearOV':'clear',
@@ -819,6 +822,6 @@
   if(document.readyState!=='loading') tag(); else document.addEventListener('DOMContentLoaded', tag);
 })();
 </script>
-<script src="/shared/auth-gate.js?v=20261106a"></script>
+<script src="/shared/auth-gate.js?v=20261106b"></script>
 </body>
 </html>
