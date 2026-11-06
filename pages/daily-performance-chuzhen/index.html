@@ -565,7 +565,7 @@
     #drill-mask .drill-title{font-size:13.5px;}
   }
 </style>
-<link rel="stylesheet" href="/shared/filterbar.css?v=20261019a">
+<link rel="stylesheet" href="/shared/filterbar.css?v=20261106a">
 <link rel="manifest" href="/manifest.json">
 <meta name="theme-color" content="#123c73">
 <link rel="apple-touch-icon" href="/icons/icon-192.png">
@@ -790,12 +790,12 @@
 <div class="toast" id="toast" data-page-node-id="cCI9nBoKLJBdwH301glleG"></div>
 
 <!-- 云端配置：后端已迁至腾讯云 CloudBase（shared/cloudbase-bridge.js 统一加载 SDK 并初始化，自动设置 window.CB） -->
-<script src="/shared/cloudbase-bridge.js?v=20261031b"></script>
+<script src="/shared/cloudbase-bridge.js?v=20261106a"></script>
 <!-- 统一剪贴板：移动端 / iframe 内复制整列依赖它（同步 execCommand + 顶层代理兜底） -->
-<script src="/shared/clipboard.js?v=20261105i"></script>
+<script src="/shared/clipboard.js?v=20261106a"></script>
 
 <!-- 缓存穿透：每次加载追加唯一戳，强制浏览器重新拉取最新 app.js，彻底规避「刷新后仍跑旧脚本导致丢数据」 -->
-<script>document.write('<script src="assets/app.js?v=20260929-06_' + Date.now() + '"><\/script>');</script><script src="/shared/rbac.js?v=20261105i"></script>
+<script>document.write('<script src="assets/app.js?v=20260929-06_' + Date.now() + '"><\/script>');</script><script src="/shared/rbac.js?v=20261106a"></script>
 <script>
 /* 敏感操作 → 权限点映射：集中维护，rbac.js 守卫据此禁用无权限按钮（导入/导出/清除/编辑/重算）。
    覆盖全站各页常见触发器，不存在的选择器自动跳过。 */
@@ -819,6 +819,6 @@
   if(document.readyState!=='loading') tag(); else document.addEventListener('DOMContentLoaded', tag);
 })();
 </script>
-<script src="/shared/auth-gate.js?v=20261029a"></script>
+<script src="/shared/auth-gate.js?v=20261106a"></script>
 </body>
 </html>

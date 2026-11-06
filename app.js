@@ -12,7 +12,7 @@ const state = { modules: [], tabs: [], current: null };
 // 发布版本号：由 index.html 顶部的 <script>window.SITE_VER=... 注入，作为唯一权威来源，避免双文件版本漂移。
 // 此处保留兜底常量，仅在脱离 Shell 独立打开时生效。用于 iframe 缓存穿透，确保线上改动即时可见。
 // file:// 双击打开时不加查询串（带查询串的 iframe 在 file:// 下可能无法加载）。
-const SITE_VER = (typeof window !== 'undefined' && window.SITE_VER) || '20261105k';
+const SITE_VER = (typeof window !== 'undefined' && window.SITE_VER) || '20261106a';
 // 每次页面加载的唯一戳：拼到所有子页 iframe URL 之后，确保浏览器每次都重新拉取最新脚本，
 // 彻底规避「服务器无 Cache-Control 时浏览器启发式缓存旧脚本导致刷新丢数据」的问题。
 // file:// 双击打开时不加查询串。
