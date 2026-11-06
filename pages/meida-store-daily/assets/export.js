@@ -609,20 +609,23 @@
   /* 同步到企业微信在线表格：把当前屏幕这份报表（同日期 / 同口径 / 含手工修改）
      序列化成约定命名的 TSV 下载到本地，由本机 wecom-sync 工具写入。
      企微 API 无跨域头，浏览器拿不到 access_token，所以这里只负责「产出数据」。 */
-  function exportWecom() {
+  /* 「☁ 同步企微」= 导出带样式的 xlsx，交给本机 send-to-wecom.bat 发到企微群。
+     群机器人 webhook 只需一个 key（群主就能建），不需要扫码登录、不需要管理员权限，
+     比写在线表格那条路稳得多。写在线表格的 TSV 通道仍保留在 HBWecomSync.push()。 */
+  async function exportWecom() {
     if (!state.date) { toast('暂无可同步的数据，请先导入订单表 / 店铺总表 / 平台数据', 'warn'); return; }
-    if (!window.HBWecomSync) { toast('同步组件未加载，请刷新页面重试', 'err', 5000); return; }
-    const g = buildGrid();
-    const r = window.HBWecomSync.push(g, {
-      module: 'meida-store-daily',
-      date: state.date,
-      period: state.period || '',
-      label: '美大店铺日数据',
-      headerRows: 3,
-      expandMerges: 'all',
-    });
-    if (r && r.ok) {
-      setBusy(false, '已生成同步文件：' + r.cols + ' 列 × ' + r.rows + ' 行，双击「同步到企微.bat」写入');
+    setBusy(true, '正在生成 Excel…');
+    try {
+      const g = buildGrid();
+      const blob = await buildXlsxBlob(g);
+      const name = fileBase() + '.xlsx';
+      downloadBlob(blob, name);
+      toast('已导出「' + name + '」（' + g.meta.rows + ' 行 × ' + g.meta.cols + ' 列），双击 send-to-wecom.bat 发到企微群', 'ok', 7000);
+      setBusy(false, '已导出，等双击 bat 发送');
+    } catch (e) {
+      console.error(e);
+      toast('导出失败：' + e.message, 'err', 6000);
+      setBusy(false, '导出失败');
     }
   }
 

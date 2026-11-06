@@ -205,7 +205,7 @@
     .toolbar{padding:10px 12px;gap:8px;}
   }
 </style>
-<link rel="stylesheet" href="/shared/filterbar.css?v=20261106b">
+<link rel="stylesheet" href="/shared/filterbar.css?v=20261106c">
 <link rel="manifest" href="/manifest.json">
 <meta name="theme-color" content="#123c73">
 <link rel="apple-touch-icon" href="/icons/icon-192.png">
@@ -3785,9 +3785,9 @@ const PROJ_EXCLUDE = {
     document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState === 'hidden') flush(); });
   })();
   </script>
-<script src="/shared/cloudbase-bridge.js?v=20261106b"></script>
-<script src="/shared/clipboard.js?v=20261106b"></script>
-<script src="/shared/rbac.js?v=20261106b"></script>
+<script src="/shared/cloudbase-bridge.js?v=20261106c"></script>
+<script src="/shared/clipboard.js?v=20261106c"></script>
+<script src="/shared/rbac.js?v=20261106c"></script>
 <script>
 /* 敏感操作 → 权限点映射：集中维护，rbac.js 守卫据此禁用无权限按钮（导入/导出/清除/编辑/重算）。
    覆盖全站各页常见触发器，不存在的选择器自动跳过。 */
@@ -3811,7 +3811,7 @@ const PROJ_EXCLUDE = {
   if(document.readyState!=='loading') tag(); else document.addEventListener('DOMContentLoaded', tag);
 })();
 </script>
-<script src="/shared/auth-gate.js?v=20261106b"></script>
+<script src="/shared/auth-gate.js?v=20261106c"></script>
 <!-- 医管考核各面板（VAB 会员清单 / 领健 / ABC / 到店率 / 重点项目 / 累计消费）数据只存本机，
      不再上云：已移除 /shared/ma-cloud-sync.js 的加载（2026-11-03 业务要求）。
      本地持久化不受影响（localStorage + IndexedDB），刷新免重导；

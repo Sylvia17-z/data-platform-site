@@ -5944,19 +5944,21 @@ async function exportXlsx(){
 /* 同步到企业微信在线表格：只负责把当前网格序列化成约定命名的 TSV，
    真正的写入由本机 platform/tools/wecom-sync 完成（企微 API 无跨域头、也拿不到 access_token）。
    列数随截止日变化，清空范围交给推送脚本按「上次 ∪ 本次」处理，这里不裁剪列。 */
-function exportWecomSync(){
+/* 「☁ 同步企微」= 导出带样式的 xlsx，交给本机 send-to-wecom.bat 发到企微群。
+   群机器人 webhook 只需一个 key（群主就能建），不需要扫码登录、不需要管理员权限。 */
+async function exportWecomSync(){
+  await ensureXlsxStyled();
   if(!state.results){ showToast('请先计算', 'err'); return; }
-  if(!window.HBWecomSync){ showToast('同步组件未加载，请刷新页面重试', 'err'); return; }
-  const g = buildReportGrid();
-  const r = window.HBWecomSync.push(g, {
-    module: 'daily-performance-chuzhen',
-    date: state.cutoffDate || todayIso(),
-    period: '',
-    label: '日业绩',
-    headerRows: 2,
-    expandMerges: 'all',
-  });
-  if(r && r.ok) showToast('已生成同步文件：' + r.cols + ' 列 × ' + r.rows + ' 行，双击「同步到企微.bat」写入', 'ok');
+  const { rows, merges, colWidths, hiddenCols } = buildReportGrid();
+  const name = `日业绩-${state.cutoffDate||todayIso()}.xlsx`;
+  try{
+    const blob = await buildStyledXlsx({ sheetName:'日业绩', rows, merges, colWidths, hiddenCols });
+    downloadBlob(blob, name);
+    showToast('已导出「'+name+'」，双击 send-to-wecom.bat 发到企微群', 'ok');
+  }catch(e){
+    console.error(e);
+    showToast('导出失败：'+e.message, 'err');
+  }
 }
 
 // 门店业绩导出
