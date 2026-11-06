@@ -790,8 +790,15 @@ async function parsePlatFile(file) {
           if (!st) { if (rawName) unmatched.add(rawName); continue; }
           const pick = (k) => (ix[k] >= 0 ? row[ix[k]] : null);
           const vals = {};
-          ['expo', 'visit', 'orderU', 'orderC', 'orderAmt', 'woU', 'woC', 'woAmt', 'realWo', 'chatCnt', 'revCnt', 'qrScan']
+          ['expo', 'visit', 'orderU', 'orderC', 'orderAmt', 'woU', 'woC', 'woAmt', 'realWo', 'chatCnt', 'revCnt']
             .forEach((k) => { if (ix[k] >= 0) vals[k] = platNum(pick(k)); });
+          /* 优惠码扫码量：空白 ≠ 0。「近7日」要靠「该日该店到底有没有数」判完整性，
+             空白写 null（而不是跳过），才能覆盖住同一日期重复导入时残留的旧值。 */
+          if (ix.qrScan >= 0) {
+            const rawQ = pick('qrScan');
+            const sQ = rawQ == null ? '' : String(rawQ).trim();
+            vals.qrScan = sQ === '' ? null : platNum(rawQ);
+          }
           const sec = cleanCell(pick('replySec'), 'sec');
           if (isNum(sec)) vals.replySec = sec;
           const p30 = cleanCell(pick('reply30'), 'pct');
@@ -1071,7 +1078,8 @@ async function onFilePromo(file) {
  * （无该列时权重取 1，退化为简单平均）。
  * ===================================================================== */
 let _platCache = { key: '', data: null };
-const PLAT_SUM_KEYS = ['expo', 'visit', 'orderU', 'orderC', 'orderAmt', 'woU', 'woC', 'woAmt', 'realWo', 'revCnt', 'qrScan'];
+/* qrScan 不在此列：它按「报表日往前 7 天」独立口径计算，见下方 qr7 模块 */
+const PLAT_SUM_KEYS = ['expo', 'visit', 'orderU', 'orderC', 'orderAmt', 'woU', 'woC', 'woAmt', 'realWo', 'revCnt'];
 
 /* 「美团数据（曝光/下单/核销）」「美团榜单维护及客资转化」两组，表头写的就是「填前一天数据」：
    美团/点评后台当天出不了当天数，报表日期 D 的这一行填的是 D-1 的数。
@@ -1146,26 +1154,113 @@ function platAgg() {
     if (c._p30N) c.reply30 = c._p30W / c._p30N;
     delete c._secW; delete c._secN; delete c._p30W; delete c._p30N;
   });
-  /* 优惠码扫码量（近7日）：列名写的是「近7日」，当日行就给【近 7 天滚动合计】——
-     pdate 往前数 7 天并包含 pdate（报表日 D 的口径即 D-7 ~ D-1），不再显示单日值。
-     月累计行仍是当月 1 日 ~ pdate 累加；合计行按 SUM_KEYS 同源求和。
-     浅拷贝后写入，避免污染 state.daily 里的源记录（today[k] 原本是引用）。 */
-  STORE_KEYS.forEach((k) => {
-    let sum = 0;
-    let hit = false;
-    for (let i = 0; i < 7; i++) {
-      const d = addDays(pdate, -i);
-      const r = d ? (state.daily[d] || {})[k] : null;
-      if (r && isNum(r.qrScan)) { sum += r.qrScan; hit = true; }
-    }
-    if (!hit) return;                                  // 近 7 天都没有扫码数据：保持原样（显示 —）
-    const base = today[k] ? Object.assign({}, today[k]) : {};
-    base.qrScan = sum;
-    today[k] = base;
-  });
+  /* 优惠码扫码量（近7日）不在这里算：它按「报表日往前 7 天」独立取值，见下方 qr7 模块 */
   const data = { today, cum };
   _platCache = { key, data };
   return data;
+}
+
+/* =====================================================================
+ * 四之三·甲、优惠码扫码量（近7日）
+ * ---------------------------------------------------------------------
+ * 口径：报表日 D → 窗口 = [D-7, D-1]，共 7 天，不含 D 当天。
+ *   · 锚点永远是 state.date，不做 platDate() / sheetDate() 的「往前借最近一天」回退；
+ *   · 7 天必须齐全：缺任一天 → 整格显示「—」并提示补数据，不做「有几天算几天」；
+ *   · 数据源随「数据来源」切换：auto → state.daily；sheet → 七大店铺总表的当日桶；
+ *   · 不跨源拼接：auto 模式某天没有日报数据就判缺，即使总表里有值也不拿来补。
+ * 不设缓存：窗口依赖具体每一天的值，而 _platCache 的键只有「日期 + 条数」，会失效。
+ * ===================================================================== */
+const QR7_N = 7;
+
+/* [D-7 … D-1] 共 7 个 ISO 日期，升序 */
+function qr7Window() {
+  const d = state.date;
+  if (!d) return [];
+  const out = [];
+  for (let i = QR7_N; i >= 1; i--) {
+    const x = addDays(d, -i);
+    if (!x) return [];
+    out.push(x);
+  }
+  return out;
+}
+
+/* 单日单店扫码量。判「有没有数据」看的是【这一天这家店有没有导入记录】，
+   而不是【值是不是数字】：美团日报表对没有成交的店也会出行，支付订单留空 = 当天 0 次，
+   若把空白判成缺数据，几乎每家店都会因为某一天为 0 而整列变成 —。
+   返回 undefined 表示这一天确实没有这条数据（没导入 / 源表没有该列）。 */
+function qrDayOf(storeKey, iso, src) {
+  if (src === 'sheet') {
+    const rec = (state.rows[iso] || {})[storeKey];
+    if (!rec || !rec.today) return undefined;
+    if (!Object.prototype.hasOwnProperty.call(rec.today, 'qrScan')) return undefined;
+    return isNum(rec.today.qrScan) ? rec.today.qrScan : 0;
+  }
+  const rec = (state.daily[iso] || {})[storeKey];
+  if (!rec) return undefined;
+  if (!Object.prototype.hasOwnProperty.call(rec, 'qrScan')) return undefined;
+  return isNum(rec.qrScan) ? rec.qrScan : 0;
+}
+
+function qrSumOf(storeKey, dates, src) {
+  let sum = 0;
+  const miss = [];
+  dates.forEach((d) => {
+    const v = qrDayOf(storeKey, d, src);
+    if (v === undefined) miss.push(d);
+    else sum += v;
+  });
+  return {
+    sum: sum,
+    miss: miss,
+    empty: dates.length > 0 && miss.length === dates.length,
+    complete: dates.length === QR7_N && miss.length === 0,
+    src: src,
+  };
+}
+
+function qrSrc() {
+  return state.source === 'sheet' ? 'sheet' : 'auto';
+}
+
+/* 当日行：严格近 7 日 */
+function qr7Of(storeKey) {
+  const ds = qr7Window();
+  if (!ds.length) return { sum: 0, miss: [], empty: true, complete: false, src: qrSrc() };
+  return qrSumOf(storeKey, ds, qrSrc());
+}
+
+/* 月累计行：当月 1 日 ~ D-1，有几天算几天（缺天由渲染层加提示） */
+function qrMtdOf(storeKey) {
+  const d = state.date;
+  const empty = { sum: 0, miss: [], empty: true, complete: false, src: qrSrc() };
+  if (!d) return empty;
+  const day = iso2date(d);
+  if (!day) return empty;
+  const start = fmtDate(new Date(day.getFullYear(), day.getMonth(), 1));
+  const end = addDays(d, -1);
+  const ds = [];
+  for (let x = start; x && end && x <= end; x = addDays(x, 1)) ds.push(x);
+  return qrSumOf(storeKey, ds, qrSrc());
+}
+
+/* 7 店汇总：供合计行与列头提示 */
+function qr7Stat() {
+  const map = {};
+  let ok = 0;
+  STORE_KEYS.forEach((k) => {
+    const r = qr7Of(k);
+    map[k] = r;
+    if (r.complete) ok++;
+  });
+  return { map: map, ok: ok, total: STORE_KEYS.length, days: qr7Window() };
+}
+
+/* 缺天提示：只列前 3 天，更多则折叠成「等 N 天」 */
+function qMissTip(miss) {
+  const ds = (miss || []).map((d) => d.slice(5));
+  const head = ds.length > 3 ? ds.slice(0, 3).join('、') + ' 等 ' + ds.length + ' 天' : ds.join('、');
+  return '缺 ' + head + ' 数据，补齐后自动合计';
 }
 
 /* =====================================================================
@@ -1399,6 +1494,19 @@ function cellValue(storeKey, field, which) {
   if (Object.prototype.hasOwnProperty.call(state.manual, mk)) {
     return { v: state.manual[mk], kind: 'manual' };
   }
+  /* ★ 优惠码扫码量（近7日）：独立滚动窗口，必须早于 isD1 / plat / 总表回落三个分支——
+     旧实现挂在 platAgg 上，锚点是会回退的 pdate；这里严格按报表日 state.date 取 [D-7, D-1]，
+     并从各自数据源逐日自取，不看 recDate。 */
+  if (field === 'qrScan') {
+    const q = which === 'cum' ? qrMtdOf(storeKey) : qr7Of(storeKey);
+    const qk = q.src === 'sheet' ? 'sheet' : 'plat';
+    if (which === 'cum') {
+      if (q.empty) return { v: null, kind: qk, miss: q.miss };
+      return { v: q.sum, kind: qk, miss: q.miss };        // 有缺天：给数 + 橙点提示偏小
+    }
+    if (q.complete) return { v: q.sum, kind: qk };
+    return { v: null, kind: qk, miss: q.miss };           // 7 天不全：整格 —
+  }
   // 「美团数据」的剩余列、好评维护组、店铺评分（美团/点评星级）取【前一天】的七大店铺总表；
   // 榜单 / 业绩 / 客量取报表当日
   const isD1 = state.source === 'auto' && D1_SHEET_FIELDS.indexOf(field) >= 0;
@@ -1613,10 +1721,21 @@ function renderThead() {
       + '<rect x="4.6" y="4.6" width="6.2" height="6.2" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.1"/>'
       + '</svg>';
     // 口径提示：扫码量是滚动 7 天，跟其他「当日/累计」列不同，悬停列头时说明清楚
-    const tip = c.k === 'qrScan'
-      ? '近7日 = 报表日往前 7 天（D-7 ~ D-1）滚动合计；本月累计行 = 当月 1 日至 D-1 累加'
-      : '';
-    return `<th class="g3${isFirst ? ' c-store' : ''}"${tip ? ` title="${esc(tip)}"` : ''}>${esc(c.label)}`
+    let tip = '';
+    let warn = '';
+    if (c.k === 'qrScan') {
+      const st = qr7Stat();
+      const ds = st.days;
+      const win = ds.length ? ds[0].slice(5) + ' ~ ' + ds[ds.length - 1].slice(5) : '';
+      tip = '近7日 = 报表日往前 7 天合计（D-7 ~ D-1，不含当天）；7 天齐全才出数，缺任一天显示 —'
+        + (win ? '；当前窗口 ' + win : '')
+        + (st.ok < st.total ? '，' + st.ok + '/' + st.total + ' 家店数据齐全' : '');
+      if (st.ok < st.total) {
+        warn = '<span class="q-warn" title="'
+          + esc(st.ok + '/' + st.total + ' 家店近7日数据不全，悬停单元格查看缺失日期') + '"></span>';
+      }
+    }
+    return `<th class="g3${isFirst ? ' c-store' : ''}"${tip ? ` title="${esc(tip)}"` : ''}>${esc(c.label)}${warn}`
       + `<button type="button" class="col-copy" data-col="${c.k}" title="复制「${esc(label)}」整列数据" aria-label="复制「${esc(label)}」整列">${icon}</button></th>`;
   }).join('');
   $('tbl-thead').innerHTML = `
@@ -1665,13 +1784,21 @@ function cellHTML(c, store, which, merge, mergedSet, crossMap) {
     const klass = 'num' + (kind === 'manual' ? ' editable manual' : '') + (kind === 'sheet' ? ' fb' : '') + (c.zone ? ' z-' + c.zone : '');
     return `<td class="${klass}" data-edit="1" data-store="${store.key}" data-field="${c.k}" data-which="${src}"${rs}>${inner}</td>`;
   }
-  const { v, kind } = cellValue(store.key, c.k, src);
+  const { v, kind, miss } = cellValue(store.key, c.k, src);
   const klass = (c.type === 'text' || c.type === 'scoreText' ? 'txt' : 'num')
     + ' editable' + (c.zone ? ' z-' + c.zone : '') + (cm ? ' tgt-mg' : '');
   // 平台三表算出的格子加蓝点（区别于订单自动计算的绿点）
-  const inner = (kind === 'plat' && typeof v === 'number')
-    ? '<span class="pdot" title="由平台日报数据汇总（客流 / 在线咨询 / 门店交易）"></span>' + display(kind, v, c)
-    : display(kind, v, c);
+  let inner;
+  if (miss && miss.length) {
+    // 扫码量缺天：当日行不出数、月累计行出数但偏小。只挂一个小徽标，正文不加任何说明文字。
+    const dash = (v === null || v === undefined);
+    inner = (dash ? '<span class="dash">—</span>' : display(kind, v, c))
+      + '<span class="qmiss' + (dash ? '' : ' soft') + '" title="' + esc(qMissTip(miss)) + '">!</span>';
+  } else if (kind === 'plat' && typeof v === 'number') {
+    inner = '<span class="pdot" title="由平台日报数据汇总（客流 / 在线咨询 / 门店交易）"></span>' + display(kind, v, c);
+  } else {
+    inner = display(kind, v, c);
+  }
   return `<td class="${klass}" data-edit="1" data-store="${store.key}" data-field="${c.k}" data-which="${src}"${rs}>${inner}</td>`;
 }
 function rowHTML(store, which, crossMap) {
@@ -1696,6 +1823,21 @@ function sumRowHTML(label, which) {
       return `<td class="num${c.zone ? ' z-' + c.zone : ''}"><span class="dash">—</span></td>`;
     }
     let total = null;
+    if (c.k === 'qrScan') {
+      /* 扫码量：当日行只累加「7 天齐全」的门店（缺数的店格子里本来就是 —，合计不能悄悄少算还装作完整）；
+         月累计行按有值的店累加。有缺店时挂一颗橙点说明覆盖了几家。 */
+      let okN = 0, missN = 0;
+      STORES.forEach((s) => {
+        const q = cellValue(s.key, 'qrScan', which);
+        if (q.miss && q.miss.length) missN++; else okN++;
+        if (typeof q.v === 'number') total = (total || 0) + q.v;
+      });
+      const txt = total === null ? '<span class="dash">—</span>' : display(null, total, c);
+      const dot = missN > 0
+        ? '<span class="qdot" title="' + esc(okN + '/' + STORES.length + ' 家店数据齐全，合计仅含这 ' + okN + ' 家') + '"></span>'
+        : '';
+      return `<td class="num${c.zone ? ' z-' + c.zone : ''}">${txt}${dot}</td>`;
+    }
     STORES.forEach((s) => {
       const { v } = cellValue(s.key, c.k, which);
       if (typeof v === 'number') total = (total || 0) + v;

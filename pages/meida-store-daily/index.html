@@ -121,6 +121,16 @@
   td .adot{display:inline-block;width:5px;height:5px;border-radius:50%;background:#1f8a4a;margin-right:4px;vertical-align:2px;}
   td .pdot{display:inline-block;width:5px;height:5px;border-radius:50%;background:#3658d3;margin-right:4px;vertical-align:2px;}
   td.dash{color:#9aa9c0;}
+  /* 优惠码扫码量（近7日）：缺天提示。缺失用「!」徽标而不是圆点，
+     避免与绿点（订单自动）/ 蓝点（平台汇总）的语义混在一起。 */
+  td .qmiss{display:inline-block;min-width:10px;height:10px;line-height:10px;padding:0 2px;margin-left:4px;
+    border-radius:5px;background:#e8a33d;color:#fff;font-size:8px;font-weight:700;text-align:center;
+    vertical-align:1px;cursor:help;}
+  td .qmiss.soft{background:#f0c583;}
+  td .qdot{display:inline-block;width:5px;height:5px;border-radius:50%;background:#e8a33d;
+    margin-left:4px;vertical-align:2px;cursor:help;}
+  th .q-warn{display:inline-block;width:6px;height:6px;border-radius:50%;background:#ffd479;
+    margin-left:4px;vertical-align:2px;cursor:help;}
   td.fb{color:#8a6a2a;font-style:italic;}
   td.editable{cursor:cell;}
   td.editable:hover{outline:2px solid var(--c-accent);outline-offset:-2px;}
